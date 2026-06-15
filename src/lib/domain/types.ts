@@ -356,5 +356,9 @@ export interface RollResult {
   notation: string;
 }
 
-/** A history entry is a persisted RollResult. */
-export type RollHistoryEntry = RollResult;
+/**
+ * A persisted roll. `RollResult` is the pure engine output; the stored history
+ * entry is an Entity (id + timestamps managed by the data layer) carrying all
+ * the same roll fields. Save with: `const { id, ...rest } = result; create(rest)`.
+ */
+export interface RollHistoryEntry extends Entity, Omit<RollResult, "id"> {}
