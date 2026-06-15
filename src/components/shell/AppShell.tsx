@@ -97,6 +97,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen lg:flex">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-card focus:border focus:border-brass focus:bg-oxblood focus:px-4 focus:py-2 focus:font-display focus:text-parchment-50"
+      >
+        Skip to content
+      </a>
       {/* Desktop sidebar */}
       <aside className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col gap-6 border-r border-parchment-400/60 bg-parchment-200/40 px-4 py-6 lg:flex">
         <Brand />
@@ -131,7 +137,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Mobile drawer */}
       {menuOpen && (
-        <div className="fixed inset-0 top-[57px] z-20 animate-fade-in bg-leather/40 lg:hidden">
+        <div
+          className="fixed inset-0 top-[57px] z-20 animate-fade-in bg-leather/40 lg:hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setMenuOpen(false);
+          }}
+        >
           <div className="animate-fade-in-up border-b border-parchment-400/60 bg-parchment-200 px-4 py-4 shadow-raised">
             <CampaignBadge />
             <div className="my-4 rule-illuminated" />
@@ -140,7 +151,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      <main className="min-w-0 flex-1">
+      <main id="main" className="min-w-0 flex-1">
         <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
           {children}
         </div>
