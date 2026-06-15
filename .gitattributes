@@ -1,0 +1,12 @@
+# Normalize line endings: LF in the repo, auto on checkout.
+* text=auto eol=lf
+
+# Treat these as binary (no EOL munging / diffing).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===========================================================================
+   Candlelit Scriptorium — global theme layer
+   Fonts are loaded via <link> in layout.tsx (Cinzel + EB Garamond) so the app
+   still compiles and renders with graceful serif fallbacks if offline.
+   =========================================================================== */
+
+:root {
+  --font-display: "Cinzel", "Trajan Pro", Georgia, serif;
+  --font-body: "EB Garamond", Georgia, "Times New Roman", serif;
+
+  /* Parchment page texture: layered warm gradients + a faint speckle. */
+  --parchment-texture:
+    radial-gradient(120% 120% at 12% 8%, rgba(255, 248, 226, 0.55) 0%, rgba(255, 248, 226, 0) 42%),
+    radial-gradient(120% 120% at 88% 96%, rgba(122, 46, 46, 0.06) 0%, rgba(122, 46, 46, 0) 46%),
+    radial-gradient(100% 100% at 50% 0%, rgba(185, 138, 60, 0.07) 0%, rgba(185, 138, 60, 0) 40%);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-parchment-100 text-ink font-body antialiased;
+    background-image: var(--parchment-texture);
+    background-attachment: fixed;
+    font-size: 1.0625rem;
+    line-height: 1.6;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display text-ink;
+    letter-spacing: 0.02em;
+  }
+
+  /* Real, visible focus for keyboard users everywhere. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brass ring-offset-2 ring-offset-parchment-100;
+    border-radius: 0.35rem;
+  }
+
+  ::selection {
+    background: rgba(185, 138, 60, 0.35);
+    color: #2b2117;
+  }
+
+  /* Thematic scrollbars (progressive enhancement; harmless if unsupported). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #b5996a transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: linear-gradient(#cbb07f, #b5996a);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+}
+
+@layer components {
+  /* The signature surface: an aged-paper card with a gilt hairline edge. */
+  .surface-parchment {
+    @apply bg-parchment-200 border border-parchment-400/70 rounded-card shadow-card;
+    background-image:
+      linear-gradient(180deg, rgba(255, 248, 226, 0.5) 0%, rgba(255, 248, 226, 0) 30%);
+  }
+
+  .surface-raised {
+    @apply bg-parchment-100 border border-parchment-400/80 rounded-card shadow-raised;
+  }
+
+  /* A double-rule "illuminated" divider, drawn with borders only. */
+  .rule-illuminated {
+    border-top: 1px solid rgba(138, 101, 38, 0.55);
+    box-shadow: 0 2px 0 -1px rgba(138, 101, 38, 0.28);
+  }
+
+  /* Gilt heading flourish used on section titles. */
+  .heading-flourish {
+    @apply relative inline-block;
+  }
+  .heading-flourish::after {
+    content: "";
+    @apply absolute left-0 -bottom-1 h-px w-full;
+    background: linear-gradient(90deg, #b98a3c, rgba(185, 138, 60, 0) 90%);
+  }
+
+  /* Tabular numerals for any stat/HP/initiative readout. */
+  .numerals {
+    font-variant-numeric: tabular-nums lining-nums;
+    letter-spacing: 0.01em;
+  }
+}
+
+/* ===========================================================================
+   Respect prefers-reduced-motion: kill non-essential motion everywhere.
+   =========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
