@@ -142,6 +142,12 @@ export interface RealtimeController {
     listener: (campaign: CampaignSummary | null, role: Role | null) => void,
   ): Unsubscribe;
 
+  /** The campaigns the current user is a member of (with role + DM join code). */
+  getCampaigns(): CampaignSummary[];
+  subscribeCampaigns(
+    listener: (campaigns: CampaignSummary[]) => void,
+  ): Unsubscribe;
+
   createCampaign(input: {
     name: string;
     setting?: string;

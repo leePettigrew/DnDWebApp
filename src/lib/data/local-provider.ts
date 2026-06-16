@@ -192,10 +192,23 @@ class LocalAuthController implements AuthController {
 
 /** Phase 1 realtime: inert. Status "local", presence = just you, you are DM. */
 class LocalRealtimeController implements RealtimeController {
+  private summaries: CampaignSummary[] = [];
+
   constructor(
     private readonly campaigns: Repository<Campaign>,
     private readonly rollHistory: Repository<RollHistoryEntry>,
-  ) {}
+  ) {
+    // Mirror local campaigns as DM memberships for any UI that asks.
+    this.campaigns.subscribe((items) => {
+      this.summaries = items.map((c) => ({
+        id: c.id,
+        name: c.name,
+        setting: c.setting,
+        description: c.description,
+        role: "dm" as Role,
+      }));
+    });
+  }
 
   getStatus(): ConnectionStatus {
     return "local";
@@ -216,6 +229,25 @@ class LocalRealtimeController implements RealtimeController {
   ): Unsubscribe {
     listener(null, "dm");
     return () => {};
+  }
+
+  getCampaigns(): CampaignSummary[] {
+    return this.summaries;
+  }
+  subscribeCampaigns(
+    listener: (campaigns: CampaignSummary[]) => void,
+  ): Unsubscribe {
+    return this.campaigns.subscribe((items) => {
+      listener(
+        items.map((c) => ({
+          id: c.id,
+          name: c.name,
+          setting: c.setting,
+          description: c.description,
+          role: "dm" as Role,
+        })),
+      );
+    });
   }
 
   async createCampaign(input: {
