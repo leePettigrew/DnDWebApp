@@ -1,6 +1,12 @@
 import http from "node:http";
 import { WebSocketServer } from "ws";
 import { config } from "./config";
+import { openDatabase } from "./db";
+import { createSqliteRepositories } from "./sqlite-repositories";
+
+const db = openDatabase(config.dbPath);
+const repos = createSqliteRepositories(db);
+console.log(`SQLite ready at ${config.dbPath}`);
 
 /**
  * Entry point: one Node HTTP server hosts BOTH the JSON auth endpoints
