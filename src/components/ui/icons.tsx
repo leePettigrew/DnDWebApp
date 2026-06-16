@@ -224,3 +224,29 @@ export function HomeIcon(props: IconProps) {
     </Base>
   );
 }
+
+export function SunIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" />
+    </Base>
+  );
+}
+
+export function MoonIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" />
+    </Base>
+  );
+}
+
+export function ChatIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />
+      <path d="M8 9h8M8 12h5" />
+    </Base>
+  );
+}

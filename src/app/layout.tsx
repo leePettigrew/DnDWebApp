@@ -22,8 +22,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Apply the saved theme before paint to avoid a flash. Defaults to the
+            OS preference when the user hasn't chosen. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('dragons-ledger:theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}`,
+          }}
+        />
         {/* Type pairing: Cinzel (engraved display) + EB Garamond (warm body).
             Loaded via <link> so the app still renders with serif fallbacks
             when offline, instead of failing the build. */}

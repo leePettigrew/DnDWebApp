@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/Badge";
 import { TextField, TextArea } from "@/components/ui/Field";
 import { ChevronRightIcon, PlusIcon, ScrollIcon } from "@/components/ui/icons";
 import { ConnectionPill } from "./ConnectionPill";
+import { ThemeToggle } from "@/components/shell/ThemeToggle";
 
 export function CampaignSelect() {
   const realtime = useRealtime();
@@ -51,6 +52,7 @@ export function CampaignSelect() {
           </h1>
         </div>
         <div className="flex items-center gap-3">
+          <ThemeToggle />
           <ConnectionPill />
           <Button variant="ghost" size="sm" onClick={() => auth.logout()}>
             Sign out

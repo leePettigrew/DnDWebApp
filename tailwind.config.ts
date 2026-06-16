@@ -15,42 +15,46 @@ import type { Config } from "tailwindcss";
  */
 const config: Config = {
   content: ["./src/**/*.{ts,tsx,mdx}"],
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
+        // Resolved from CSS variables (see globals.css) so the whole palette
+        // swaps between Candlelit Scriptorium (light) and Leatherbound Tome
+        // (dark) with zero changes to component classes.
         parchment: {
-          50: "#FBF5E6",
-          100: "#F5E9CF",
-          200: "#ECDCB8",
-          300: "#E0CBA0",
-          400: "#CBB07F",
-          500: "#B5996A",
+          50: "rgb(var(--c-parchment-50) / <alpha-value>)",
+          100: "rgb(var(--c-parchment-100) / <alpha-value>)",
+          200: "rgb(var(--c-parchment-200) / <alpha-value>)",
+          300: "rgb(var(--c-parchment-300) / <alpha-value>)",
+          400: "rgb(var(--c-parchment-400) / <alpha-value>)",
+          500: "rgb(var(--c-parchment-500) / <alpha-value>)",
         },
         ink: {
-          DEFAULT: "#2B2117",
-          soft: "#5C4A33",
-          faint: "#897154",
+          DEFAULT: "rgb(var(--c-ink) / <alpha-value>)",
+          soft: "rgb(var(--c-ink-soft) / <alpha-value>)",
+          faint: "rgb(var(--c-ink-faint) / <alpha-value>)",
         },
         oxblood: {
-          DEFAULT: "#7A2E2E",
-          dark: "#5E2020",
-          light: "#9B4A43",
+          DEFAULT: "rgb(var(--c-oxblood) / <alpha-value>)",
+          dark: "rgb(var(--c-oxblood-dark) / <alpha-value>)",
+          light: "rgb(var(--c-oxblood-light) / <alpha-value>)",
         },
         brass: {
-          DEFAULT: "#B98A3C",
-          dark: "#8A6526",
-          light: "#D4A95A",
+          DEFAULT: "rgb(var(--c-brass) / <alpha-value>)",
+          dark: "rgb(var(--c-brass-dark) / <alpha-value>)",
+          light: "rgb(var(--c-brass-light) / <alpha-value>)",
         },
-        gilt: "#E6C772",
+        gilt: "rgb(var(--c-gilt) / <alpha-value>)",
         forest: {
-          DEFAULT: "#3E5641",
-          light: "#5A7A5E",
+          DEFAULT: "rgb(var(--c-forest) / <alpha-value>)",
+          light: "rgb(var(--c-forest-light) / <alpha-value>)",
         },
         arcane: {
-          DEFAULT: "#4A3B6B",
-          light: "#6E5A99",
+          DEFAULT: "rgb(var(--c-arcane) / <alpha-value>)",
+          light: "rgb(var(--c-arcane-light) / <alpha-value>)",
         },
-        leather: "#211A12",
+        leather: "rgb(var(--c-leather) / <alpha-value>)",
       },
       fontFamily: {
         display: ["var(--font-display)", "Cinzel", "Georgia", "serif"],

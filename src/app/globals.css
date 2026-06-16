@@ -12,11 +12,66 @@
   --font-display: "Cinzel", "Trajan Pro", Georgia, serif;
   --font-body: "EB Garamond", Georgia, "Times New Roman", serif;
 
-  /* Parchment page texture: layered warm gradients + a faint speckle. */
+  /* Candlelit Scriptorium (light) — palette as RGB channels so Tailwind's
+     /opacity modifiers keep working (rgb(var(--c-x) / <alpha-value>)). */
+  --c-parchment-50: 251 245 230;
+  --c-parchment-100: 245 233 207;
+  --c-parchment-200: 236 220 184;
+  --c-parchment-300: 224 203 160;
+  --c-parchment-400: 203 176 127;
+  --c-parchment-500: 181 153 106;
+  --c-ink: 43 33 23;
+  --c-ink-soft: 92 74 51;
+  --c-ink-faint: 137 113 84;
+  --c-oxblood: 122 46 46;
+  --c-oxblood-dark: 94 32 32;
+  --c-oxblood-light: 155 74 67;
+  --c-brass: 185 138 60;
+  --c-brass-dark: 138 101 38;
+  --c-brass-light: 212 169 90;
+  --c-gilt: 230 199 114;
+  --c-forest: 62 86 65;
+  --c-forest-light: 90 122 94;
+  --c-arcane: 74 59 107;
+  --c-arcane-light: 110 90 153;
+  --c-leather: 33 26 18;
+
+  --surface-sheen: rgba(255, 248, 226, 0.5);
   --parchment-texture:
     radial-gradient(120% 120% at 12% 8%, rgba(255, 248, 226, 0.55) 0%, rgba(255, 248, 226, 0) 42%),
     radial-gradient(120% 120% at 88% 96%, rgba(122, 46, 46, 0.06) 0%, rgba(122, 46, 46, 0) 46%),
     radial-gradient(100% 100% at 50% 0%, rgba(185, 138, 60, 0.07) 0%, rgba(185, 138, 60, 0) 40%);
+}
+
+/* Leatherbound Tome (dark) — same token names remapped to firelit oak & leather. */
+.dark {
+  --c-parchment-50: 43 33 24;
+  --c-parchment-100: 23 18 12;
+  --c-parchment-200: 34 26 17;
+  --c-parchment-300: 58 45 30;
+  --c-parchment-400: 74 58 39;
+  --c-parchment-500: 94 74 51;
+  --c-ink: 236 220 188;
+  --c-ink-soft: 199 181 148;
+  --c-ink-faint: 163 142 104;
+  --c-oxblood: 194 90 61;
+  --c-oxblood-dark: 155 65 40;
+  --c-oxblood-light: 214 122 92;
+  --c-brass: 201 154 74;
+  --c-brass-dark: 217 174 94;
+  --c-brass-light: 230 199 114;
+  --c-gilt: 240 213 133;
+  --c-forest: 110 154 114;
+  --c-forest-light: 138 184 142;
+  --c-arcane: 138 119 184;
+  --c-arcane-light: 169 147 214;
+  --c-leather: 14 10 6;
+
+  --surface-sheen: rgba(255, 240, 214, 0.05);
+  --parchment-texture:
+    radial-gradient(120% 120% at 12% 8%, rgba(214, 169, 90, 0.05) 0%, rgba(214, 169, 90, 0) 42%),
+    radial-gradient(120% 120% at 88% 96%, rgba(194, 90, 61, 0.07) 0%, rgba(194, 90, 61, 0) 46%),
+    radial-gradient(100% 100% at 50% 0%, rgba(0, 0, 0, 0.28) 0%, rgba(0, 0, 0, 0) 55%);
 }
 
 @layer base {
@@ -44,21 +99,24 @@
   }
 
   ::selection {
-    background: rgba(185, 138, 60, 0.35);
-    color: #2b2117;
+    background: rgb(var(--c-brass) / 0.35);
+    color: rgb(var(--c-leather));
   }
 
   /* Thematic scrollbars (progressive enhancement; harmless if unsupported). */
   * {
     scrollbar-width: thin;
-    scrollbar-color: #b5996a transparent;
+    scrollbar-color: rgb(var(--c-parchment-500)) transparent;
   }
   *::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   *::-webkit-scrollbar-thumb {
-    background: linear-gradient(#cbb07f, #b5996a);
+    background: linear-gradient(
+      rgb(var(--c-parchment-400)),
+      rgb(var(--c-parchment-500))
+    );
     border-radius: 999px;
     border: 2px solid transparent;
     background-clip: padding-box;
@@ -70,7 +128,7 @@
   .surface-parchment {
     @apply bg-parchment-200 border border-parchment-400/70 rounded-card shadow-card;
     background-image:
-      linear-gradient(180deg, rgba(255, 248, 226, 0.5) 0%, rgba(255, 248, 226, 0) 30%);
+      linear-gradient(180deg, var(--surface-sheen) 0%, transparent 30%);
   }
 
   .surface-raised {

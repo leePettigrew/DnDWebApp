@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/Field";
 import { D20Icon } from "@/components/ui/icons";
 import { ConnectionPill } from "./ConnectionPill";
+import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { cn } from "@/components/ui/cn";
 
 /** Full-screen login / register gate shown before a campaign is chosen. */
@@ -41,7 +42,10 @@ export function AuthScreen({ onPlayOffline }: { onPlayOffline: () => void }) {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center px-4 py-10">
+    <main className="relative flex min-h-screen flex-col items-center justify-center px-4 py-10">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <div className="mb-6 flex flex-col items-center gap-3 text-center">
         <span className="flex h-14 w-14 items-center justify-center rounded-card border border-brass/50 bg-oxblood text-gilt shadow-gilt">
           <D20Icon className="h-8 w-8" />

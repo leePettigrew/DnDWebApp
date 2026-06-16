@@ -13,6 +13,7 @@ import {
 } from "@/lib/data/hooks";
 import { SessionPanel } from "@/components/multiplayer/SessionPanel";
 import { ConnectionPill } from "@/components/multiplayer/ConnectionPill";
+import { ThemeToggle } from "./ThemeToggle";
 import { NAV_ITEMS } from "./nav-items";
 
 function isActive(pathname: string, href: string): boolean {
@@ -114,7 +115,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
       {/* Desktop sidebar */}
       <aside className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col gap-6 border-r border-parchment-400/60 bg-parchment-200/40 px-4 py-6 lg:flex">
-        <Brand />
+        <div className="flex items-center justify-between gap-2">
+          <Brand />
+          <ThemeToggle />
+        </div>
         <CampaignBadge />
         <div className="rule-illuminated" />
         <NavLinks />
@@ -135,6 +139,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-parchment-400/60 bg-parchment-100/90 px-4 py-3 backdrop-blur-sm lg:hidden">
         <Brand />
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           <ConnectionPill />
           <button
             type="button"
