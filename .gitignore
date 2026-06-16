@@ -70,6 +70,20 @@ Thumbs.db
 desktop.ini
 
 # ---------------------------------------------------------------------------
+# Server (Phase 2) — deps, build, and the SQLite DATABASE + secrets.
+# THIS REPO IS PUBLIC. Never commit the database or any secrets.
+# ---------------------------------------------------------------------------
+/server/node_modules
+/server/dist
+/server/data
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# ---------------------------------------------------------------------------
 # Claude Code local config (keep agent/session files out of the public repo)
 # ---------------------------------------------------------------------------
 /.claude
