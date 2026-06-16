@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { DataProviderProvider } from "@/lib/data/context";
 import { AppShell } from "@/components/shell/AppShell";
+import { MultiplayerGate } from "@/components/multiplayer/MultiplayerGate";
 
 export const metadata: Metadata = {
   title: "Dragon's Ledger — D&D Campaign Manager",
@@ -39,7 +40,9 @@ export default function RootLayout({
       </head>
       <body>
         <DataProviderProvider>
-          <AppShell>{children}</AppShell>
+          <MultiplayerGate>
+            <AppShell>{children}</AppShell>
+          </MultiplayerGate>
         </DataProviderProvider>
       </body>
     </html>

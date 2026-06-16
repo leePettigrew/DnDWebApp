@@ -5,7 +5,14 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/components/ui/cn";
 import { D20Icon, MenuIcon, CloseIcon } from "@/components/ui/icons";
-import { useCampaigns, useCurrentUser } from "@/lib/data/hooks";
+import {
+  useActiveCampaign,
+  useCampaigns,
+  useCurrentUser,
+  useDataProvider,
+} from "@/lib/data/hooks";
+import { SessionPanel } from "@/components/multiplayer/SessionPanel";
+import { ConnectionPill } from "@/components/multiplayer/ConnectionPill";
 import { NAV_ITEMS } from "./nav-items";
 
 function isActive(pathname: string, href: string): boolean {
@@ -70,14 +77,15 @@ function Brand() {
 function CampaignBadge() {
   const { items } = useCampaigns();
   const user = useCurrentUser();
-  const campaign = items[0];
+  const { campaign: active } = useActiveCampaign();
+  const name = active?.name ?? items[0]?.name ?? "No campaign yet";
   return (
     <div className="rounded-card border border-parchment-400/60 bg-parchment-100/70 px-3 py-2.5">
       <p className="font-display text-[0.6rem] uppercase tracking-[0.2em] text-brass-dark">
         Active Campaign
       </p>
       <p className="truncate font-display text-sm font-semibold text-ink">
-        {campaign?.name ?? "No campaign yet"}
+        {name}
       </p>
       <p className="mt-1 truncate text-xs text-ink-faint">
         {user ? `Keeper: ${user.name}` : "Local mode"}
@@ -89,6 +97,7 @@ function CampaignBadge() {
 export function AppShell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const pathname = usePathname();
+  const { capabilities } = useDataProvider();
 
   // Close the mobile drawer on navigation.
   useEffect(() => {
@@ -109,30 +118,38 @@ export function AppShell({ children }: { children: ReactNode }) {
         <CampaignBadge />
         <div className="rule-illuminated" />
         <NavLinks />
-        <div className="mt-auto rounded-card border border-parchment-400/50 bg-parchment-100/50 px-3 py-2 text-[0.7rem] text-ink-faint">
-          <span className="font-display tracking-title text-brass-dark">
-            Phase 1
-          </span>{" "}
-          · local-first · your data lives in this browser
+        <div className="mt-auto space-y-3">
+          <SessionPanel />
+          {!capabilities.multiUser && (
+            <div className="rounded-card border border-parchment-400/50 bg-parchment-100/50 px-3 py-2 text-[0.7rem] text-ink-faint">
+              <span className="font-display tracking-title text-brass-dark">
+                Solo
+              </span>{" "}
+              · local-first · your data lives in this browser
+            </div>
+          )}
         </div>
       </aside>
 
       {/* Mobile top bar */}
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-parchment-400/60 bg-parchment-100/90 px-4 py-3 backdrop-blur-sm lg:hidden">
         <Brand />
-        <button
-          type="button"
-          onClick={() => setMenuOpen((v) => !v)}
+        <div className="flex items-center gap-2">
+          <ConnectionPill />
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
           aria-expanded={menuOpen}
           aria-label={menuOpen ? "Close menu" : "Open menu"}
           className="rounded-card border border-parchment-400/70 p-2 text-ink-soft hover:bg-parchment-200"
         >
-          {menuOpen ? (
-            <CloseIcon className="h-6 w-6" />
-          ) : (
-            <MenuIcon className="h-6 w-6" />
-          )}
-        </button>
+            {menuOpen ? (
+              <CloseIcon className="h-6 w-6" />
+            ) : (
+              <MenuIcon className="h-6 w-6" />
+            )}
+          </button>
+        </div>
       </header>
 
       {/* Mobile drawer */}
@@ -147,6 +164,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <CampaignBadge />
             <div className="my-4 rule-illuminated" />
             <NavLinks onNavigate={() => setMenuOpen(false)} />
+            <div className="mt-4">
+              <SessionPanel />
+            </div>
           </div>
         </div>
       )}

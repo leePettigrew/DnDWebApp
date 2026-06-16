@@ -15,6 +15,8 @@ import type {
 } from "./provider";
 import { useDataProvider } from "./context";
 
+export { useDataProvider } from "./context";
+
 /**
  * Subscription hooks. Every component reads data through these — they wire a
  * collection's `subscribe` to React state, so any change (this tab now, another
@@ -156,4 +158,17 @@ export function usePresence(): PresenceUser[] {
   const [users, setUsers] = useState<PresenceUser[]>([]);
   useEffect(() => provider.realtime.subscribePresence(setUsers), [provider]);
   return users;
+}
+
+/** The campaigns the current user is a member of (with role + DM join code). */
+export function useCampaignList(): CampaignSummary[] {
+  const provider = useDataProvider();
+  const [list, setList] = useState<CampaignSummary[]>(() =>
+    provider.realtime.getCampaigns(),
+  );
+  useEffect(
+    () => provider.realtime.subscribeCampaigns(setList),
+    [provider],
+  );
+  return list;
 }
