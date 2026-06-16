@@ -25,8 +25,8 @@ import {
   spellAttackBonus,
   spellSaveDC,
 } from "@/lib/domain/character";
-import { rollSpec, spec } from "@/lib/domain/dice";
-import { useRollHistory } from "@/lib/data/hooks";
+import { spec } from "@/lib/domain/dice";
+import { useRealtime } from "@/lib/data/hooks";
 
 interface SheetProps {
   character: Character;
@@ -56,18 +56,19 @@ function StatPill({
 }
 
 export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
-  const { create: logRoll } = useRollHistory();
+  const realtime = useRealtime();
   const [lastRoll, setLastRoll] = useState<RollResult | null>(null);
   const [hpAmount, setHpAmount] = useState(0);
 
   const pb = proficiencyBonus(c.level);
 
+  // Route through the provider so multiplayer rolls are server-authoritative
+  // and broadcast to the whole table (solo still computes locally).
   function quickRoll(labelText: string, bonus: number, mode: RollMode = "normal") {
-    const r = rollSpec(spec(1, 20, bonus, mode, labelText));
-    const { id: _id, ...rest } = r;
-    void _id;
-    void logRoll(rest);
-    setLastRoll(r);
+    void realtime
+      .roll(spec(1, 20, bonus, mode, labelText))
+      .then((r) => setLastRoll(r))
+      .catch(() => {});
   }
 
   function applyDamage() {
