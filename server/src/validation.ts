@@ -51,6 +51,7 @@ const combatState = z.object({
   turnIndex: z.number().int(),
   combatants: z.array(combatant).max(200),
   encounterName: z.string().max(200).optional(),
+  activeMapId: z.string().max(80).optional(),
   updatedAt: z.string(),
 });
 
@@ -61,6 +62,7 @@ const combatPatch = z
     turnIndex: z.number().int(),
     combatants: z.array(combatant).max(200),
     encounterName: z.string().max(200),
+    activeMapId: z.string().max(80),
     updatedAt: z.string(),
   })
   .partial();
