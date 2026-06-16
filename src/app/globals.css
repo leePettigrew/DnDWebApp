@@ -208,6 +208,17 @@
   }
 }
 
+.map-ping {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: map-ping 2.6s ease-out forwards;
+}
+@keyframes map-ping {
+  0% { transform: scale(0.3); opacity: 0.9; }
+  70% { opacity: 0.5; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
 @keyframes dice3d-tumble {
   0% { transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(0.8); }
   35% { transform: rotateX(280deg) rotateY(180deg) rotateZ(40deg) scale(1.12); }
