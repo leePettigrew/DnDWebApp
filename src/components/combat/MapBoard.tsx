@@ -27,7 +27,6 @@ import {
   type View,
 } from "@/lib/map/geometry";
 import {
-  accumulateExplored,
   computeVisibilityMask,
   isVisibleAt,
   paintFog,
@@ -181,11 +180,14 @@ export function MapBoard({
       return;
     }
 
+    // Binary fog: areas not currently visible are fully dark (no dim "memory"
+    // layer), so a wall always blocks to the same darkness whether or not the
+    // player had seen behind it before.
+    void ectx;
     computeVisibilityMask(mctx, tctx, imgSize.w, imgSize.h, viewers, walls);
-    accumulateExplored(ectx, mask);
-    paintFog(fctx, imgSize.w, imgSize.h, mask, explored, {
-      fogColor: "rgba(8,6,4,0.98)",
-      exploredDim: 0.55,
+    paintFog(fctx, imgSize.w, imgSize.h, mask, null, {
+      fogColor: "rgba(8,6,4,0.99)",
+      exploredDim: 0,
     });
   }, [imgSize, fogEnabled, isDM, dmPreview, tokens, walls, drag, defaultVision]);
 
