@@ -15,7 +15,7 @@ import {
   TrashIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/components/ui/cn";
-import { DiceChip } from "./DiceChip";
+import { Dice3D } from "./Dice3D";
 import { DIE_SIDES, formatSpec } from "@/lib/domain/dice";
 import type {
   DieRoll,
@@ -348,10 +348,11 @@ export function DiceRoller() {
               )}
               <div className="flex flex-wrap items-center justify-center gap-3">
                 {displayRolls.map((r, i) => (
-                  <DiceChip
+                  <Dice3D
                     key={i}
                     roll={r}
                     rolling={rolling}
+                    delayMs={i * 60}
                     display={
                       rolling
                         ? Math.floor(Math.random() * r.sides) + 1
