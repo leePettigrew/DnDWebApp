@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/ui/PageHeader";
 import { DiceRoller } from "@/components/dice/DiceRoller";
-import { PhysicsD20 } from "@/components/dice/PhysicsD20";
+import { DiceArena } from "@/components/dice/DiceArena";
 
 export default function DicePage() {
   return (
@@ -11,7 +11,7 @@ export default function DicePage() {
         description="Build any pool of dice, add modifiers, roll with advantage or disadvantage, and keep your favorites a tap away."
       />
       <DiceRoller />
-      <PhysicsD20 />
+      <DiceArena />
     </div>
   );
 }
