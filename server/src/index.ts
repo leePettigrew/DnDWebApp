@@ -4,9 +4,12 @@ import { config } from "./config";
 import { openDatabase } from "./db";
 import { createSqliteRepositories } from "./sqlite-repositories";
 import { handleHttpRequest } from "./http";
+import { RoomManager } from "./rooms";
+import { handleConnection } from "./handlers";
 
 const db = openDatabase(config.dbPath);
 const repos = createSqliteRepositories(db);
+const rooms = new RoomManager(repos);
 console.log(`SQLite ready at ${config.dbPath}`);
 
 /**
@@ -40,10 +43,7 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server });
-wss.on("connection", (socket) => {
-  socket.on("error", () => {});
-  // Realtime message handling is added in a later commit.
-});
+wss.on("connection", (socket) => handleConnection(socket, repos, rooms));
 
 server.listen(config.port, () => {
   console.log(`Dragon's Ledger server listening on :${config.port}`);
