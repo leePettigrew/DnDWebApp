@@ -118,6 +118,19 @@ const message = z.discriminatedUnion("type", [
     type: z.literal("chat:send"),
     body: z.string().min(1).max(2000),
   }),
+  z.object({
+    type: z.literal("map:token:move"),
+    mapId: z.string().max(80),
+    tokenId: z.string().max(80),
+    x: z.number().finite(),
+    y: z.number().finite(),
+  }),
+  z.object({
+    type: z.literal("map:ping"),
+    mapId: z.string().max(80),
+    x: z.number().finite(),
+    y: z.number().finite(),
+  }),
   z.object({ type: z.literal("ping") }),
 ]);
 

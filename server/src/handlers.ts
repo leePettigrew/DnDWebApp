@@ -1,7 +1,12 @@
 import type { WebSocket } from "ws";
 import { newId, nowISO } from "../../shared/ids";
 import { rollSpec as computeRoll } from "../../shared/dice";
-import type { Entity, RollHistoryEntry } from "../../shared/domain";
+import type {
+  BattleMap,
+  Entity,
+  MapToken,
+  RollHistoryEntry,
+} from "../../shared/domain";
 import type {
   AnyScopedEntity,
   CampaignCreateMessage,
@@ -12,6 +17,8 @@ import type {
   ChatSendMessage,
   ClientMessage,
   DiceRollMessage,
+  MapPingMessage,
+  MapTokenMoveMessage,
   EntityCreateMessage,
   EntityRemoveMessage,
   EntityUpdateMessage,
@@ -114,6 +121,10 @@ export class ClientSession {
         return this.onTyping(msg.context);
       case "chat:send":
         return this.onChat(msg);
+      case "map:token:move":
+        return this.onMapTokenMove(msg);
+      case "map:ping":
+        return this.onMapPing(msg);
     }
   }
 
@@ -434,6 +445,52 @@ export class ClientSession {
     // Hidden rolls go ONLY to DM sockets — they can never leak to players.
     if (hidden) room.broadcast(message, (m) => m.role === "dm");
     else room.broadcast(message);
+  }
+
+  // --- tactical map --------------------------------------------------------
+
+  private onMapTokenMove(msg: MapTokenMoveMessage): void {
+    if (!this.requireCampaign()) return;
+    const map = this.repos.entities.maps.get(
+      this.campaignId!,
+      msg.mapId,
+    ) as BattleMap | null;
+    if (!map) return this.error("not_found", "Map not found.");
+    const tokens: MapToken[] = map.tokens ?? [];
+    const token = tokens.find((t) => t.id === msg.tokenId);
+    if (!token) return this.error("not_found", "Token not found.");
+    if (this.role !== "dm" && token.ownerId !== this.userId) {
+      return this.error("forbidden", "You can only move your own token.");
+    }
+    const nextMap: BattleMap = {
+      ...map,
+      tokens: tokens.map((t) =>
+        t.id === msg.tokenId ? { ...t, x: msg.x, y: msg.y } : t,
+      ),
+      updatedAt: nowISO(),
+    };
+    this.repos.entities.maps.upsert(this.campaignId!, nextMap, null);
+    // Lightweight broadcast — don't resend the whole maps collection per drag.
+    this.rooms.get(this.campaignId!).broadcast({
+      type: "map:token:moved",
+      mapId: msg.mapId,
+      tokenId: msg.tokenId,
+      x: msg.x,
+      y: msg.y,
+    });
+  }
+
+  private onMapPing(msg: MapPingMessage): void {
+    if (!this.requireCampaign()) return;
+    const color = this.role === "dm" ? "#C25A3D" : "#E6C772";
+    this.rooms.get(this.campaignId!).broadcast({
+      type: "map:pinged",
+      mapId: msg.mapId,
+      x: msg.x,
+      y: msg.y,
+      by: this.displayName,
+      color,
+    });
   }
 
   // --- chat ----------------------------------------------------------------

@@ -210,6 +210,19 @@ export interface ChatSendMessage {
   type: "chat:send";
   body: string;
 }
+export interface MapTokenMoveMessage {
+  type: "map:token:move";
+  mapId: ID;
+  tokenId: ID;
+  x: number;
+  y: number;
+}
+export interface MapPingMessage {
+  type: "map:ping";
+  mapId: ID;
+  x: number;
+  y: number;
+}
 export interface PingMessage {
   type: "ping";
 }
@@ -228,6 +241,8 @@ export type ClientMessage =
   | DiceRollMessage
   | PresenceTypingMessage
   | ChatSendMessage
+  | MapTokenMoveMessage
+  | MapPingMessage
   | PingMessage;
 
 export type ClientMessageType = ClientMessage["type"];
@@ -287,6 +302,21 @@ export interface ChatMessageMessage {
   type: "chat:message";
   message: ChatMessage;
 }
+export interface MapTokenMovedMessage {
+  type: "map:token:moved";
+  mapId: ID;
+  tokenId: ID;
+  x: number;
+  y: number;
+}
+export interface MapPingedMessage {
+  type: "map:pinged";
+  mapId: ID;
+  x: number;
+  y: number;
+  by: string;
+  color: string;
+}
 export interface PongMessage {
   type: "pong";
 }
@@ -303,6 +333,8 @@ export type ServerMessage =
   | DiceRolledMessage
   | PresenceStateMessage
   | ChatMessageMessage
+  | MapTokenMovedMessage
+  | MapPingedMessage
   | PongMessage;
 
 export type ServerMessageType = ServerMessage["type"];

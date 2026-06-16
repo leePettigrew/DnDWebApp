@@ -345,6 +345,8 @@ export interface CombatState {
   turnIndex: number;
   combatants: Combatant[];
   encounterName?: string;
+  /** The battle map shown on the War Table (id of a BattleMap). */
+  activeMapId?: ID;
   updatedAt: ISODateString;
 }
 
@@ -373,12 +375,69 @@ export interface SessionLog extends Entity {
   body: string;
 }
 
+/**
+ * Tactical map layers (Phase 3). All coordinates are in MAP IMAGE PIXELS, so
+ * they're resolution-independent of the viewer's pan/zoom.
+ */
+export interface Wall {
+  id: ID;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export interface MapDrawing {
+  id: ID;
+  color: string;
+  width: number;
+  /** Flattened polyline: [x1, y1, x2, y2, …]. */
+  points: number[];
+}
+
+export interface MapToken {
+  id: ID;
+  /** Links to a Combatant so HP/labels can track the War Table. */
+  combatantId?: ID;
+  label: string;
+  x: number;
+  y: number;
+  /** Token radius in map pixels (≈ half a grid cell). */
+  radius: number;
+  color: string;
+  isPC: boolean;
+  /** User allowed to move this token (their character's token). */
+  ownerId?: ID;
+  /** Vision radius in map pixels. 0/undefined → no light (relies on others). */
+  visionRadius?: number;
+  /** DM-hidden token — never shown to players. */
+  hidden?: boolean;
+  portraitUrl?: string;
+}
+
 export interface BattleMap extends Entity {
   campaignId?: ID;
   name: string;
   /** Image slot: a URL or data: URL to the battle map art. */
   imageUrl: string;
   notes?: string;
+
+  // --- tactical layer (optional; absent on plain Codex maps) ---
+  /** Natural image size in px (for fog/vision bounds). */
+  width?: number;
+  height?: number;
+  /** Grid cell size in image px. 0/undefined → no grid. */
+  gridSize?: number;
+  gridOffsetX?: number;
+  gridOffsetY?: number;
+  /** Feet represented by one cell (default 5). */
+  feetPerCell?: number;
+  showGrid?: boolean;
+  /** Whether players' view is fogged by line of sight. */
+  fogEnabled?: boolean;
+  walls?: Wall[];
+  drawings?: MapDrawing[];
+  tokens?: MapToken[];
 }
 
 /** Dice — see ./dice for the engine. */
