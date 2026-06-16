@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { Button } from "@/components/ui/Button";
+import { ChevronRightIcon } from "@/components/ui/icons";
 import { cn } from "@/components/ui/cn";
 import { useRealtime } from "@/lib/data/hooks";
 import { useReducedMotion } from "@/lib/hooks/useReducedMotion";
@@ -31,6 +32,7 @@ export function DiceArena() {
 
   const [result, setResult] = useState<number | null>(null);
   const [phase, setPhase] = useState<"idle" | "rolling" | "settled">("idle");
+  const [open, setOpen] = useState(true);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -55,7 +57,7 @@ export function DiceArena() {
       container.appendChild(renderer.domElement);
 
       const scene = new THREE.Scene();
-      scene.fog = new THREE.Fog(0x14100b, 14, 26);
+      scene.fog = new THREE.Fog(0x171225, 14, 26);
 
       const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 100);
       camera.position.set(0, 10.5, 8.5);
@@ -73,14 +75,14 @@ export function DiceArena() {
       key.shadow.camera.top = 8;
       key.shadow.camera.bottom = -8;
       scene.add(key);
-      const rim = new THREE.PointLight(0xb98a3c, 0.5, 30);
+      const rim = new THREE.PointLight(0x7858b6, 0.6, 30);
       rim.position.set(-6, 5, -4);
       scene.add(rim);
 
-      // Felt floor.
+      // Felt floor — charcoal with a purple cast.
       const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(FLOOR * 2, FLOOR * 2),
-        new THREE.MeshStandardMaterial({ color: 0x2c1c14, roughness: 0.95 }),
+        new THREE.MeshStandardMaterial({ color: 0x231d31, roughness: 0.95 }),
       );
       floor.rotation.x = -Math.PI / 2;
       floor.receiveShadow = true;
@@ -88,7 +90,7 @@ export function DiceArena() {
 
       // Wooden rim walls.
       const wallMat = new THREE.MeshStandardMaterial({
-        color: 0x3a2616,
+        color: 0x2e2742,
         roughness: 0.85,
       });
       const wallH = 1.2;
@@ -116,14 +118,28 @@ export function DiceArena() {
       const dieMesh = new THREE.Mesh(
         geo,
         new THREE.MeshStandardMaterial({
-          color: 0xc99a4a,
-          metalness: 0.35,
-          roughness: 0.42,
+          color: 0x2c2540, // charcoal purple
+          emissive: 0x150f26,
+          emissiveIntensity: 0.6,
+          metalness: 0.4,
+          roughness: 0.5,
           flatShading: true,
         }),
       );
       dieMesh.castShadow = true;
       die.add(dieMesh);
+
+      // Glowing gold lines tracing the edges/corners of the d20.
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geo),
+        new THREE.LineBasicMaterial({
+          color: 0xe7c06d,
+          transparent: true,
+          opacity: 0.85,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      die.add(edges);
 
       // Compute faces (centroid + normal), assign 1..20, and label them.
       const pos = geo.getAttribute("position");
@@ -146,15 +162,28 @@ export function DiceArena() {
         const value = f + 1;
         faces.push({ normal: normal.clone(), value });
 
-        // Number label plane sitting on the face.
+        // Number label plane sitting on the face — glowing, colour-coded:
+        // a red 1, a green 20, and gold for everything between.
+        const palette =
+          value === 1
+            ? { fill: "#ff5d5d", glow: "#ff1515" }
+            : value === 20
+              ? { fill: "#7dff98", glow: "#13e24a" }
+              : { fill: "#ffd57c", glow: "#ffab1f" };
         const canvas = document.createElement("canvas");
         canvas.width = canvas.height = 128;
         const ctx = canvas.getContext("2d")!;
         ctx.clearRect(0, 0, 128, 128);
-        ctx.fillStyle = "#2a1407";
-        ctx.font = "bold 78px Georgia, serif";
+        ctx.font = "bold 76px Georgia, serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
+        // Build a bloom by stacking the glyph with a shrinking glow.
+        ctx.shadowColor = palette.glow;
+        ctx.fillStyle = palette.fill;
+        ctx.shadowBlur = 26;
+        ctx.fillText(String(value), 64, 70);
+        ctx.fillText(String(value), 64, 70);
+        ctx.shadowBlur = 8;
         ctx.fillText(String(value), 64, 70);
         const tex = new THREE.CanvasTexture(canvas);
         tex.anisotropy = 4;
@@ -164,6 +193,7 @@ export function DiceArena() {
             map: tex,
             transparent: true,
             depthWrite: false,
+            blending: THREE.AdditiveBlending,
           }),
         );
         plane.position.copy(centroid.clone().add(normal.clone().multiplyScalar(0.02)));
@@ -445,48 +475,74 @@ export function DiceArena() {
 
   return (
     <Panel
-      title="3D Dice Arena"
+      title={
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex items-center gap-1.5 text-left"
+        >
+          <ChevronRightIcon
+            className={cn(
+              "h-4 w-4 text-brass-dark transition-transform",
+              open && "rotate-90",
+            )}
+          />
+          3D Dice Arena
+        </button>
+      }
       eyebrow="Grab &amp; throw — shared with the table"
       action={
-        <Button variant="secondary" size="sm" onClick={() => tossRef.current()}>
-          Toss for me
-        </Button>
+        open ? (
+          <Button variant="secondary" size="sm" onClick={() => tossRef.current()}>
+            Toss for me
+          </Button>
+        ) : undefined
       }
     >
-      <div className="relative">
-        <div
-          ref={containerRef}
-          className="relative h-[26rem] w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather sm:h-[30rem] lg:h-[34rem]"
-        />
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-end p-3">
-          {phase === "settled" && result !== null ? (
-            <span
-              className={cn(
-                "animate-fade-in-up rounded-full border px-4 py-1 font-display text-base font-bold shadow-raised",
-                crit
-                  ? "border-gilt bg-brass/30 text-brass-light"
+      {/* Kept mounted (just hidden) so the WebGL context survives collapsing. */}
+      <div className={cn(!open && "hidden")}>
+        <div className="relative">
+          <div
+            ref={containerRef}
+            className="relative h-[26rem] w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather sm:h-[30rem] lg:h-[34rem]"
+          />
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-end p-3">
+            {phase === "settled" && result !== null ? (
+              <span
+                className={cn(
+                  "animate-fade-in-up rounded-full border px-4 py-1 font-display text-base font-bold shadow-raised",
+                  crit
+                    ? "border-gilt bg-brass/30 text-brass-light"
+                    : fumble
+                      ? "border-oxblood bg-oxblood/30 text-oxblood-light"
+                      : "border-parchment-400/70 bg-parchment-100/95 text-ink",
+                )}
+              >
+                {crit
+                  ? "Critical — 20!"
                   : fumble
-                    ? "border-oxblood bg-oxblood/30 text-oxblood-light"
-                    : "border-parchment-400/70 bg-parchment-100/95 text-ink",
-              )}
-            >
-              {crit
-                ? "Critical — 20!"
-                : fumble
-                  ? "Fumble — 1"
-                  : `You threw ${result}`}
-            </span>
-          ) : phase === "idle" ? (
-            <span className="text-xs uppercase tracking-[0.2em] text-parchment-300/70">
-              Grab the die &amp; fling it
-            </span>
-          ) : null}
+                    ? "Fumble — 1"
+                    : `You threw ${result}`}
+              </span>
+            ) : phase === "idle" ? (
+              <span className="text-xs uppercase tracking-[0.2em] text-parchment-300/70">
+                Grab the die &amp; fling it
+              </span>
+            ) : null}
+          </div>
         </div>
+        <p className="mt-2 text-xs text-ink-faint">
+          Grab the d20 and throw it across the tray — it tumbles with real
+          physics and the result is logged + shared to your table&apos;s roll
+          log.
+        </p>
       </div>
-      <p className="mt-2 text-xs text-ink-faint">
-        Grab the d20 and throw it across the tray — it tumbles with real physics
-        and the result is logged + shared to your table&apos;s roll log.
-      </p>
+      {!open && (
+        <p className="text-sm text-ink-faint">
+          The arena is tucked away — tap the title to bring it back.
+        </p>
+      )}
     </Panel>
   );
 }
