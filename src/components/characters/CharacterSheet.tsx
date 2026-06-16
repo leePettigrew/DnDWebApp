@@ -13,7 +13,9 @@ import {
   type Character,
   type RollMode,
   type RollResult,
+  type RollSpec,
 } from "@/lib/domain/types";
+import { EquipmentPanel } from "./EquipmentPanel";
 import {
   abilityMod,
   formatModifier,
@@ -67,6 +69,14 @@ export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
   function quickRoll(labelText: string, bonus: number, mode: RollMode = "normal") {
     void realtime
       .roll(spec(1, 20, bonus, mode, labelText))
+      .then((r) => setLastRoll(r))
+      .catch(() => {});
+  }
+
+  // Roll an arbitrary spec (used by weapon attacks/damage in EquipmentPanel).
+  function onRoll(s: RollSpec) {
+    void realtime
+      .roll(s)
       .then((r) => setLastRoll(r))
       .catch(() => {});
   }
@@ -311,44 +321,8 @@ export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
           </ul>
         </Panel>
 
-        {/* Inventory + features */}
+        {/* Features */}
         <div className="space-y-6">
-          <Panel title="Inventory">
-            {c.inventory.length === 0 ? (
-              <p className="text-sm text-ink-faint">No items recorded.</p>
-            ) : (
-              <ul className="space-y-1.5">
-                {c.inventory.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex items-start justify-between gap-2 border-b border-parchment-400/40 pb-1.5 last:border-0"
-                  >
-                    <span>
-                      <span className="text-sm font-semibold text-ink">
-                        {item.name}
-                        {item.equipped && (
-                          <span className="ml-2 text-[0.6rem] uppercase tracking-wider text-forest">
-                            equipped
-                          </span>
-                        )}
-                      </span>
-                      {item.description && (
-                        <span className="block text-xs text-ink-faint">
-                          {item.description}
-                        </span>
-                      )}
-                    </span>
-                    {item.quantity > 1 && (
-                      <span className="numerals shrink-0 text-sm text-ink-soft">
-                        ×{item.quantity}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
-
           <Panel title="Features & Traits">
             {c.features.length === 0 ? (
               <p className="text-sm text-ink-faint">No features recorded.</p>
@@ -367,6 +341,8 @@ export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
           </Panel>
         </div>
       </div>
+
+      <EquipmentPanel character={c} onRoll={onRoll} />
 
       {/* Spellcasting */}
       {(c.spellcastingAbility || c.spells.length > 0) && (
