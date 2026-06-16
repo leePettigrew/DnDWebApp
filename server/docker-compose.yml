@@ -1,0 +1,25 @@
+# Run the server with: docker compose up -d --build   (from this server/ folder)
+# Reads variables from server/.env (copy server/.env.example first).
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    image: dragons-ledger-server
+    container_name: dragons-ledger-server
+    restart: unless-stopped
+    # Host PORT (default 8787) -> container 8787. Put PORT in .env to change the host port.
+    ports:
+      - "${PORT:-8787}:8787"
+    env_file:
+      - .env
+    environment:
+      # The container always listens on 8787 internally; DB lives on the volume.
+      - PORT=8787
+      - DB_PATH=/app/server/data/dragons-ledger.sqlite
+      # AUTH_SECRET and CORS_ORIGIN come from .env (env_file above).
+      - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in server/.env}
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+    volumes:
+      # Persist the SQLite database on the host so restarts keep everything.
+      - ./data:/app/server/data

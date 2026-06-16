@@ -1,0 +1,22 @@
+# Keep the Docker build context small (build context is the repo root for the
+# server image, so it can include the shared/ folder).
+.git
+.claude
+node_modules
+.next
+out
+build
+dist
+coverage
+server/node_modules
+server/dist
+server/data
+**/*.sqlite
+**/*.sqlite3
+**/*.sqlite-wal
+**/*.sqlite-shm
+**/*.db
+**/.env
+**/.env.*
+!**/.env.example
+*.log
