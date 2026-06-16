@@ -80,11 +80,26 @@ const config: Config = {
           "100%": { opacity: "1" },
         },
         "dice-tumble": {
-          "0%": { transform: "rotate(0deg) scale(0.9)" },
-          "25%": { transform: "rotate(220deg) scale(1.08)" },
-          "50%": { transform: "rotate(440deg) scale(0.96)" },
-          "75%": { transform: "rotate(680deg) scale(1.04)" },
-          "100%": { transform: "rotate(900deg) scale(1)" },
+          "0%": {
+            transform:
+              "perspective(500px) translateY(-32%) rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(0.78)",
+          },
+          "25%": {
+            transform:
+              "perspective(500px) translateY(8%) rotateX(220deg) rotateY(160deg) rotateZ(60deg) scale(1.16)",
+          },
+          "50%": {
+            transform:
+              "perspective(500px) translateY(-7%) rotateX(420deg) rotateY(300deg) rotateZ(180deg) scale(0.94)",
+          },
+          "75%": {
+            transform:
+              "perspective(500px) translateY(3%) rotateX(560deg) rotateY(360deg) rotateZ(280deg) scale(1.07)",
+          },
+          "100%": {
+            transform:
+              "perspective(500px) translateY(0) rotateX(720deg) rotateY(360deg) rotateZ(360deg) scale(1)",
+          },
         },
         shimmer: {
           "0%": { backgroundPosition: "-200% 0" },
@@ -98,7 +113,7 @@ const config: Config = {
       animation: {
         "fade-in-up": "fade-in-up 0.4s ease-out both",
         "fade-in": "fade-in 0.3s ease-out both",
-        "dice-tumble": "dice-tumble 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both",
+        "dice-tumble": "dice-tumble 0.75s cubic-bezier(0.18, 0.9, 0.28, 1.3) both",
         "pulse-glow": "pulse-glow 2.4s ease-in-out infinite",
       },
     },

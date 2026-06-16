@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/icons";
 import { cn } from "@/components/ui/cn";
 import { DiceChip } from "./DiceChip";
-import { DIE_SIDES, formatSpec, rollSpec } from "@/lib/domain/dice";
+import { DIE_SIDES, formatSpec } from "@/lib/domain/dice";
 import type {
   DieRoll,
   RollMode,
@@ -25,7 +25,13 @@ import type {
   RollSpec,
 } from "@/lib/domain/types";
 import { useReducedMotion } from "@/lib/hooks/useReducedMotion";
-import { useRollHistory, useRollPresets } from "@/lib/data/hooks";
+import {
+  useActiveCampaign,
+  useDataProvider,
+  useRealtime,
+  useRollHistory,
+  useRollPresets,
+} from "@/lib/data/hooks";
 
 const MODES: { key: RollMode; label: string }[] = [
   { key: "normal", label: "Normal" },
@@ -53,8 +59,11 @@ export function DiceRoller() {
   const reduced = useReducedMotion();
   const { items: presets, create: createPreset, remove: removePreset } =
     useRollPresets();
-  const { items: history, create: createRoll, remove: removeRoll } =
-    useRollHistory();
+  const { items: history, remove: removeRoll } = useRollHistory();
+  const realtime = useRealtime();
+  const { capabilities } = useDataProvider();
+  const { role } = useActiveCampaign();
+  const isDM = capabilities.multiUser && role === "dm";
 
   const [counts, setCounts] = useState<Record<number, number>>({});
   const [modifier, setModifier] = useState(0);
@@ -65,6 +74,8 @@ export function DiceRoller() {
   const [, forceTick] = useState(0);
   const [savingOpen, setSavingOpen] = useState(false);
   const [presetName, setPresetName] = useState("");
+  const [hiddenRoll, setHiddenRoll] = useState(false);
+  const [rollError, setRollError] = useState<string | null>(null);
 
   // While rolling, re-render fast so the chips flicker through random values.
   useEffect(() => {
@@ -84,29 +95,29 @@ export function DiceRoller() {
     return { groups, modifier, mode, label: label.trim() || undefined };
   }
 
-  function persist(r: RollResult) {
-    const { id: _id, ...rest } = r;
-    void _id;
-    void createRoll(rest);
-  }
-
-  function roll(spec: RollSpec) {
-    const r = rollSpec(spec);
-    setResult(r);
-    if (reduced) {
-      persist(r);
-      return;
-    }
+  async function roll(spec: RollSpec) {
     setRolling(true);
-    window.setTimeout(() => {
+    setRollError(null);
+    try {
+      // The provider produces the result: locally in solo mode, or on the
+      // SERVER in multiplayer (authoritative, anti-cheat, hidden-aware). Either
+      // way the shared roll history updates itself via the data layer.
+      const r = await realtime.roll(spec, { hidden: isDM && hiddenRoll });
+      setResult(r);
+      if (reduced) {
+        setRolling(false);
+        return;
+      }
+      window.setTimeout(() => setRolling(false), 650);
+    } catch (err) {
       setRolling(false);
-      persist(r);
-    }, 700);
+      setRollError(err instanceof Error ? err.message : "Roll failed.");
+    }
   }
 
   function handleRoll() {
     const spec = buildSpec();
-    if (spec) roll(spec);
+    if (spec) void roll(spec);
   }
 
   function loadPreset(p: RollPreset) {
@@ -292,6 +303,29 @@ export function DiceRoller() {
             </div>
           </div>
 
+          {isDM && (
+            <label className="mt-4 flex cursor-pointer items-center gap-2 rounded-card border border-oxblood/30 bg-oxblood/5 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={hiddenRoll}
+                onChange={(e) => setHiddenRoll(e.target.checked)}
+                className="h-4 w-4 accent-oxblood"
+              />
+              <span className="text-sm text-ink-soft">
+                Hidden roll{" "}
+                <span className="text-ink-faint">
+                  — only you (the DM) see the result
+                </span>
+              </span>
+            </label>
+          )}
+
+          {rollError && (
+            <p className="mt-3 rounded-md border border-oxblood/40 bg-oxblood/10 px-3 py-2 text-sm text-oxblood">
+              {rollError}
+            </p>
+          )}
+
           <Button
             size="lg"
             onClick={handleRoll}
@@ -392,7 +426,7 @@ export function DiceRoller() {
                 >
                   <button
                     type="button"
-                    onClick={() => roll(p.spec)}
+                    onClick={() => void roll(p.spec)}
                     className="flex-1 text-left"
                   >
                     <span className="block font-display text-sm font-semibold text-ink">
@@ -425,9 +459,9 @@ export function DiceRoller() {
 
         <Panel
           title="Roll History"
-          eyebrow="The record"
+          eyebrow={capabilities.multiUser ? "Shared campaign log" : "The record"}
           action={
-            history.length > 0 ? (
+            history.length > 0 && !capabilities.multiUser ? (
               <button
                 type="button"
                 onClick={() => history.forEach((h) => removeRoll(h.id))}
@@ -452,8 +486,21 @@ export function DiceRoller() {
                   className="flex items-center justify-between gap-3 rounded-md border border-parchment-400/50 bg-parchment-100/60 px-3 py-2"
                 >
                   <span className="min-w-0">
-                    <span className="block truncate text-sm text-ink">
-                      {h.label ?? h.notation}
+                    <span className="flex items-center gap-1.5 text-sm text-ink">
+                      {h.rolledByName && (
+                        <span className="shrink-0 font-semibold text-brass-dark">
+                          {h.rolledByName}
+                        </span>
+                      )}
+                      <span className="truncate">{h.label ?? h.notation}</span>
+                      {h.hidden && (
+                        <span
+                          title="Hidden roll — DM only"
+                          className="shrink-0 rounded bg-leather/85 px-1 text-[0.55rem] font-bold uppercase tracking-wide text-parchment-100"
+                        >
+                          Hidden
+                        </span>
+                      )}
                     </span>
                     <span className="numerals block text-xs text-ink-faint">
                       {h.notation}
