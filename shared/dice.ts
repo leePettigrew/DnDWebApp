@@ -101,3 +101,35 @@ export function spec(
 ): RollSpec {
   return { groups: [{ count, sides }], modifier, mode, label };
 }
+
+/**
+ * Parse a dice expression into a RollSpec, e.g. "1d8+3", "2d6", "1d10+1d6+5",
+ * "d20-1". Trailing words are ignored, so weapon damage like "1d8+3 slashing"
+ * works. Returns null when there are no dice.
+ */
+export function parseRollSpec(notation: string, label?: string): RollSpec | null {
+  const lead = notation.trim().toLowerCase().match(/^[0-9d\s+-]+/);
+  if (!lead) return null;
+  const cleaned = lead[0].replace(/\s+/g, "");
+  if (!cleaned) return null;
+
+  const terms = cleaned.match(/[+-]?[^+-]+/g);
+  if (!terms) return null;
+
+  const groups: { count: number; sides: number }[] = [];
+  let modifier = 0;
+  for (const raw of terms) {
+    const sign = raw.startsWith("-") ? -1 : 1;
+    const body = raw.replace(/^[+-]/, "");
+    const dice = body.match(/^(\d*)d(\d+)$/);
+    if (dice) {
+      const count = dice[1] === "" ? 1 : parseInt(dice[1], 10);
+      const sides = parseInt(dice[2], 10);
+      if (count > 0 && sides > 0) groups.push({ count, sides });
+    } else if (/^\d+$/.test(body)) {
+      modifier += sign * parseInt(body, 10);
+    }
+  }
+  if (groups.length === 0) return null;
+  return { groups, modifier, mode: "normal", label };
+}

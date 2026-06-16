@@ -89,13 +89,77 @@ export const SKILLS: SkillDef[] = [
 /** none = not proficient, proficient = +PB, expertise = +2·PB. */
 export type ProficiencyLevel = "none" | "proficient" | "expertise";
 
+export type ItemCategory =
+  | "weapon"
+  | "armor"
+  | "shield"
+  | "ammunition"
+  | "gear"
+  | "consumable"
+  | "tool"
+  | "treasure"
+  | "magic"
+  | "other";
+
+export const ITEM_CATEGORIES: { key: ItemCategory; label: string }[] = [
+  { key: "weapon", label: "Weapon" },
+  { key: "armor", label: "Armor" },
+  { key: "shield", label: "Shield" },
+  { key: "ammunition", label: "Ammunition" },
+  { key: "gear", label: "Adventuring Gear" },
+  { key: "consumable", label: "Consumable" },
+  { key: "tool", label: "Tool" },
+  { key: "treasure", label: "Treasure" },
+  { key: "magic", label: "Magic Item" },
+  { key: "other", label: "Other" },
+];
+
+export type ItemRarity =
+  | "common"
+  | "uncommon"
+  | "rare"
+  | "very-rare"
+  | "legendary"
+  | "artifact";
+
+export const ITEM_RARITIES: { key: ItemRarity; label: string }[] = [
+  { key: "common", label: "Common" },
+  { key: "uncommon", label: "Uncommon" },
+  { key: "rare", label: "Rare" },
+  { key: "very-rare", label: "Very Rare" },
+  { key: "legendary", label: "Legendary" },
+  { key: "artifact", label: "Artifact" },
+];
+
 export interface InventoryItem {
   id: ID;
   name: string;
   quantity: number;
+  /** Weight in pounds, per single unit. */
   weight?: number;
-  description?: string;
+  /** Value in gold pieces, per single unit. */
+  value?: number;
+  category?: ItemCategory;
+  rarity?: ItemRarity;
   equipped?: boolean;
+  /** Requires attunement (counts toward the limit of 3). */
+  attuned?: boolean;
+  /** Weapon/armor blurb, e.g. "Versatile (1d10), Finesse" or "AC 16, Stealth disadv." */
+  properties?: string;
+  /** Weapon attack bonus (to hit). When set, the sheet shows a rollable attack. */
+  attackBonus?: number;
+  /** Weapon damage, e.g. "1d8+3 slashing". Rollable on the sheet. */
+  damage?: string;
+  description?: string;
+}
+
+/** 5e coinage. 50 coins of any kind weigh 1 lb. */
+export interface Currency {
+  cp: number;
+  sp: number;
+  ep: number;
+  gp: number;
+  pp: number;
 }
 
 export interface Spell {
@@ -152,6 +216,8 @@ export interface Character extends Entity {
   spells: Spell[];
 
   inventory: InventoryItem[];
+  /** Coin purse. Optional for back-compat; treated as all-zero when absent. */
+  currency?: Currency;
   features: Feature[];
 
   languages?: string;

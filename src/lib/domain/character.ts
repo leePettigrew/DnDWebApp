@@ -2,6 +2,8 @@ import type {
   AbilityKey,
   AbilityScores,
   Character,
+  Currency,
+  InventoryItem,
   ProficiencyLevel,
   SkillDef,
 } from "./types";
@@ -84,4 +86,88 @@ export function spellAttackBonus(character: Character): number | null {
 /** A blank but valid character, used when creating a new sheet. */
 export function emptyAbilityScores(): AbilityScores {
   return { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
+}
+
+// --- Inventory, encumbrance & wealth ---------------------------------------
+
+/** 5e: 50 coins weigh 1 lb. */
+const COIN_WEIGHT = 1 / 50;
+export const ATTUNEMENT_LIMIT = 3;
+
+export function emptyCurrency(): Currency {
+  return { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
+}
+
+function coinCount(c?: Currency): number {
+  if (!c) return 0;
+  return (c.cp ?? 0) + (c.sp ?? 0) + (c.ep ?? 0) + (c.gp ?? 0) + (c.pp ?? 0);
+}
+
+export function coinWeight(c?: Currency): number {
+  return coinCount(c) * COIN_WEIGHT;
+}
+
+export function itemWeight(item: InventoryItem): number {
+  return (item.weight ?? 0) * (item.quantity ?? 1);
+}
+
+/** Total carried weight in lb (items + coins), rounded to 0.01. */
+export function totalCarriedWeight(character: Character): number {
+  const items = character.inventory.reduce((sum, i) => sum + itemWeight(i), 0);
+  return Math.round((items + coinWeight(character.currency)) * 100) / 100;
+}
+
+/** Carrying capacity in lb: STR × 15. */
+export function carryingCapacity(character: Character): number {
+  return character.abilityScores.str * 15;
+}
+
+export type EncumbranceLevel =
+  | "unencumbered"
+  | "encumbered"
+  | "heavily"
+  | "overloaded";
+
+const ENCUMBRANCE_LABELS: Record<EncumbranceLevel, string> = {
+  unencumbered: "Unencumbered",
+  encumbered: "Encumbered",
+  heavily: "Heavily Encumbered",
+  overloaded: "Over Capacity",
+};
+
+export function encumbrance(character: Character): {
+  weight: number;
+  capacity: number;
+  level: EncumbranceLevel;
+  label: string;
+} {
+  const str = character.abilityScores.str;
+  const weight = totalCarriedWeight(character);
+  const capacity = str * 15;
+  let level: EncumbranceLevel = "unencumbered";
+  if (weight > capacity) level = "overloaded";
+  else if (weight > str * 10) level = "heavily";
+  else if (weight > str * 5) level = "encumbered";
+  return { weight, capacity, level, label: ENCUMBRANCE_LABELS[level] };
+}
+
+/** Summed item value (gp) across the inventory. */
+export function totalItemValue(character: Character): number {
+  return character.inventory.reduce(
+    (sum, i) => sum + (i.value ?? 0) * (i.quantity ?? 1),
+    0,
+  );
+}
+
+/** Total wealth in gp: coins (converted) + item values. */
+export function totalWealthGp(character: Character): number {
+  const c = character.currency;
+  const coins = c
+    ? c.pp * 10 + c.gp + c.ep * 0.5 + c.sp * 0.1 + c.cp * 0.01
+    : 0;
+  return Math.round((coins + totalItemValue(character)) * 100) / 100;
+}
+
+export function attunedCount(character: Character): number {
+  return character.inventory.filter((i) => i.attuned).length;
 }

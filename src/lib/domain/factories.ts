@@ -7,7 +7,7 @@ import type {
   StatBlock,
   BattleMap,
 } from "./types";
-import { emptyAbilityScores } from "./character";
+import { emptyAbilityScores, emptyCurrency } from "./character";
 import type { CreateInput } from "@/lib/data/provider";
 
 /**
@@ -41,6 +41,7 @@ export function newCharacterInput(
     initiativeBonus: 0,
     spells: [],
     inventory: [],
+    currency: emptyCurrency(),
     features: [],
     languages: "Common",
     notes: "",
