@@ -113,6 +113,12 @@ const message = z.discriminatedUnion("type", [
     hidden: z.boolean().optional(),
   }),
   z.object({
+    type: z.literal("dice:physical"),
+    total: z.number().int().min(1).max(1000),
+    notation: z.string().max(20).optional(),
+    label: z.string().max(120).optional(),
+  }),
+  z.object({
     type: z.literal("presence:typing"),
     context: z.string().max(120).nullable(),
   }),

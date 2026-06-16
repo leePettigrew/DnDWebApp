@@ -502,6 +502,14 @@ export function DiceRoller() {
                           Hidden
                         </span>
                       )}
+                      {h.physical && (
+                        <span
+                          title="Hand-thrown in the 3D dice arena"
+                          className="shrink-0 rounded bg-brass/20 px-1 text-[0.55rem] font-bold uppercase tracking-wide text-brass-dark"
+                        >
+                          Thrown
+                        </span>
+                      )}
                     </span>
                     <span className="numerals block text-xs text-ink-faint">
                       {h.notation}

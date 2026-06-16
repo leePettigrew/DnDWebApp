@@ -202,6 +202,13 @@ export interface DiceRollMessage {
   spec: RollSpec;
   hidden?: boolean;
 }
+/** A trust-based hand-thrown roll (3D dice arena) — server logs/broadcasts it. */
+export interface DicePhysicalMessage {
+  type: "dice:physical";
+  total: number;
+  notation?: string;
+  label?: string;
+}
 export interface PresenceTypingMessage {
   type: "presence:typing";
   context: string | null;
@@ -239,6 +246,7 @@ export type ClientMessage =
   | CombatSetMessage
   | CombatUpdateMessage
   | DiceRollMessage
+  | DicePhysicalMessage
   | PresenceTypingMessage
   | ChatSendMessage
   | MapTokenMoveMessage

@@ -193,6 +193,13 @@ export interface RealtimeController {
    * computed locally and appended to history.
    */
   roll(spec: RollSpec, opts?: { hidden?: boolean }): Promise<RollResult>;
+
+  /**
+   * Log/share a hand-thrown d20 result (from the 3D dice arena) to the roll
+   * history. Trust-based: the thrown number is reported as-is and broadcast to
+   * the table (always public).
+   */
+  logPhysicalRoll(total: number, label?: string): void;
 }
 
 /** What a given provider can actually do — lets the UI light up Phase 2 bits. */

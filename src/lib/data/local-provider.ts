@@ -336,6 +336,22 @@ class LocalRealtimeController implements RealtimeController {
     await this.rollHistory.create({ ...rest });
     return result;
   }
+
+  logPhysicalRoll(total: number, label?: string): void {
+    void this.rollHistory.create({
+      timestamp: nowISO(),
+      label,
+      mode: "normal",
+      rolls: [{ sides: 20, value: total }],
+      modifier: 0,
+      total,
+      isCrit: total === 20,
+      isFumble: total === 1,
+      notation: "d20",
+      rolledByName: LOCAL_USER.name,
+      physical: true,
+    });
+  }
 }
 
 export const emptyCombatState: CombatState = {

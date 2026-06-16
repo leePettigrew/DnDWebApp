@@ -450,6 +450,13 @@ export class RealtimeDataProvider implements DataProvider {
         if (trimmed) this.conn.send({ type: "chat:send", body: trimmed });
       },
       roll: (spec, opts) => this.roll(spec, opts),
+      logPhysicalRoll: (total, label) => {
+        if (this.activeCampaignId && this.conn.isOpen()) {
+          this.conn.send({ type: "dice:physical", total, label });
+        } else {
+          this.local.realtime.logPhysicalRoll(total, label);
+        }
+      },
     };
 
     this.conn.onStatus(() => this.emitStatus());

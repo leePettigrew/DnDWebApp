@@ -16,6 +16,7 @@ import type {
   ChatMessage,
   ChatSendMessage,
   ClientMessage,
+  DicePhysicalMessage,
   DiceRollMessage,
   MapPingMessage,
   MapTokenMoveMessage,
@@ -117,6 +118,8 @@ export class ClientSession {
         return this.onCombatUpdate(msg.patch);
       case "dice:roll":
         return this.onDiceRoll(msg);
+      case "dice:physical":
+        return this.onDicePhysical(msg);
       case "presence:typing":
         return this.onTyping(msg.context);
       case "chat:send":
@@ -509,6 +512,32 @@ export class ClientSession {
     };
     this.repos.chat.append(message);
     this.rooms.get(this.campaignId!).broadcast({ type: "chat:message", message });
+  }
+
+  private onDicePhysical(msg: DicePhysicalMessage): void {
+    if (!this.requireCampaign()) return;
+    const total = Math.round(msg.total);
+    const entry: RollHistoryEntry = {
+      id: newId(),
+      createdAt: nowISO(),
+      updatedAt: nowISO(),
+      campaignId: this.campaignId!,
+      rolledByUserId: this.userId!,
+      rolledByName: this.displayName,
+      hidden: false,
+      physical: true,
+      timestamp: nowISO(),
+      label: msg.label,
+      mode: "normal",
+      rolls: [{ sides: 20, value: total }],
+      modifier: 0,
+      total,
+      isCrit: total === 20,
+      isFumble: total === 1,
+      notation: msg.notation ?? "d20",
+    };
+    this.repos.rollLog.append(this.campaignId!, entry);
+    this.rooms.get(this.campaignId!).broadcast({ type: "dice:rolled", entry });
   }
 
   // --- presence ------------------------------------------------------------

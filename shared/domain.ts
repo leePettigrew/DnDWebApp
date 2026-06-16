@@ -498,4 +498,6 @@ export interface RollHistoryEntry extends Entity, Omit<RollResult, "id"> {
   rolledByName?: string;
   /** A DM "hidden" roll — server only delivers it to the DM. */
   hidden?: boolean;
+  /** A hand-thrown roll from the 3D dice arena (trust-based). */
+  physical?: boolean;
 }
