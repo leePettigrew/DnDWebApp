@@ -23,13 +23,16 @@ import { createRealtimeDataProvider } from "./realtime-provider";
 let clientSingleton: DataProvider | null = null;
 
 function getProvider(): DataProvider {
-  // On the server, return a throwaway local instance per call (memory-backed)
-  // so no state is shared across requests. On the client, memoize one instance.
+  const wsUrl = process.env.NEXT_PUBLIC_MULTIPLAYER_WS_URL;
+  // On the server, return a throwaway instance per call (never connects — no
+  // window) so no state leaks across requests. We still pick the SAME KIND of
+  // provider the client will, so the first render matches and hydration is clean.
   if (typeof window === "undefined") {
-    return createLocalDataProvider();
+    return wsUrl
+      ? createRealtimeDataProvider(wsUrl)
+      : createLocalDataProvider();
   }
   if (!clientSingleton) {
-    const wsUrl = process.env.NEXT_PUBLIC_MULTIPLAYER_WS_URL;
     clientSingleton = wsUrl
       ? createRealtimeDataProvider(wsUrl)
       : createLocalDataProvider();
