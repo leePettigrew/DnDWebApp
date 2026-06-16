@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { cn } from "@/components/ui/cn";
 import { useMapPings, useMaps, useRealtime } from "@/lib/data/hooks";
@@ -387,22 +386,30 @@ export function MapBoard({
     }
   }
 
-  function onWheel(e: ReactWheelEvent) {
-    if (!containerRef.current) return;
-    const r = containerRef.current.getBoundingClientRect();
-    const cx = e.clientX - r.left;
-    const cy = e.clientY - r.top;
-    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    setView((v) => {
-      const scale = clamp(v.scale * factor, 0.1, 8);
-      const k = scale / v.scale;
-      return {
-        scale,
-        offsetX: cx - (cx - v.offsetX) * k,
-        offsetY: cy - (cy - v.offsetY) * k,
-      };
-    });
-  }
+  // Native, non-passive wheel listener so preventDefault() actually stops the
+  // page from scrolling while we zoom the map (React's onWheel is passive).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      const cx = e.clientX - r.left;
+      const cy = e.clientY - r.top;
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      setView((v) => {
+        const scale = clamp(v.scale * factor, 0.1, 8);
+        const k = scale / v.scale;
+        return {
+          scale,
+          offsetX: cx - (cx - v.offsetX) * k,
+          offsetY: cy - (cy - v.offsetY) * k,
+        };
+      });
+    };
+    el.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => el.removeEventListener("wheel", onWheelNative);
+  }, []);
 
   const activeCombatantId = useMemo(() => {
     if (!combat || !combat.active) return null;
@@ -421,7 +428,6 @@ export function MapBoard({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
         className={cn(
           "relative h-[62vh] min-h-80 w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather/90 touch-none select-none",
@@ -627,7 +633,10 @@ export function MapBoard({
         )}
 
         {/* Tool palette */}
-        <div className="absolute left-2 top-2 flex flex-wrap gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 backdrop-blur">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute left-2 top-2 flex flex-wrap gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 backdrop-blur"
+        >
           {tools.map((t) => (
             <button
               key={t.key}
@@ -659,7 +668,10 @@ export function MapBoard({
         </div>
 
         {/* Zoom */}
-        <div className="absolute bottom-2 right-2 flex gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 backdrop-blur">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute bottom-2 right-2 flex gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 backdrop-blur"
+        >
           <button
             onClick={() => setView((v) => ({ ...v, scale: clamp(v.scale * 1.15, 0.1, 8) }))}
             className="h-7 w-7 rounded-md text-ink-soft hover:bg-parchment-300/60"
