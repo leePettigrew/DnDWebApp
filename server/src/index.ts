@@ -3,6 +3,7 @@ import { WebSocketServer } from "ws";
 import { config } from "./config";
 import { openDatabase } from "./db";
 import { createSqliteRepositories } from "./sqlite-repositories";
+import { handleHttpRequest } from "./http";
 
 const db = openDatabase(config.dbPath);
 const repos = createSqliteRepositories(db);
@@ -21,8 +22,21 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true, service: "dragons-ledger-server" }));
     return;
   }
-  res.writeHead(404, { "content-type": "application/json" });
-  res.end(JSON.stringify({ error: "not_found" }));
+  void handleHttpRequest(req, res, repos)
+    .then((handled) => {
+      if (!handled) {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "not_found" }));
+      }
+    })
+    .catch(() => {
+      try {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Server error." }));
+      } catch {
+        /* response already sent */
+      }
+    });
 });
 
 const wss = new WebSocketServer({ server });
