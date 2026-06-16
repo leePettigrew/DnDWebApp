@@ -14,13 +14,28 @@ import { PlusIcon, TrashIcon } from "@/components/ui/icons";
 import {
   ABILITY_KEYS,
   ABILITY_LABELS,
+  ITEM_CATEGORIES,
+  ITEM_RARITIES,
   SKILLS,
   type AbilityKey,
   type Character,
+  type Currency,
+  type InventoryItem,
+  type ItemCategory,
+  type ItemRarity,
   type ProficiencyLevel,
   type SkillKey,
 } from "@/lib/domain/types";
+import { emptyCurrency } from "@/lib/domain/character";
 import { newId } from "@/lib/domain/ids";
+
+const COIN_KEYS: { key: keyof Currency; label: string }[] = [
+  { key: "pp", label: "Platinum" },
+  { key: "gp", label: "Gold" },
+  { key: "ep", label: "Electrum" },
+  { key: "sp", label: "Silver" },
+  { key: "cp", label: "Copper" },
+];
 
 export function CharacterEditor({
   character,
@@ -37,6 +52,17 @@ export function CharacterEditor({
     setD((prev) => ({ ...prev, [key]: value }));
   }
   const num = (v: string) => (v === "" ? 0 : Number(v));
+
+  const updateItem = (id: string, patch: Partial<InventoryItem>) =>
+    set(
+      "inventory",
+      d.inventory.map((it) => (it.id === id ? { ...it, ...patch } : it)),
+    );
+  const removeItem = (id: string) =>
+    set("inventory", d.inventory.filter((it) => it.id !== id));
+  const currency = d.currency ?? emptyCurrency();
+  const setCoin = (key: keyof Currency, value: number) =>
+    set("currency", { ...currency, [key]: value });
 
   return (
     <div className="space-y-6">
@@ -181,7 +207,7 @@ export function CharacterEditor({
 
       {/* Inventory editor */}
       <Panel
-        title="Inventory"
+        title="Inventory & Equipment"
         action={
           <Button
             variant="secondary"
@@ -189,7 +215,7 @@ export function CharacterEditor({
             onClick={() =>
               set("inventory", [
                 ...d.inventory,
-                { id: newId(), name: "", quantity: 1 },
+                { id: newId(), name: "", quantity: 1, category: "gear" },
               ])
             }
           >
@@ -200,72 +226,168 @@ export function CharacterEditor({
         {d.inventory.length === 0 ? (
           <p className="text-sm text-ink-faint">No items yet.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-3">
             {d.inventory.map((item) => (
-              <li key={item.id} className="flex flex-wrap items-end gap-2">
-                <TextField
-                  label="Item"
-                  className="min-w-40 flex-1"
-                  value={item.name}
-                  onChange={(e) =>
-                    set(
-                      "inventory",
-                      d.inventory.map((it) =>
-                        it.id === item.id ? { ...it, name: e.target.value } : it,
-                      ),
-                    )
-                  }
-                />
-                <NumberField
-                  label="Qty"
-                  className="w-16"
-                  value={item.quantity}
-                  onChange={(e) =>
-                    set(
-                      "inventory",
-                      d.inventory.map((it) =>
-                        it.id === item.id
-                          ? { ...it, quantity: num(e.target.value) }
-                          : it,
-                      ),
-                    )
-                  }
-                />
-                <label className="flex h-10 items-center gap-1.5 px-1 text-xs text-ink-soft">
-                  <input
-                    type="checkbox"
-                    checked={!!item.equipped}
-                    onChange={(e) =>
-                      set(
-                        "inventory",
-                        d.inventory.map((it) =>
-                          it.id === item.id
-                            ? { ...it, equipped: e.target.checked }
-                            : it,
-                        ),
-                      )
-                    }
-                    className="h-4 w-4 accent-forest"
+              <li
+                key={item.id}
+                className="space-y-2 rounded-card border border-parchment-400/50 bg-parchment-100/40 p-3"
+              >
+                <div className="flex flex-wrap items-end gap-2">
+                  <TextField
+                    label="Item"
+                    className="min-w-40 flex-1"
+                    value={item.name}
+                    onChange={(e) => updateItem(item.id, { name: e.target.value })}
                   />
-                  Equipped
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    set(
-                      "inventory",
-                      d.inventory.filter((it) => it.id !== item.id),
-                    )
+                  <div className="w-36">
+                    <SelectField
+                      label="Category"
+                      value={item.category ?? "gear"}
+                      onChange={(e) =>
+                        updateItem(item.id, {
+                          category: e.target.value as ItemCategory,
+                        })
+                      }
+                    >
+                      {ITEM_CATEGORIES.map((cat) => (
+                        <option key={cat.key} value={cat.key}>
+                          {cat.label}
+                        </option>
+                      ))}
+                    </SelectField>
+                  </div>
+                  <NumberField
+                    label="Qty"
+                    className="w-16"
+                    value={item.quantity}
+                    onChange={(e) =>
+                      updateItem(item.id, { quantity: num(e.target.value) })
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeItem(item.id)}
+                    aria-label="Remove item"
+                    className="mb-0.5 rounded-md p-2 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <NumberField
+                    label="Weight (lb)"
+                    value={item.weight ?? 0}
+                    onChange={(e) =>
+                      updateItem(item.id, { weight: num(e.target.value) })
+                    }
+                  />
+                  <NumberField
+                    label="Value (gp)"
+                    value={item.value ?? 0}
+                    onChange={(e) =>
+                      updateItem(item.id, { value: num(e.target.value) })
+                    }
+                  />
+                  <SelectField
+                    label="Rarity"
+                    value={item.rarity ?? ""}
+                    onChange={(e) =>
+                      updateItem(item.id, {
+                        rarity: (e.target.value || undefined) as
+                          | ItemRarity
+                          | undefined,
+                      })
+                    }
+                  >
+                    <option value="">—</option>
+                    {ITEM_RARITIES.map((r) => (
+                      <option key={r.key} value={r.key}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </SelectField>
+                  <div className="flex items-end gap-3 pb-2">
+                    <label className="flex items-center gap-1.5 text-xs text-ink-soft">
+                      <input
+                        type="checkbox"
+                        checked={!!item.equipped}
+                        onChange={(e) =>
+                          updateItem(item.id, { equipped: e.target.checked })
+                        }
+                        className="h-4 w-4 accent-forest"
+                      />
+                      Equipped
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-ink-soft">
+                      <input
+                        type="checkbox"
+                        checked={!!item.attuned}
+                        onChange={(e) =>
+                          updateItem(item.id, { attuned: e.target.checked })
+                        }
+                        className="h-4 w-4 accent-arcane"
+                      />
+                      Attuned
+                    </label>
+                  </div>
+                </div>
+
+                {item.category === "weapon" && (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <NumberField
+                      label="Atk bonus"
+                      value={item.attackBonus ?? 0}
+                      onChange={(e) =>
+                        updateItem(item.id, { attackBonus: num(e.target.value) })
+                      }
+                    />
+                    <div className="sm:col-span-3">
+                      <TextField
+                        label="Damage"
+                        placeholder="1d8+3 slashing"
+                        value={item.damage ?? ""}
+                        onChange={(e) =>
+                          updateItem(item.id, { damage: e.target.value })
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <TextField
+                  label="Properties"
+                  placeholder="Finesse, Versatile (1d10), AC 16…"
+                  value={item.properties ?? ""}
+                  onChange={(e) =>
+                    updateItem(item.id, { properties: e.target.value })
                   }
-                  aria-label="Remove item"
-                  className="mb-0.5 rounded-md p-2 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
-                >
-                  <TrashIcon className="h-4 w-4" />
-                </button>
+                />
+                <TextField
+                  label="Description"
+                  value={item.description ?? ""}
+                  onChange={(e) =>
+                    updateItem(item.id, { description: e.target.value })
+                  }
+                />
               </li>
             ))}
           </ul>
         )}
+      </Panel>
+
+      {/* Coin purse editor */}
+      <Panel title="Coin Purse">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {COIN_KEYS.map(({ key, label }) => (
+            <NumberField
+              key={key}
+              label={label}
+              value={currency[key]}
+              onChange={(e) => setCoin(key, num(e.target.value))}
+            />
+          ))}
+        </div>
       </Panel>
 
       {/* Spells editor */}
