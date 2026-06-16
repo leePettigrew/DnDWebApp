@@ -8,10 +8,13 @@ import type {
   Note,
   RollHistoryEntry,
   RollPreset,
+  RollResult,
+  RollSpec,
   SessionLog,
   StatBlock,
 } from "@/lib/domain/types";
 import type { ID } from "@/lib/domain/ids";
+import type { CampaignSummary, PresenceUser, Role } from "@shared/protocol";
 
 /**
  * ===========================================================================
@@ -92,6 +95,74 @@ export interface SessionController {
   subscribe(listener: (user: CurrentUser | null) => void): Unsubscribe;
 }
 
+/** Live connection state surfaced to the UI. "local" = no server configured. */
+export type ConnectionStatus =
+  | "local"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "offline";
+
+export interface RegisterInput {
+  username: string;
+  password: string;
+  displayName?: string;
+}
+
+export interface LoginInput {
+  username: string;
+  password: string;
+}
+
+/**
+ * Auth seam. In local mode `mode === "local"` and register/login are no-ops
+ * (the user is always the local Dungeon Master). In remote mode these hit the
+ * server and update the current user, which the UI observes via `subscribe`.
+ */
+export interface AuthController extends SessionController {
+  readonly mode: "local" | "remote";
+  register(input: RegisterInput): Promise<void>;
+  login(input: LoginInput): Promise<void>;
+  logout(): Promise<void>;
+}
+
+/**
+ * Realtime/campaign-session seam. Everything here is inert in local mode
+ * (status "local", a single implicit campaign, presence = just you) so Phase 1
+ * keeps working with no server. The realtime provider implements it against the
+ * WebSocket connection.
+ */
+export interface RealtimeController {
+  getStatus(): ConnectionStatus;
+  subscribeStatus(listener: (status: ConnectionStatus) => void): Unsubscribe;
+
+  getActiveCampaign(): CampaignSummary | null;
+  getRole(): Role | null;
+  subscribeActiveCampaign(
+    listener: (campaign: CampaignSummary | null, role: Role | null) => void,
+  ): Unsubscribe;
+
+  createCampaign(input: {
+    name: string;
+    setting?: string;
+    description?: string;
+  }): Promise<CampaignSummary>;
+  joinByCode(code: string): Promise<CampaignSummary>;
+  openCampaign(campaignId: ID): Promise<void>;
+  leaveCampaign(): Promise<void>;
+
+  subscribePresence(listener: (users: PresenceUser[]) => void): Unsubscribe;
+  setTyping(context: string | null): void;
+
+  /**
+   * Make a roll. In remote mode the SERVER computes the authoritative result
+   * (anti-cheat) and broadcasts it (respecting `hidden`); the returned promise
+   * resolves with that result so the UI can animate to it. In local mode it is
+   * computed locally and appended to history.
+   */
+  roll(spec: RollSpec, opts?: { hidden?: boolean }): Promise<RollResult>;
+}
+
 /** What a given provider can actually do — lets the UI light up Phase 2 bits. */
 export interface DataProviderCapabilities {
   /** True when changes from other clients arrive without a manual refresh. */
@@ -123,5 +194,8 @@ export interface DataProvider {
   readonly rollHistory: Repository<RollHistoryEntry>;
   readonly combat: SingletonRepository<CombatState>;
 
+  /** Current user. Kept for Phase 1 back-compat; `auth` is the superset. */
   readonly session: SessionController;
+  readonly auth: AuthController;
+  readonly realtime: RealtimeController;
 }

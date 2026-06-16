@@ -1,13 +1,27 @@
-import type { CombatState, Entity } from "@/lib/domain/types";
+import type {
+  Campaign,
+  CombatState,
+  Entity,
+  RollHistoryEntry,
+  RollResult,
+  RollSpec,
+} from "@/lib/domain/types";
 import { newId, nowISO } from "@/lib/domain/ids";
 import type { ID } from "@/lib/domain/ids";
+import { rollSpec } from "@/lib/domain/dice";
+import type { CampaignSummary, PresenceUser, Role } from "@shared/protocol";
 import type { PersistenceAdapter } from "./persistence";
 import { createBrowserPersistence } from "./persistence";
 import type {
+  AuthController,
+  ConnectionStatus,
   CreateInput,
   CurrentUser,
   DataProvider,
   DataProviderCapabilities,
+  LoginInput,
+  RealtimeController,
+  RegisterInput,
   Repository,
   SessionController,
   SingletonRepository,
@@ -15,6 +29,8 @@ import type {
   UpdateInput,
 } from "./provider";
 import { buildSeedData, type SeedData } from "./seed";
+
+const LOCAL_USER: CurrentUser = { id: "local-dm", name: "Dungeon Master" };
 
 /**
  * Phase 1 DataProvider: an in-memory, observable store with a localStorage
@@ -155,17 +171,92 @@ class LocalSingleton<T> implements SingletonRepository<T> {
   }
 }
 
-/** Phase 1 session: a fixed local Dungeon Master, never changes. */
-class LocalSessionController implements SessionController {
-  private user: CurrentUser = { id: "local-dm", name: "Dungeon Master" };
+/** Phase 1 auth: a fixed local Dungeon Master. register/login are no-ops. */
+class LocalAuthController implements AuthController {
+  readonly mode = "local" as const;
 
   async getCurrentUser(): Promise<CurrentUser | null> {
-    return this.user;
+    return LOCAL_USER;
   }
 
   subscribe(listener: (user: CurrentUser | null) => void): Unsubscribe {
-    listener(this.user);
+    listener(LOCAL_USER);
     return () => {};
+  }
+
+  // No accounts in local mode — you are always the local DM.
+  async register(_input: RegisterInput): Promise<void> {}
+  async login(_input: LoginInput): Promise<void> {}
+  async logout(): Promise<void> {}
+}
+
+/** Phase 1 realtime: inert. Status "local", presence = just you, you are DM. */
+class LocalRealtimeController implements RealtimeController {
+  constructor(
+    private readonly campaigns: Repository<Campaign>,
+    private readonly rollHistory: Repository<RollHistoryEntry>,
+  ) {}
+
+  getStatus(): ConnectionStatus {
+    return "local";
+  }
+  subscribeStatus(listener: (status: ConnectionStatus) => void): Unsubscribe {
+    listener("local");
+    return () => {};
+  }
+
+  getActiveCampaign(): CampaignSummary | null {
+    return null;
+  }
+  getRole(): Role | null {
+    return "dm";
+  }
+  subscribeActiveCampaign(
+    listener: (campaign: CampaignSummary | null, role: Role | null) => void,
+  ): Unsubscribe {
+    listener(null, "dm");
+    return () => {};
+  }
+
+  async createCampaign(input: {
+    name: string;
+    setting?: string;
+    description?: string;
+  }): Promise<CampaignSummary> {
+    const campaign = await this.campaigns.create({
+      name: input.name,
+      setting: input.setting,
+      description: input.description,
+      bannerUrl: "",
+    });
+    return {
+      id: campaign.id,
+      name: campaign.name,
+      setting: campaign.setting,
+      description: campaign.description,
+      role: "dm",
+    };
+  }
+  async joinByCode(_code: string): Promise<CampaignSummary> {
+    throw new Error("Joining campaigns requires the multiplayer server.");
+  }
+  async openCampaign(_campaignId: ID): Promise<void> {}
+  async leaveCampaign(): Promise<void> {}
+
+  subscribePresence(listener: (users: PresenceUser[]) => void): Unsubscribe {
+    listener([
+      { userId: LOCAL_USER.id, name: LOCAL_USER.name, role: "dm", online: true },
+    ]);
+    return () => {};
+  }
+  setTyping(_context: string | null): void {}
+
+  async roll(spec: RollSpec): Promise<RollResult> {
+    const result = rollSpec(spec);
+    const { id: _id, ...rest } = result;
+    void _id;
+    await this.rollHistory.create({ ...rest });
+    return result;
   }
 }
 
@@ -200,7 +291,9 @@ class LocalDataProvider implements DataProvider {
   readonly rollPresets;
   readonly rollHistory;
   readonly combat;
-  readonly session = new LocalSessionController();
+  readonly session: SessionController;
+  readonly auth: AuthController;
+  readonly realtime: RealtimeController;
 
   constructor(options: LocalProviderOptions = {}) {
     const persistence = options.persistence ?? createBrowserPersistence();
@@ -216,6 +309,11 @@ class LocalDataProvider implements DataProvider {
     this.rollPresets = new LocalCollection("rollPresets", persistence, seed.rollPresets);
     this.rollHistory = new LocalCollection("rollHistory", persistence, []);
     this.combat = new LocalSingleton("combat", persistence, emptyCombatState);
+
+    const auth = new LocalAuthController();
+    this.auth = auth;
+    this.session = auth;
+    this.realtime = new LocalRealtimeController(this.campaigns, this.rollHistory);
   }
 
   async init(): Promise<void> {

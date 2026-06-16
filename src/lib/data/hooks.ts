@@ -2,9 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Entity } from "@/lib/domain/types";
+import type { CampaignSummary, PresenceUser, Role } from "@shared/protocol";
 import type {
+  AuthController,
+  ConnectionStatus,
   CreateInput,
   CurrentUser,
+  RealtimeController,
   Repository,
   SingletonRepository,
   UpdateInput,
@@ -106,4 +110,50 @@ export function useCurrentUser(): CurrentUser | null {
   const [user, setUser] = useState<CurrentUser | null>(null);
   useEffect(() => provider.session.subscribe(setUser), [provider]);
   return user;
+}
+
+// --- Multiplayer surfaces (inert in local mode) ----------------------------
+
+export const useAuth = (): AuthController => useDataProvider().auth;
+export const useRealtime = (): RealtimeController => useDataProvider().realtime;
+
+export function useConnectionStatus(): ConnectionStatus {
+  const provider = useDataProvider();
+  const [status, setStatus] = useState<ConnectionStatus>(() =>
+    provider.realtime.getStatus(),
+  );
+  useEffect(
+    () => provider.realtime.subscribeStatus(setStatus),
+    [provider],
+  );
+  return status;
+}
+
+export function useActiveCampaign(): {
+  campaign: CampaignSummary | null;
+  role: Role | null;
+} {
+  const provider = useDataProvider();
+  const [state, setState] = useState<{
+    campaign: CampaignSummary | null;
+    role: Role | null;
+  }>(() => ({
+    campaign: provider.realtime.getActiveCampaign(),
+    role: provider.realtime.getRole(),
+  }));
+  useEffect(
+    () =>
+      provider.realtime.subscribeActiveCampaign((campaign, role) =>
+        setState({ campaign, role }),
+      ),
+    [provider],
+  );
+  return state;
+}
+
+export function usePresence(): PresenceUser[] {
+  const provider = useDataProvider();
+  const [users, setUsers] = useState<PresenceUser[]>([]);
+  useEffect(() => provider.realtime.subscribePresence(setUsers), [provider]);
+  return users;
 }
