@@ -114,6 +114,10 @@ const message = z.discriminatedUnion("type", [
     type: z.literal("presence:typing"),
     context: z.string().max(120).nullable(),
   }),
+  z.object({
+    type: z.literal("chat:send"),
+    body: z.string().min(1).max(2000),
+  }),
   z.object({ type: z.literal("ping") }),
 ]);
 

@@ -13,6 +13,7 @@ import {
 } from "@/lib/data/hooks";
 import { SessionPanel } from "@/components/multiplayer/SessionPanel";
 import { ConnectionPill } from "@/components/multiplayer/ConnectionPill";
+import { ChatWidget } from "@/components/multiplayer/ChatWidget";
 import { ThemeToggle } from "./ThemeToggle";
 import { NAV_ITEMS } from "./nav-items";
 
@@ -181,6 +182,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           {children}
         </div>
       </main>
+
+      <ChatWidget />
     </div>
   );
 }

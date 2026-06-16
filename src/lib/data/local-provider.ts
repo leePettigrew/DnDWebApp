@@ -9,7 +9,12 @@ import type {
 import { newId, nowISO } from "@/lib/domain/ids";
 import type { ID } from "@/lib/domain/ids";
 import { rollSpec } from "@/lib/domain/dice";
-import type { CampaignSummary, PresenceUser, Role } from "@shared/protocol";
+import type {
+  CampaignSummary,
+  ChatMessage,
+  PresenceUser,
+  Role,
+} from "@shared/protocol";
 import type { PersistenceAdapter } from "./persistence";
 import { createBrowserPersistence } from "./persistence";
 import type {
@@ -282,6 +287,15 @@ class LocalRealtimeController implements RealtimeController {
     return () => {};
   }
   setTyping(_context: string | null): void {}
+
+  getChat(): ChatMessage[] {
+    return [];
+  }
+  subscribeChat(listener: (messages: ChatMessage[]) => void): Unsubscribe {
+    listener([]);
+    return () => {};
+  }
+  sendChat(_body: string): void {}
 
   async roll(spec: RollSpec): Promise<RollResult> {
     const result = rollSpec(spec);

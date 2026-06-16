@@ -19,6 +19,7 @@ import type {
   AuthResponse,
   CampaignSnapshot,
   CampaignSummary,
+  ChatMessage,
   ClientMessage,
   PresenceUser,
   Role,
@@ -312,6 +313,8 @@ export class RealtimeDataProvider implements DataProvider {
   private campaignListeners = new Set<(c: CampaignSummary[]) => void>();
   private presence: PresenceUser[] = [];
   private presenceListeners = new Set<(p: PresenceUser[]) => void>();
+  private chat: ChatMessage[] = [];
+  private chatListeners = new Set<(m: ChatMessage[]) => void>();
   private statusListeners = new Set<(s: ConnectionStatus) => void>();
   private pendingCampaign = new Map<
     string,
@@ -396,6 +399,16 @@ export class RealtimeDataProvider implements DataProvider {
       setTyping: (context) => {
         this.conn.send({ type: "presence:typing", context });
       },
+      getChat: () => this.chat,
+      subscribeChat: (l) => {
+        this.chatListeners.add(l);
+        l(this.chat);
+        return () => this.chatListeners.delete(l);
+      },
+      sendChat: (body) => {
+        const trimmed = body.trim();
+        if (trimmed) this.conn.send({ type: "chat:send", body: trimmed });
+      },
       roll: (spec, opts) => this.roll(spec, opts),
     };
 
@@ -442,6 +455,8 @@ export class RealtimeDataProvider implements DataProvider {
     this.role = null;
     this.setScopedMode("local");
     this.activeListeners.forEach((fn) => fn(null, null));
+    this.chat = [];
+    this.chatListeners.forEach((fn) => fn([]));
   }
 
   // --- auth ----------------------------------------------------------------
@@ -624,6 +639,11 @@ export class RealtimeDataProvider implements DataProvider {
         this.presenceListeners.forEach((fn) => fn(msg.users));
         break;
       }
+      case "chat:message": {
+        this.chat = [...this.chat, msg.message].slice(-200);
+        this.chatListeners.forEach((fn) => fn(this.chat));
+        break;
+      }
       case "pong":
         break;
     }
@@ -670,6 +690,8 @@ export class RealtimeDataProvider implements DataProvider {
     this.combat.setLive(snap.combat);
     this.presence = snap.presence;
     this.presenceListeners.forEach((fn) => fn(snap.presence));
+    this.chat = snap.chat;
+    this.chatListeners.forEach((fn) => fn(snap.chat));
   }
 }
 

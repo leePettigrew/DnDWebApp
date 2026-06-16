@@ -4,11 +4,12 @@ import type {
   Entity,
   RollHistoryEntry,
 } from "../../shared/domain";
-import type { ScopedCollection } from "../../shared/protocol";
+import type { ChatMessage, ScopedCollection } from "../../shared/protocol";
 import { SCOPED_TABLES } from "./db";
 import type {
   CampaignRecord,
   CampaignRepository,
+  ChatRepository,
   CombatRepository,
   EntityRepository,
   MembershipRecord,
@@ -246,6 +247,31 @@ function createRollLogRepository(db: DatabaseSync): RollLogRepository {
   };
 }
 
+function createChatRepository(db: DatabaseSync): ChatRepository {
+  const insert = db.prepare(
+    `INSERT INTO chat_messages (id, campaign_id, user_id, data, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+  const listStmt = db.prepare(
+    `SELECT data FROM chat_messages WHERE campaign_id = ? ORDER BY created_at DESC LIMIT ?`,
+  );
+  return {
+    append(message) {
+      insert.run(
+        message.id,
+        message.campaignId,
+        message.userId,
+        JSON.stringify(message),
+        message.createdAt,
+      );
+    },
+    list(campaignId, limit = 100) {
+      const rows = listStmt.all(campaignId, limit) as Row[];
+      return rows.map((r) => JSON.parse(str(r.data)) as ChatMessage).reverse();
+    },
+  };
+}
+
 export function createSqliteRepositories(db: DatabaseSync): Repositories {
   const entities = {} as Record<ScopedCollection, EntityRepository>;
   for (const [collection, table] of Object.entries(SCOPED_TABLES)) {
@@ -258,5 +284,6 @@ export function createSqliteRepositories(db: DatabaseSync): Repositories {
     entities,
     combat: createCombatRepository(db),
     rollLog: createRollLogRepository(db),
+    chat: createChatRepository(db),
   };
 }

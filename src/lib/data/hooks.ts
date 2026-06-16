@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Entity } from "@/lib/domain/types";
-import type { CampaignSummary, PresenceUser, Role } from "@shared/protocol";
+import type {
+  CampaignSummary,
+  ChatMessage,
+  PresenceUser,
+  Role,
+} from "@shared/protocol";
 import type {
   AuthController,
   ConnectionStatus,
@@ -158,6 +163,23 @@ export function usePresence(): PresenceUser[] {
   const [users, setUsers] = useState<PresenceUser[]>([]);
   useEffect(() => provider.realtime.subscribePresence(setUsers), [provider]);
   return users;
+}
+
+/** Campaign chat — live messages + a send function (no-op in solo mode). */
+export function useChat(): {
+  messages: ChatMessage[];
+  send: (body: string) => void;
+} {
+  const provider = useDataProvider();
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    provider.realtime.getChat(),
+  );
+  useEffect(() => provider.realtime.subscribeChat(setMessages), [provider]);
+  const send = useCallback(
+    (body: string) => provider.realtime.sendChat(body),
+    [provider],
+  );
+  return { messages, send };
 }
 
 /** The campaigns the current user is a member of (with role + DM join code). */

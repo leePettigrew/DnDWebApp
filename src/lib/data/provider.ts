@@ -14,7 +14,12 @@ import type {
   StatBlock,
 } from "@/lib/domain/types";
 import type { ID } from "@/lib/domain/ids";
-import type { CampaignSummary, PresenceUser, Role } from "@shared/protocol";
+import type {
+  CampaignSummary,
+  ChatMessage,
+  PresenceUser,
+  Role,
+} from "@shared/protocol";
 
 /**
  * ===========================================================================
@@ -159,6 +164,11 @@ export interface RealtimeController {
 
   subscribePresence(listener: (users: PresenceUser[]) => void): Unsubscribe;
   setTyping(context: string | null): void;
+
+  /** Campaign chat (multiplayer only; empty/no-op in local mode). */
+  getChat(): ChatMessage[];
+  subscribeChat(listener: (messages: ChatMessage[]) => void): Unsubscribe;
+  sendChat(body: string): void;
 
   /**
    * Make a roll. In remote mode the SERVER computes the authoritative result

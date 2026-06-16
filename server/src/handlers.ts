@@ -8,6 +8,8 @@ import type {
   CampaignJoinMessage,
   CampaignSnapshot,
   CampaignSummary,
+  ChatMessage,
+  ChatSendMessage,
   ClientMessage,
   DiceRollMessage,
   EntityCreateMessage,
@@ -110,6 +112,8 @@ export class ClientSession {
         return this.onDiceRoll(msg);
       case "presence:typing":
         return this.onTyping(msg.context);
+      case "chat:send":
+        return this.onChat(msg);
     }
   }
 
@@ -267,6 +271,7 @@ export class ClientSession {
       combat: this.repos.combat.get(cid) ?? emptyCombat(),
       rollLog: this.repos.rollLog.list(cid, { includeHidden: role === "dm" }),
       presence: this.rooms.get(cid).presence(),
+      chat: this.repos.chat.list(cid),
     };
   }
 
@@ -429,6 +434,24 @@ export class ClientSession {
     // Hidden rolls go ONLY to DM sockets — they can never leak to players.
     if (hidden) room.broadcast(message, (m) => m.role === "dm");
     else room.broadcast(message);
+  }
+
+  // --- chat ----------------------------------------------------------------
+
+  private onChat(msg: ChatSendMessage): void {
+    if (!this.requireCampaign()) return;
+    const body = msg.body.trim();
+    if (!body) return;
+    const message: ChatMessage = {
+      id: newId(),
+      campaignId: this.campaignId!,
+      userId: this.userId!,
+      name: this.displayName,
+      body: body.slice(0, 2000),
+      createdAt: nowISO(),
+    };
+    this.repos.chat.append(message);
+    this.rooms.get(this.campaignId!).broadcast({ type: "chat:message", message });
   }
 
   // --- presence ------------------------------------------------------------

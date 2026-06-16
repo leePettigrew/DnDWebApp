@@ -1,5 +1,9 @@
 import type { CombatState, Entity, RollHistoryEntry } from "../../shared/domain";
-import type { Role, ScopedCollection } from "../../shared/protocol";
+import type {
+  ChatMessage,
+  Role,
+  ScopedCollection,
+} from "../../shared/protocol";
 
 /**
  * The persistence abstraction. App logic (rooms, handlers) depends ONLY on
@@ -79,6 +83,12 @@ export interface RollLogRepository {
   ): RollHistoryEntry[];
 }
 
+export interface ChatRepository {
+  append(message: ChatMessage): void;
+  /** Most recent messages, chronological. */
+  list(campaignId: string, limit?: number): ChatMessage[];
+}
+
 export interface Repositories {
   users: UserRepository;
   campaigns: CampaignRepository;
@@ -86,4 +96,5 @@ export interface Repositories {
   entities: Record<ScopedCollection, EntityRepository>;
   combat: CombatRepository;
   rollLog: RollLogRepository;
+  chat: ChatRepository;
 }

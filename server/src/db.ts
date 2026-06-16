@@ -75,6 +75,15 @@ function applySchema(db: DatabaseSync): void {
       created_at        TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_roll_log_campaign ON roll_log(campaign_id);
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id          TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      user_id     TEXT,
+      data        TEXT NOT NULL,
+      created_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_campaign ON chat_messages(campaign_id);
   `);
 
   for (const table of Object.values(SCOPED_TABLES)) {

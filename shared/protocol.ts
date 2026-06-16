@@ -11,7 +11,7 @@ import type {
   SessionLog,
   StatBlock,
 } from "./domain";
-import type { ID } from "./ids";
+import type { ID, ISODateString } from "./ids";
 
 /**
  * ============================================================================
@@ -58,6 +58,15 @@ export interface PresenceUser {
   typing?: string | null;
 }
 
+export interface ChatMessage {
+  id: ID;
+  campaignId: ID;
+  userId: ID;
+  name: string;
+  body: string;
+  createdAt: ISODateString;
+}
+
 /** Maps each syncable scoped collection to its entity type (client typing). */
 export interface ScopedEntityMap {
   characters: Character;
@@ -93,6 +102,7 @@ export interface CampaignSnapshot {
   combat: CombatState;
   rollLog: RollHistoryEntry[];
   presence: PresenceUser[];
+  chat: ChatMessage[];
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +206,10 @@ export interface PresenceTypingMessage {
   type: "presence:typing";
   context: string | null;
 }
+export interface ChatSendMessage {
+  type: "chat:send";
+  body: string;
+}
 export interface PingMessage {
   type: "ping";
 }
@@ -213,6 +227,7 @@ export type ClientMessage =
   | CombatUpdateMessage
   | DiceRollMessage
   | PresenceTypingMessage
+  | ChatSendMessage
   | PingMessage;
 
 export type ClientMessageType = ClientMessage["type"];
@@ -268,6 +283,10 @@ export interface PresenceStateMessage {
   type: "presence:state";
   users: PresenceUser[];
 }
+export interface ChatMessageMessage {
+  type: "chat:message";
+  message: ChatMessage;
+}
 export interface PongMessage {
   type: "pong";
 }
@@ -283,6 +302,7 @@ export type ServerMessage =
   | CombatChangedMessage
   | DiceRolledMessage
   | PresenceStateMessage
+  | ChatMessageMessage
   | PongMessage;
 
 export type ServerMessageType = ServerMessage["type"];
