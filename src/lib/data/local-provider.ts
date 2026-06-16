@@ -1,4 +1,5 @@
 import type {
+  BattleMap,
   Campaign,
   CombatState,
   Entity,
@@ -25,6 +26,7 @@ import type {
   DataProvider,
   DataProviderCapabilities,
   LoginInput,
+  MapPing,
   RealtimeController,
   RegisterInput,
   Repository,
@@ -199,9 +201,12 @@ class LocalAuthController implements AuthController {
 class LocalRealtimeController implements RealtimeController {
   private summaries: CampaignSummary[] = [];
 
+  private pingListeners = new Set<(p: MapPing) => void>();
+
   constructor(
     private readonly campaigns: Repository<Campaign>,
     private readonly rollHistory: Repository<RollHistoryEntry>,
+    private readonly maps: Repository<BattleMap>,
   ) {
     // Mirror local campaigns as DM memberships for any UI that asks.
     this.campaigns.subscribe((items) => {
@@ -288,6 +293,33 @@ class LocalRealtimeController implements RealtimeController {
   }
   setTyping(_context: string | null): void {}
 
+  moveToken(mapId: string, tokenId: string, x: number, y: number): void {
+    void (async () => {
+      const map = await this.maps.get(mapId);
+      if (!map?.tokens) return;
+      await this.maps.update(mapId, {
+        tokens: map.tokens.map((t) =>
+          t.id === tokenId ? { ...t, x, y } : t,
+        ),
+      });
+    })();
+  }
+  ping(mapId: string, x: number, y: number): void {
+    const ping: MapPing = {
+      id: newId(),
+      mapId,
+      x,
+      y,
+      by: LOCAL_USER.name,
+      color: "#E6C772",
+    };
+    this.pingListeners.forEach((l) => l(ping));
+  }
+  subscribePings(listener: (p: MapPing) => void): Unsubscribe {
+    this.pingListeners.add(listener);
+    return () => this.pingListeners.delete(listener);
+  }
+
   getChat(): ChatMessage[] {
     return [];
   }
@@ -359,7 +391,11 @@ class LocalDataProvider implements DataProvider {
     const auth = new LocalAuthController();
     this.auth = auth;
     this.session = auth;
-    this.realtime = new LocalRealtimeController(this.campaigns, this.rollHistory);
+    this.realtime = new LocalRealtimeController(
+      this.campaigns,
+      this.rollHistory,
+      this.maps,
+    );
   }
 
   async init(): Promise<void> {

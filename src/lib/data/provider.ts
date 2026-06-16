@@ -100,6 +100,16 @@ export interface SessionController {
   subscribe(listener: (user: CurrentUser | null) => void): Unsubscribe;
 }
 
+/** A transient map ping delivered to subscribers. */
+export interface MapPing {
+  id: ID;
+  mapId: ID;
+  x: number;
+  y: number;
+  by: string;
+  color: string;
+}
+
 /** Live connection state surfaced to the UI. "local" = no server configured. */
 export type ConnectionStatus =
   | "local"
@@ -164,6 +174,12 @@ export interface RealtimeController {
 
   subscribePresence(listener: (users: PresenceUser[]) => void): Unsubscribe;
   setTyping(context: string | null): void;
+
+  /** Move a map token (DM: any; player: only their own). Optimistic + synced. */
+  moveToken(mapId: ID, tokenId: ID, x: number, y: number): void;
+  /** Drop a transient ping on the map for the whole table. */
+  ping(mapId: ID, x: number, y: number): void;
+  subscribePings(listener: (ping: MapPing) => void): Unsubscribe;
 
   /** Campaign chat (multiplayer only; empty/no-op in local mode). */
   getChat(): ChatMessage[];

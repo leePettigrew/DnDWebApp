@@ -36,6 +36,7 @@ import type {
   DataProvider,
   DataProviderCapabilities,
   LoginInput,
+  MapPing,
   RealtimeController,
   RegisterInput,
   Repository,
@@ -138,6 +139,13 @@ class SwitchableCollection<T extends Entity> implements Repository<T> {
   }
   appendLive(item: T): void {
     this.live.set(item.id, item);
+    if (this.mode === "live") this.emit();
+  }
+  /** Patch a single live item in place (used for granular token moves). */
+  patchLive(id: ID, updater: (item: T) => T): void {
+    const existing = this.live.get(id);
+    if (!existing) return;
+    this.live.set(id, updater(existing));
     if (this.mode === "live") this.emit();
   }
 
@@ -315,6 +323,7 @@ export class RealtimeDataProvider implements DataProvider {
   private presenceListeners = new Set<(p: PresenceUser[]) => void>();
   private chat: ChatMessage[] = [];
   private chatListeners = new Set<(m: ChatMessage[]) => void>();
+  private pingListeners = new Set<(p: MapPing) => void>();
   private statusListeners = new Set<(s: ConnectionStatus) => void>();
   private pendingCampaign = new Map<
     string,
@@ -399,6 +408,37 @@ export class RealtimeDataProvider implements DataProvider {
       setTyping: (context) => {
         this.conn.send({ type: "presence:typing", context });
       },
+      moveToken: (mapId, tokenId, x, y) => {
+        if (this.activeCampaignId && this.conn.isOpen()) {
+          this.maps.patchLive(mapId, (m) => ({
+            ...m,
+            tokens: m.tokens?.map((t) =>
+              t.id === tokenId ? { ...t, x, y } : t,
+            ),
+          }));
+          this.conn.send({ type: "map:token:move", mapId, tokenId, x, y });
+        } else {
+          this.local.realtime.moveToken(mapId, tokenId, x, y);
+        }
+      },
+      ping: (mapId, x, y) => {
+        if (this.activeCampaignId && this.conn.isOpen()) {
+          this.conn.send({ type: "map:ping", mapId, x, y });
+        } else {
+          this.emitPing({
+            id: newId(),
+            mapId,
+            x,
+            y,
+            by: this.currentUser?.name ?? "You",
+            color: "#E6C772",
+          });
+        }
+      },
+      subscribePings: (l) => {
+        this.pingListeners.add(l);
+        return () => this.pingListeners.delete(l);
+      },
       getChat: () => this.chat,
       subscribeChat: (l) => {
         this.chatListeners.add(l);
@@ -435,6 +475,9 @@ export class RealtimeDataProvider implements DataProvider {
   private emitStatus(): void {
     const s = this.conn.status as ConnectionStatus;
     this.statusListeners.forEach((fn) => fn(s));
+  }
+  private emitPing(ping: MapPing): void {
+    this.pingListeners.forEach((fn) => fn(ping));
   }
 
   private setScopedMode(mode: Mode): void {
@@ -642,6 +685,26 @@ export class RealtimeDataProvider implements DataProvider {
       case "chat:message": {
         this.chat = [...this.chat, msg.message].slice(-200);
         this.chatListeners.forEach((fn) => fn(this.chat));
+        break;
+      }
+      case "map:token:moved": {
+        this.maps.patchLive(msg.mapId, (m) => ({
+          ...m,
+          tokens: m.tokens?.map((t) =>
+            t.id === msg.tokenId ? { ...t, x: msg.x, y: msg.y } : t,
+          ),
+        }));
+        break;
+      }
+      case "map:pinged": {
+        this.emitPing({
+          id: newId(),
+          mapId: msg.mapId,
+          x: msg.x,
+          y: msg.y,
+          by: msg.by,
+          color: msg.color,
+        });
         break;
       }
       case "pong":

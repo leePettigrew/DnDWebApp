@@ -13,6 +13,7 @@ import type {
   ConnectionStatus,
   CreateInput,
   CurrentUser,
+  MapPing,
   RealtimeController,
   Repository,
   SingletonRepository,
@@ -163,6 +164,24 @@ export function usePresence(): PresenceUser[] {
   const [users, setUsers] = useState<PresenceUser[]>([]);
   useEffect(() => provider.realtime.subscribePresence(setUsers), [provider]);
   return users;
+}
+
+/** Transient map pings (auto-expire after a few seconds). */
+export function useMapPings(): MapPing[] {
+  const provider = useDataProvider();
+  const [pings, setPings] = useState<MapPing[]>([]);
+  useEffect(
+    () =>
+      provider.realtime.subscribePings((p) => {
+        setPings((cur) => [...cur, p]);
+        window.setTimeout(
+          () => setPings((cur) => cur.filter((x) => x.id !== p.id)),
+          2800,
+        );
+      }),
+    [provider],
+  );
+  return pings;
 }
 
 /** Campaign chat — live messages + a send function (no-op in solo mode). */
