@@ -456,7 +456,7 @@ export function DiceArena() {
       <div className="relative">
         <div
           ref={containerRef}
-          className="relative h-80 w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather"
+          className="relative h-[26rem] w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather sm:h-[30rem] lg:h-[34rem]"
         />
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-end p-3">
           {phase === "settled" && result !== null ? (

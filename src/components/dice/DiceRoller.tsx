@@ -6,7 +6,6 @@ import { Button, buttonClasses } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { TextField } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
-import { EmptyState } from "@/components/ui/EmptyState";
 import {
   D20Icon,
   MinusIcon,
@@ -29,7 +28,6 @@ import {
   useActiveCampaign,
   useDataProvider,
   useRealtime,
-  useRollHistory,
   useRollPresets,
 } from "@/lib/data/hooks";
 
@@ -59,7 +57,6 @@ export function DiceRoller() {
   const reduced = useReducedMotion();
   const { items: presets, create: createPreset, remove: removePreset } =
     useRollPresets();
-  const { items: history, remove: removeRoll } = useRollHistory();
   const realtime = useRealtime();
   const { capabilities } = useDataProvider();
   const { role } = useActiveCampaign();
@@ -149,9 +146,6 @@ export function DiceRoller() {
   };
 
   const displayRolls = result ? toDisplayRolls(result.rolls) : [];
-  const sortedHistory = [...history]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 25);
 
   return (
     <div className="grid gap-6 lg:grid-cols-5">
@@ -452,81 +446,6 @@ export function DiceRoller() {
                   >
                     <TrashIcon className="h-4 w-4" />
                   </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-
-        <Panel
-          title="Roll History"
-          eyebrow={capabilities.multiUser ? "Shared campaign log" : "The record"}
-          action={
-            history.length > 0 && !capabilities.multiUser ? (
-              <button
-                type="button"
-                onClick={() => history.forEach((h) => removeRoll(h.id))}
-                className="text-xs font-semibold text-ink-faint hover:text-oxblood"
-              >
-                Clear
-              </button>
-            ) : undefined
-          }
-        >
-          {sortedHistory.length === 0 ? (
-            <EmptyState
-              icon={<D20Icon />}
-              title="No rolls yet"
-              description="Your rolls will be chronicled here."
-            />
-          ) : (
-            <ul className="space-y-1.5">
-              {sortedHistory.map((h) => (
-                <li
-                  key={h.id}
-                  className="flex items-center justify-between gap-3 rounded-md border border-parchment-400/50 bg-parchment-100/60 px-3 py-2"
-                >
-                  <span className="min-w-0">
-                    <span className="flex items-center gap-1.5 text-sm text-ink">
-                      {h.rolledByName && (
-                        <span className="shrink-0 font-semibold text-brass-dark">
-                          {h.rolledByName}
-                        </span>
-                      )}
-                      <span className="truncate">{h.label ?? h.notation}</span>
-                      {h.hidden && (
-                        <span
-                          title="Hidden roll — DM only"
-                          className="shrink-0 rounded bg-leather/85 px-1 text-[0.55rem] font-bold uppercase tracking-wide text-parchment-100"
-                        >
-                          Hidden
-                        </span>
-                      )}
-                      {h.physical && (
-                        <span
-                          title="Hand-thrown in the 3D dice arena"
-                          className="shrink-0 rounded bg-brass/20 px-1 text-[0.55rem] font-bold uppercase tracking-wide text-brass-dark"
-                        >
-                          Thrown
-                        </span>
-                      )}
-                    </span>
-                    <span className="numerals block text-xs text-ink-faint">
-                      {h.notation}
-                    </span>
-                  </span>
-                  <span
-                    className={cn(
-                      "numerals shrink-0 font-display text-xl font-bold",
-                      h.isCrit
-                        ? "text-brass-dark"
-                        : h.isFumble
-                          ? "text-oxblood"
-                          : "text-ink",
-                    )}
-                  >
-                    {h.total}
-                  </span>
                 </li>
               ))}
             </ul>
