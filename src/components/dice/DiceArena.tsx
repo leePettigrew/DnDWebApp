@@ -239,6 +239,23 @@ export function DiceArena() {
       }
 
       function launch(vx: number, vz: number, vy: number) {
+        if (reducedRef.current) {
+          // Reduced motion: skip the tumble, settle on a face instantly.
+          const value = Math.floor(Math.random() * 20) + 1;
+          const fc = faces.find((f) => f.value === value) ?? faces[0];
+          die.quaternion.copy(
+            new THREE.Quaternion().setFromUnitVectors(fc.normal, up),
+          );
+          die.position.set(0, RADIUS, 0);
+          vel.set(0, 0, 0);
+          angVel.set(0, 0, 0);
+          simulating = false;
+          settling = false;
+          setResult(value);
+          setPhase("settled");
+          realtime.logPhysicalRoll(value, "Physical toss");
+          return;
+        }
         vel.set(vx, vy, vz);
         angVel.set(
           (Math.random() - 0.5) * 18,
