@@ -3,6 +3,7 @@ import type {
   AbilityScores,
   Character,
   Currency,
+  DeathSaves,
   InventoryItem,
   ProficiencyLevel,
   SkillDef,
@@ -170,4 +171,47 @@ export function totalWealthGp(character: Character): number {
 
 export function attunedCount(character: Character): number {
   return character.inventory.filter((i) => i.attuned).length;
+}
+
+// --- Rest, hit dice, exhaustion & death saves ------------------------------
+
+export const MAX_EXHAUSTION = 6;
+
+/** Class hit-die size (e.g. 8 → d8). Defaults to d8. */
+export function hitDieSize(character: Character): number {
+  return character.hitDieSize ?? 8;
+}
+
+/** Hit dice still available to spend on a short rest. */
+export function hitDiceRemaining(character: Character): number {
+  return Math.max(0, character.level - (character.hitDiceUsed ?? 0));
+}
+
+/** Fresh, all-zero death saves. */
+export function emptyDeathSaves(): DeathSaves {
+  return { successes: 0, failures: 0 };
+}
+
+/**
+ * The patch a long rest applies: full HP, all spell slots restored, half the
+ * spent hit dice regained (min 1), exhaustion reduced by one, and temp HP,
+ * concentration & death saves cleared. Empty string (not undefined) clears
+ * `concentratingOn` so the change survives JSON to the server.
+ */
+export function longRestPatch(character: Character): Partial<Character> {
+  const regain = Math.max(1, Math.floor(character.level / 2));
+  const hitDiceUsed = Math.max(0, (character.hitDiceUsed ?? 0) - regain);
+  const spellSlots = (character.spellSlots ?? []).map((s) => ({
+    ...s,
+    used: 0,
+  }));
+  return {
+    currentHp: character.maxHp,
+    tempHp: 0,
+    hitDiceUsed,
+    spellSlots,
+    exhaustion: Math.max(0, (character.exhaustion ?? 0) - 1),
+    concentratingOn: "",
+    deathSaves: emptyDeathSaves(),
+  };
 }

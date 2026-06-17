@@ -175,6 +175,30 @@ export interface Spell {
   description?: string;
 }
 
+/** Expendable spell slots for one spell level (casters only). */
+export interface SpellSlotLevel {
+  level: number; // 1..9
+  max: number;
+  used: number;
+}
+
+/** Death saving throws, tracked while a creature is at 0 HP. */
+export interface DeathSaves {
+  successes: number; // 0..3
+  failures: number; // 0..3
+}
+
+/** The 5e exhaustion ladder; index = exhaustion level (0 = none, 6 = death). */
+export const EXHAUSTION_EFFECTS: string[] = [
+  "No exhaustion",
+  "Disadvantage on ability checks",
+  "Speed halved",
+  "Disadvantage on attack rolls & saving throws",
+  "Hit point maximum halved",
+  "Speed reduced to 0",
+  "Death",
+];
+
 export interface Feature {
   id: ID;
   name: string;
@@ -206,6 +230,14 @@ export interface Character extends Entity {
   currentHp: number;
   tempHp: number;
   hitDice?: string;
+  /** Size of the class hit die (e.g. 8 for d8). Defaults to 8 when absent. */
+  hitDieSize?: number;
+  /** Hit dice already spent on short rests (regained on a long rest). */
+  hitDiceUsed?: number;
+  /** Death saving throws — used when currentHp hits 0. */
+  deathSaves?: DeathSaves;
+  /** Exhaustion level 0..6 (see EXHAUSTION_EFFECTS). */
+  exhaustion?: number;
 
   armorClass: number;
   speed: number;
@@ -214,6 +246,10 @@ export interface Character extends Entity {
 
   spellcastingAbility?: AbilityKey;
   spells: Spell[];
+  /** Expendable spell slots by level (casters only). */
+  spellSlots?: SpellSlotLevel[];
+  /** The spell currently being concentrated on, if any. */
+  concentratingOn?: string;
 
   inventory: InventoryItem[];
   /** Coin purse. Optional for back-compat; treated as all-zero when absent. */
@@ -327,6 +363,8 @@ export interface Combatant {
   armorClass: number;
   conditions: ConditionKey[];
   isPC: boolean;
+  /** Death saving throws, tracked while the combatant is at 0 HP. */
+  deathSaves?: DeathSaves;
   /** Optional link back to the source Character or StatBlock. */
   sourceId?: ID;
   notes?: string;

@@ -40,6 +40,9 @@ const combatant = z.object({
   armorClass: z.number(),
   conditions: z.array(z.string()),
   isPC: z.boolean(),
+  deathSaves: z
+    .object({ successes: z.number().int(), failures: z.number().int() })
+    .optional(),
   sourceId: z.string().optional(),
   notes: z.string().optional(),
 });
