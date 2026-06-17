@@ -355,7 +355,10 @@ export function DiceTray3D({
         });
 
         // Auto-fit the pool into the camera's view: small pools scale UP to
-        // fill the tray (capped) and big pools shrink to fit.
+        // fill the tray (capped) and big pools shrink to fit. Measure at scale
+        // 1 so the result doesn't compound with the previous throw's scale.
+        root.scale.setScalar(1);
+        root.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(root);
         const s = new THREE.Vector3();
         box.getSize(s);
