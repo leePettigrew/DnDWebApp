@@ -16,6 +16,7 @@ import { SessionPanel } from "@/components/multiplayer/SessionPanel";
 import { ConnectionPill } from "@/components/multiplayer/ConnectionPill";
 import { ChatWidget } from "@/components/multiplayer/ChatWidget";
 import { HandoutOverlay } from "@/components/dm/HandoutOverlay";
+import { CustomContentProvider } from "@/lib/content/context";
 import { ThemeToggle } from "./ThemeToggle";
 import { NAV_ITEMS } from "./nav-items";
 
@@ -186,7 +187,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <main id="main" className="min-w-0 flex-1">
         <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
-          {children}
+          <CustomContentProvider>{children}</CustomContentProvider>
         </div>
       </main>
 

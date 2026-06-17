@@ -5,18 +5,26 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/components/ui/cn";
-import { SparkIcon, HelmIcon, BookIcon, ScrollIcon } from "@/components/ui/icons";
+import {
+  SparkIcon,
+  HelmIcon,
+  BookIcon,
+  ScrollIcon,
+  FeatherIcon,
+} from "@/components/ui/icons";
 import { usePermissions } from "@/lib/data/hooks";
 import { TreasureGenerator } from "@/components/dm/TreasureGenerator";
 import { NpcGenerator } from "@/components/dm/NpcGenerator";
 import { DmScreen } from "@/components/dm/DmScreen";
 import { HandoutComposer } from "@/components/dm/HandoutComposer";
+import { HomebrewEditor } from "@/components/dm/HomebrewEditor";
 
-type Tab = "treasure" | "npcs" | "handouts" | "screen";
+type Tab = "treasure" | "npcs" | "homebrew" | "handouts" | "screen";
 
 const TABS: { key: Tab; label: string; icon: typeof SparkIcon }[] = [
   { key: "treasure", label: "Treasure", icon: SparkIcon },
   { key: "npcs", label: "NPC Forge", icon: HelmIcon },
+  { key: "homebrew", label: "Homebrew", icon: FeatherIcon },
   { key: "handouts", label: "Handouts", icon: ScrollIcon },
   { key: "screen", label: "DM Screen", icon: BookIcon },
 ];
@@ -75,6 +83,7 @@ export default function DmPage() {
 
       {tab === "treasure" && <TreasureGenerator />}
       {tab === "npcs" && <NpcGenerator />}
+      {tab === "homebrew" && <HomebrewEditor />}
       {tab === "handouts" && <HandoutComposer />}
       {tab === "screen" && <DmScreen />}
     </div>
