@@ -26,7 +26,10 @@ import {
   itemToInventoryItem,
   monsterToStatBlockInput,
   spellToCharacterSpell,
+  type CompendiumItem,
+  type CompendiumSpell,
 } from "@/lib/compendium";
+import { useCustomContent } from "@/lib/content/context";
 
 type Tab = "spells" | "items" | "monsters";
 
@@ -55,6 +58,7 @@ export function CompendiumBrowser() {
   // Only offer characters the user is actually allowed to edit.
   const characters = allCharacters.filter((c) => perms.canEdit("characters", c));
   const canAddMonsters = perms.canCreate("statBlocks");
+  const content = useCustomContent();
 
   const [tab, setTab] = useState<Tab>("spells");
   const [query, setQuery] = useState("");
@@ -70,12 +74,40 @@ export function CompendiumBrowser() {
   const character =
     characters.find((c) => c.id === charId) ?? characters[0] ?? null;
 
+  // SRD + homebrew (campaign + global), tagged so the UI can badge homebrew.
+  const spellSource: (CompendiumSpell & { homebrew: boolean })[] = useMemo(
+    () => [
+      ...COMPENDIUM_SPELLS.map((s) => ({ ...s, homebrew: false })),
+      ...content.spells.map((r) => ({
+        name: r.data.name,
+        level: r.data.level,
+        school: r.data.school ?? "",
+        classes: r.data.classes ?? [],
+        castingTime: r.data.castingTime ?? "",
+        range: r.data.range ?? "",
+        components: r.data.components ?? "",
+        duration: r.data.duration ?? "",
+        concentration: r.data.concentration,
+        description: r.data.description ?? "",
+        homebrew: true,
+      })),
+    ],
+    [content.spells],
+  );
+  const itemSource: (CompendiumItem & { homebrew: boolean })[] = useMemo(
+    () => [
+      ...COMPENDIUM_ITEMS.map((i) => ({ ...i, homebrew: false })),
+      ...content.items.map((r) => ({ ...r.data, homebrew: true })),
+    ],
+    [content.items],
+  );
+
   const allClasses = useMemo(
     () =>
-      [...new Set(COMPENDIUM_SPELLS.flatMap((s) => s.classes))].sort((a, b) =>
+      [...new Set(spellSource.flatMap((s) => s.classes))].sort((a, b) =>
         a.localeCompare(b),
       ),
-    [],
+    [spellSource],
   );
   const allCrs = useMemo(
     () =>
@@ -85,13 +117,13 @@ export function CompendiumBrowser() {
     [],
   );
 
-  const spells = COMPENDIUM_SPELLS.filter(
+  const spells = spellSource.filter(
     (s) =>
       (level === "all" || s.level === Number(level)) &&
       (klass === "all" || s.classes.includes(klass)) &&
       (!q || `${s.name} ${s.school} ${s.description}`.toLowerCase().includes(q)),
   );
-  const items = COMPENDIUM_ITEMS.filter(
+  const items = itemSource.filter(
     (i) =>
       (category === "all" || i.category === category) &&
       (!q ||
@@ -110,7 +142,7 @@ export function CompendiumBrowser() {
     window.setTimeout(() => setFlash((f) => (f === msg ? null : f)), 2600);
   }
   function addSpell(name: string) {
-    const s = COMPENDIUM_SPELLS.find((x) => x.name === name);
+    const s = spellSource.find((x) => x.name === name);
     if (!s || !character) return;
     void updateCharacter(character.id, {
       spells: [...character.spells, spellToCharacterSpell(s)],
@@ -118,7 +150,7 @@ export function CompendiumBrowser() {
     announce(`Added ${s.name} to ${character.name}.`);
   }
   function addItem(name: string) {
-    const i = COMPENDIUM_ITEMS.find((x) => x.name === name);
+    const i = itemSource.find((x) => x.name === name);
     if (!i || !character) return;
     void updateCharacter(character.id, {
       inventory: [...character.inventory, itemToInventoryItem(i)],
@@ -286,11 +318,11 @@ export function CompendiumBrowser() {
         {tab === "spells" && (
           <ul className="space-y-1.5">
             {spells.map((s) => {
-              const id = `spell-${s.name}`;
+              const id = `spell-${s.homebrew ? "hb-" : ""}${s.name}`;
               const isOpen = open === id;
               return (
                 <li
-                  key={s.name}
+                  key={id}
                   className="rounded-md border border-parchment-400/50 bg-parchment-100/60"
                 >
                   <div className="flex items-center gap-2 p-2.5">
@@ -320,6 +352,7 @@ export function CompendiumBrowser() {
                           Conc.
                         </span>
                       )}
+                      {s.homebrew && <Badge tone="forest">Homebrew</Badge>}
                     </button>
                     <button
                       type="button"
@@ -348,12 +381,12 @@ export function CompendiumBrowser() {
         {tab === "items" && (
           <ul className="space-y-1.5">
             {items.map((i) => {
-              const id = `item-${i.name}`;
+              const id = `item-${i.homebrew ? "hb-" : ""}${i.name}`;
               const isOpen = open === id;
               const cat = ITEM_CATEGORIES.find((c) => c.key === i.category);
               return (
                 <li
-                  key={i.name}
+                  key={id}
                   className="rounded-md border border-parchment-400/50 bg-parchment-100/60"
                 >
                   <div className="flex items-center gap-2 p-2.5">
@@ -373,6 +406,7 @@ export function CompendiumBrowser() {
                         {i.name}
                       </span>
                       {cat && <Badge>{cat.label}</Badge>}
+                      {i.homebrew && <Badge tone="forest">Homebrew</Badge>}
                       {i.damage && (
                         <span className="numerals hidden text-xs text-ink-faint sm:inline">
                           {i.damage}

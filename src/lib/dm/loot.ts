@@ -1,5 +1,6 @@
 import { COMPENDIUM_ITEMS } from "@/lib/compendium";
 import type { CompendiumItem } from "@/lib/compendium";
+import type { LootTable } from "@/lib/domain/types";
 
 /** Treasure & loot generation — rough 5e-flavored tables, client-side only. */
 
@@ -111,6 +112,48 @@ export function generateLoot(tier: LootTier): LootResult {
   }
 
   return { coins, valuables, magicItems };
+}
+
+/** Roll a homebrew weighted loot table into the same result shape. */
+export function rollCustomTable(table: LootTable): LootResult {
+  const coins: Coins = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
+  if (table.coins && table.coins.count > 0) {
+    const amt =
+      d(table.coins.count, Math.max(2, table.coins.sides)) *
+      (table.coins.multiplier || 1);
+    coins[table.coins.denomination] += amt;
+  }
+
+  const magicItems: CompendiumItem[] = [];
+  const totalWeight = table.entries.reduce(
+    (n, e) => n + Math.max(0, e.weight || 0),
+    0,
+  );
+  const picks = Math.max(0, table.picks || 0);
+  for (let p = 0; p < picks && totalWeight > 0; p++) {
+    let roll = Math.random() * totalWeight;
+    let chosen = table.entries[0];
+    for (const e of table.entries) {
+      roll -= Math.max(0, e.weight || 0);
+      if (roll <= 0) {
+        chosen = e;
+        break;
+      }
+    }
+    if (chosen && chosen.name.trim()) {
+      magicItems.push({
+        name: chosen.name,
+        category: chosen.category ?? "treasure",
+        rarity: chosen.rarity,
+        weight: chosen.itemWeight,
+        value: chosen.value,
+        properties: chosen.properties,
+        damage: chosen.damage,
+        description: chosen.description,
+      });
+    }
+  }
+  return { coins, valuables: [], magicItems };
 }
 
 export function coinsToString(c: Coins): string {

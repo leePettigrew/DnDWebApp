@@ -8,6 +8,7 @@ import { cn } from "@/components/ui/cn";
 import { PlusIcon, SparkIcon } from "@/components/ui/icons";
 import { useCharacters, usePermissions } from "@/lib/data/hooks";
 import { itemToInventoryItem } from "@/lib/compendium";
+import { useCustomContent } from "@/lib/content/context";
 import { emptyCurrency } from "@/lib/domain/character";
 import { newId } from "@/lib/domain/ids";
 import type { InventoryItem } from "@/lib/domain/types";
@@ -15,6 +16,7 @@ import {
   LOOT_TIERS,
   coinsToString,
   generateLoot,
+  rollCustomTable,
   type LootResult,
   type LootTier,
 } from "@/lib/dm/loot";
@@ -26,13 +28,24 @@ export function TreasureGenerator() {
   const { items: allCharacters, update } = useCharacters();
   const perms = usePermissions();
   const characters = allCharacters.filter((c) => perms.canEdit("characters", c));
-  const [tier, setTier] = useState<LootTier>("1-4");
+  const content = useCustomContent();
+  const customTables = content.lootTables;
+  const [source, setSource] = useState<string>("tier:1-4");
   const [loot, setLoot] = useState<LootResult | null>(null);
   const [charId, setCharId] = useState("");
   const [flash, setFlash] = useState<string | null>(null);
 
   const character =
     characters.find((c) => c.id === charId) ?? characters[0] ?? null;
+
+  function rollSource() {
+    if (source.startsWith("custom:")) {
+      const rec = customTables.find((r) => r.id === source.slice(7));
+      if (rec) setLoot(rollCustomTable(rec.data));
+    } else {
+      setLoot(generateLoot(source.slice(5) as LootTier));
+    }
+  }
 
   function announce(msg: string) {
     setFlash(msg);
@@ -79,18 +92,30 @@ export function TreasureGenerator() {
     <Panel title="Treasure &amp; Loot" eyebrow="Hoard generator">
       <div className="flex flex-wrap items-center gap-2">
         <select
-          aria-label="Challenge tier"
-          value={tier}
-          onChange={(e) => setTier(e.target.value as LootTier)}
+          aria-label="Loot source"
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
           className={selectClass}
         >
-          {LOOT_TIERS.map((t) => (
-            <option key={t.key} value={t.key}>
-              {t.label}
-            </option>
-          ))}
+          <optgroup label="Standard (by CR)">
+            {LOOT_TIERS.map((t) => (
+              <option key={t.key} value={`tier:${t.key}`}>
+                {t.label}
+              </option>
+            ))}
+          </optgroup>
+          {customTables.length > 0 && (
+            <optgroup label="Homebrew tables">
+              {customTables.map((r) => (
+                <option key={r.id} value={`custom:${r.id}`}>
+                  {r.data.name || "Untitled table"}
+                  {r.scope === "global" ? " (global)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
-        <Button size="sm" onClick={() => setLoot(generateLoot(tier))}>
+        <Button size="sm" onClick={rollSource}>
           <SparkIcon className="h-4 w-4" /> Roll hoard
         </Button>
         {characters.length > 0 && (
