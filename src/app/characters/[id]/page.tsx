@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/icons";
 import { CharacterSheet } from "@/components/characters/CharacterSheet";
 import { CharacterEditor } from "@/components/characters/CharacterEditor";
-import { useCharacters } from "@/lib/data/hooks";
+import { useCharacters, usePermissions } from "@/lib/data/hooks";
 import type { Character } from "@/lib/domain/types";
 
 export default function CharacterDetailPage() {
@@ -24,16 +24,20 @@ export default function CharacterDetailPage() {
 
   const { items, loading, update, remove } = useCharacters();
   const character = items.find((c) => c.id === id);
+  const canEdit = usePermissions().canEdit("characters", character);
 
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Newly-created heroes arrive with ?edit=1 — open straight into the editor.
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("edit") === "1") {
+    if (
+      canEdit &&
+      new URLSearchParams(window.location.search).get("edit") === "1"
+    ) {
       setEditing(true);
     }
-  }, []);
+  }, [canEdit]);
 
   if (loading && !character) {
     return (
@@ -79,7 +83,7 @@ export default function CharacterDetailPage() {
         >
           <ChevronLeftIcon className="h-4 w-4" /> All Heroes
         </Link>
-        {!editing && (
+        {!editing && canEdit && (
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
               <EditIcon className="h-4 w-4" /> Edit
@@ -95,7 +99,7 @@ export default function CharacterDetailPage() {
         )}
       </div>
 
-      {editing ? (
+      {editing && canEdit ? (
         <CharacterEditor
           character={character}
           onSave={save}
@@ -107,6 +111,7 @@ export default function CharacterDetailPage() {
       ) : (
         <CharacterSheet
           character={character}
+          canEdit={canEdit}
           onUpdate={(patch) => update(character.id, patch)}
         />
       )}

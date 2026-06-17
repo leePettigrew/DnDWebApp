@@ -9,12 +9,13 @@ import { TextField } from "@/components/ui/Field";
 import { Markdown } from "@/components/ui/Markdown";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EditIcon, FeatherIcon, PlusIcon, TrashIcon } from "@/components/ui/icons";
-import { useSessionLogs } from "@/lib/data/hooks";
+import { usePermissions, useSessionLogs } from "@/lib/data/hooks";
 import { newSessionLogInput } from "@/lib/domain/factories";
 import type { SessionLog } from "@/lib/domain/types";
 
 export function ChronicleTab({ campaignId }: { campaignId?: string }) {
   const { items, create, update, remove } = useSessionLogs();
+  const canManage = usePermissions().canEdit("sessionLogs");
   const logs = items
     .filter((l) => l.campaignId === campaignId)
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -39,11 +40,13 @@ export function ChronicleTab({ campaignId }: { campaignId?: string }) {
 
   return (
     <div>
-      <div className="mb-4 flex justify-end">
-        <Button variant="secondary" size="sm" onClick={createLog}>
-          <PlusIcon className="h-4 w-4" /> New Entry
-        </Button>
-      </div>
+      {canManage && (
+        <div className="mb-4 flex justify-end">
+          <Button variant="secondary" size="sm" onClick={createLog}>
+            <PlusIcon className="h-4 w-4" /> New Entry
+          </Button>
+        </div>
+      )}
 
       {logs.length === 0 ? (
         <EmptyState
@@ -51,9 +54,11 @@ export function ChronicleTab({ campaignId }: { campaignId?: string }) {
           title="The chronicle is blank"
           description="Record what happened each session — the tale starts here."
           action={
-            <Button variant="secondary" onClick={createLog}>
-              <PlusIcon className="h-4 w-4" /> New Entry
-            </Button>
+            canManage ? (
+              <Button variant="secondary" onClick={createLog}>
+                <PlusIcon className="h-4 w-4" /> New Entry
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -71,22 +76,24 @@ export function ChronicleTab({ campaignId }: { campaignId?: string }) {
                       {l.title}
                     </h3>
                   </div>
-                  <div className="flex shrink-0 gap-1">
-                    <button
-                      onClick={() => setEditing(l)}
-                      aria-label={`Edit ${l.title}`}
-                      className="rounded-md p-1.5 text-ink-faint hover:bg-parchment-300/60 hover:text-ink"
-                    >
-                      <EditIcon className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => setDeleting(l)}
-                      aria-label={`Delete ${l.title}`}
-                      className="rounded-md p-1.5 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
-                    >
-                      <TrashIcon className="h-4 w-4" />
-                    </button>
-                  </div>
+                  {canManage && (
+                    <div className="flex shrink-0 gap-1">
+                      <button
+                        onClick={() => setEditing(l)}
+                        aria-label={`Edit ${l.title}`}
+                        className="rounded-md p-1.5 text-ink-faint hover:bg-parchment-300/60 hover:text-ink"
+                      >
+                        <EditIcon className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setDeleting(l)}
+                        aria-label={`Delete ${l.title}`}
+                        className="rounded-md p-1.5 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 {l.body && (
                   <div className="mt-2">

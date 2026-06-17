@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
 import { PlusIcon, SparkIcon } from "@/components/ui/icons";
-import { useCharacters } from "@/lib/data/hooks";
+import { useCharacters, usePermissions } from "@/lib/data/hooks";
 import { itemToInventoryItem } from "@/lib/compendium";
 import { emptyCurrency } from "@/lib/domain/character";
 import { newId } from "@/lib/domain/ids";
@@ -23,7 +23,9 @@ const selectClass =
   "h-9 rounded-md border border-parchment-400 bg-parchment-50 px-2 text-sm text-ink focus:border-brass focus:outline-none focus:ring-2 focus:ring-brass/40";
 
 export function TreasureGenerator() {
-  const { items: characters, update } = useCharacters();
+  const { items: allCharacters, update } = useCharacters();
+  const perms = usePermissions();
+  const characters = allCharacters.filter((c) => perms.canEdit("characters", c));
   const [tier, setTier] = useState<LootTier>("1-4");
   const [loot, setLoot] = useState<LootResult | null>(null);
   const [charId, setCharId] = useState("");

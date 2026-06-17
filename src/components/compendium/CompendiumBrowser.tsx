@@ -12,7 +12,12 @@ import {
   SparkIcon,
   SwordIcon,
 } from "@/components/ui/icons";
-import { useCampaigns, useCharacters, useStatBlocks } from "@/lib/data/hooks";
+import {
+  useCampaigns,
+  useCharacters,
+  usePermissions,
+  useStatBlocks,
+} from "@/lib/data/hooks";
 import { ITEM_CATEGORIES } from "@/lib/domain/types";
 import {
   COMPENDIUM_ITEMS,
@@ -44,8 +49,12 @@ const selectClass =
 
 export function CompendiumBrowser() {
   const { items: campaigns } = useCampaigns();
-  const { items: characters, update: updateCharacter } = useCharacters();
+  const { items: allCharacters, update: updateCharacter } = useCharacters();
   const { create: createStatBlock } = useStatBlocks();
+  const perms = usePermissions();
+  // Only offer characters the user is actually allowed to edit.
+  const characters = allCharacters.filter((c) => perms.canEdit("characters", c));
+  const canAddMonsters = perms.canCreate("statBlocks");
 
   const [tab, setTab] = useState<Tab>("spells");
   const [query, setQuery] = useState("");
@@ -430,13 +439,15 @@ export function CompendiumBrowser() {
                         {m.size} {m.type}
                       </span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => addMonster(m.name)}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-brass/50 px-2 py-1 text-xs font-semibold text-brass-dark hover:bg-brass hover:text-parchment-50"
-                    >
-                      <PlusIcon className="h-3.5 w-3.5" /> Bestiary
-                    </button>
+                    {canAddMonsters && (
+                      <button
+                        type="button"
+                        onClick={() => addMonster(m.name)}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-brass/50 px-2 py-1 text-xs font-semibold text-brass-dark hover:bg-brass hover:text-parchment-50"
+                      >
+                        <PlusIcon className="h-3.5 w-3.5" /> Bestiary
+                      </button>
+                    )}
                   </div>
                   {isOpen && (
                     <div className="space-y-2 border-t border-parchment-400/40 px-3 py-2.5 text-sm text-ink-soft">

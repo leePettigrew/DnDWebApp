@@ -5,7 +5,7 @@ import { Panel } from "@/components/ui/Panel";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { SparkIcon, PlusIcon } from "@/components/ui/icons";
-import { useCampaigns, useStatBlocks } from "@/lib/data/hooks";
+import { useCampaigns, usePermissions, useStatBlocks } from "@/lib/data/hooks";
 import {
   ANCESTRIES,
   generateNpc,
@@ -20,6 +20,7 @@ const selectClass =
 export function NpcGenerator() {
   const { items: campaigns } = useCampaigns();
   const { create } = useStatBlocks();
+  const canSave = usePermissions().canCreate("statBlocks");
   const [anc, setAnc] = useState<"random" | Ancestry>("random");
   const [npc, setNpc] = useState<GeneratedNpc | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -66,7 +67,7 @@ export function NpcGenerator() {
         >
           <SparkIcon className="h-4 w-4" /> Conjure NPC
         </Button>
-        {npc && (
+        {npc && canSave && (
           <Button variant="secondary" size="sm" onClick={save}>
             <PlusIcon className="h-4 w-4" /> Save to bestiary
           </Button>

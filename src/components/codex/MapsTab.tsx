@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TextArea, TextField } from "@/components/ui/Field";
 import { EditIcon, MapIcon, PlusIcon, TrashIcon } from "@/components/ui/icons";
-import { useMaps } from "@/lib/data/hooks";
+import { useMaps, usePermissions } from "@/lib/data/hooks";
 import { newMapInput } from "@/lib/domain/factories";
 import type { BattleMap } from "@/lib/domain/types";
 
@@ -22,6 +22,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 export function MapsTab({ campaignId }: { campaignId?: string }) {
   const { items, create, update, remove } = useMaps();
+  const canManage = usePermissions().canEdit("maps");
   const maps = items.filter((m) => m.campaignId === campaignId);
 
   const [editing, setEditing] = useState<BattleMap | null>(null);
@@ -51,11 +52,13 @@ export function MapsTab({ campaignId }: { campaignId?: string }) {
 
   return (
     <div>
-      <div className="mb-4 flex justify-end">
-        <Button variant="secondary" size="sm" onClick={createMap}>
-          <PlusIcon className="h-4 w-4" /> New Map
-        </Button>
-      </div>
+      {canManage && (
+        <div className="mb-4 flex justify-end">
+          <Button variant="secondary" size="sm" onClick={createMap}>
+            <PlusIcon className="h-4 w-4" /> New Map
+          </Button>
+        </div>
+      )}
 
       {maps.length === 0 ? (
         <EmptyState
@@ -63,9 +66,11 @@ export function MapsTab({ campaignId }: { campaignId?: string }) {
           title="No battle maps yet"
           description="Add a map and drop in an image — or leave the slot empty for now."
           action={
-            <Button variant="secondary" onClick={createMap}>
-              <PlusIcon className="h-4 w-4" /> New Map
-            </Button>
+            canManage ? (
+              <Button variant="secondary" onClick={createMap}>
+                <PlusIcon className="h-4 w-4" /> New Map
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -102,22 +107,24 @@ export function MapsTab({ campaignId }: { campaignId?: string }) {
                     <p className="line-clamp-2 text-xs text-ink-soft">{m.notes}</p>
                   )}
                 </div>
-                <div className="flex shrink-0 gap-1">
-                  <button
-                    onClick={() => setEditing(m)}
-                    aria-label={`Edit ${m.name}`}
-                    className="rounded-md p-1.5 text-ink-faint hover:bg-parchment-300/60 hover:text-ink"
-                  >
-                    <EditIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => setDeleting(m)}
-                    aria-label={`Delete ${m.name}`}
-                    className="rounded-md p-1.5 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
-                  >
-                    <TrashIcon className="h-4 w-4" />
-                  </button>
-                </div>
+                {canManage && (
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      onClick={() => setEditing(m)}
+                      aria-label={`Edit ${m.name}`}
+                      className="rounded-md p-1.5 text-ink-faint hover:bg-parchment-300/60 hover:text-ink"
+                    >
+                      <EditIcon className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => setDeleting(m)}
+                      aria-label={`Delete ${m.name}`}
+                      className="rounded-md p-1.5 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ))}

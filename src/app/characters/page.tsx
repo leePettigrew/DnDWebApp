@@ -10,13 +10,14 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { HelmIcon, PlusIcon, ShieldIcon, HeartIcon, TrashIcon } from "@/components/ui/icons";
-import { useCampaigns, useCharacters } from "@/lib/data/hooks";
+import { useCampaigns, useCharacters, usePermissions } from "@/lib/data/hooks";
 import { newCharacterInput } from "@/lib/domain/factories";
 
 export default function CharactersPage() {
   const router = useRouter();
   const { items: campaigns } = useCampaigns();
   const { items, create, remove } = useCharacters();
+  const perms = usePermissions();
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(
     null,
   );
@@ -81,14 +82,16 @@ export default function CharactersPage() {
                   </div>
                 </div>
               </Link>
-              <button
-                type="button"
-                onClick={() => setDeleting({ id: c.id, name: c.name })}
-                aria-label={`Delete ${c.name}`}
-                className="absolute right-2 top-2 rounded-md p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-oxblood hover:text-parchment-50 focus:opacity-100 group-hover:opacity-100"
-              >
-                <TrashIcon className="h-4 w-4" />
-              </button>
+              {perms.canEdit("characters", c) && (
+                <button
+                  type="button"
+                  onClick={() => setDeleting({ id: c.id, name: c.name })}
+                  aria-label={`Delete ${c.name}`}
+                  className="absolute right-2 top-2 rounded-md p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-oxblood hover:text-parchment-50 focus:opacity-100 group-hover:opacity-100"
+                >
+                  <TrashIcon className="h-4 w-4" />
+                </button>
+              )}
             </div>
           ))}
         </div>

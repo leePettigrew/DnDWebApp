@@ -10,11 +10,12 @@ import { Markdown } from "@/components/ui/Markdown";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/components/ui/cn";
 import { PlusIcon, ScrollIcon, TrashIcon } from "@/components/ui/icons";
-import { useNotes } from "@/lib/data/hooks";
+import { useNotes, usePermissions } from "@/lib/data/hooks";
 import { newNoteInput } from "@/lib/domain/factories";
 
 export function NotesTab({ campaignId }: { campaignId?: string }) {
   const { items, create, update, remove } = useNotes();
+  const canManage = usePermissions().canEdit("notes");
   const notes = items
     .filter((n) => n.campaignId === campaignId)
     .sort((a, b) =>
@@ -71,9 +72,11 @@ export function NotesTab({ campaignId }: { campaignId?: string }) {
         <Panel
           title="Notes"
           action={
-            <Button variant="secondary" size="sm" onClick={createNote}>
-              <PlusIcon className="h-4 w-4" /> New
-            </Button>
+            canManage ? (
+              <Button variant="secondary" size="sm" onClick={createNote}>
+                <PlusIcon className="h-4 w-4" /> New
+              </Button>
+            ) : undefined
           }
         >
           {notes.length === 0 ? (
@@ -122,26 +125,28 @@ export function NotesTab({ campaignId }: { campaignId?: string }) {
       <div className="lg:col-span-2">
         {selected ? (
           <Panel
-            title={preview ? "Preview" : "Edit Note"}
+            title={preview || !canManage ? "Note" : "Edit Note"}
             action={
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPreview((v) => !v)}
-                  className="rounded-md px-2 py-1 text-xs font-semibold text-brass-dark hover:bg-parchment-300/60"
-                >
-                  {preview ? "Edit" : "Preview"}
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  aria-label="Delete note"
-                  className="rounded-md p-1.5 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
-                >
-                  <TrashIcon className="h-4 w-4" />
-                </button>
-              </div>
+              canManage ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPreview((v) => !v)}
+                    className="rounded-md px-2 py-1 text-xs font-semibold text-brass-dark hover:bg-parchment-300/60"
+                  >
+                    {preview ? "Edit" : "Preview"}
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    aria-label="Delete note"
+                    className="rounded-md p-1.5 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : undefined
             }
           >
-            {preview ? (
+            {preview || !canManage ? (
               <div>
                 <h2 className="font-display text-2xl font-bold text-ink">{title}</h2>
                 <div className="mt-3">
@@ -207,9 +212,11 @@ export function NotesTab({ campaignId }: { campaignId?: string }) {
             title="Select a note"
             description="Choose a note to read or edit, or create a new one."
             action={
-              <Button variant="secondary" onClick={createNote}>
-                <PlusIcon className="h-4 w-4" /> New Note
-              </Button>
+              canManage ? (
+                <Button variant="secondary" onClick={createNote}>
+                  <PlusIcon className="h-4 w-4" /> New Note
+                </Button>
+              ) : undefined
             }
           />
         )}

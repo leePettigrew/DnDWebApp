@@ -39,6 +39,9 @@ import { useRealtime } from "@/lib/data/hooks";
 interface SheetProps {
   character: Character;
   onUpdate: (patch: Partial<Character>) => void;
+  /** When false (a player viewing a sheet they don't own), editing controls
+   *  are hidden/disabled. Rolling stays available. Defaults to true. */
+  canEdit?: boolean;
 }
 
 function StatPill({
@@ -63,7 +66,11 @@ function StatPill({
   );
 }
 
-export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
+export function CharacterSheet({
+  character: c,
+  onUpdate,
+  canEdit = true,
+}: SheetProps) {
   const realtime = useRealtime();
   const [lastRoll, setLastRoll] = useState<RollResult | null>(null);
   const [hpAmount, setHpAmount] = useState(0);
@@ -264,25 +271,27 @@ export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
               style={{ width: `${hpPct}%` }}
             />
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <input
-              type="number"
-              value={hpAmount || ""}
-              onChange={(e) => setHpAmount(Number(e.target.value) || 0)}
-              placeholder="0"
-              aria-label="HP amount"
-              className="numerals h-9 w-20 rounded-md border border-parchment-400 bg-parchment-50 px-2 text-center font-bold text-ink focus:border-brass focus:outline-none focus:ring-2 focus:ring-brass/40"
-            />
-            <button onClick={applyDamage} className="rounded-md border border-oxblood/40 px-3 py-1.5 text-sm font-semibold text-oxblood hover:bg-oxblood hover:text-parchment-50">
-              Damage
-            </button>
-            <button onClick={applyHeal} className="rounded-md border border-forest/40 px-3 py-1.5 text-sm font-semibold text-forest hover:bg-forest hover:text-parchment-50">
-              Heal
-            </button>
-            <button onClick={applyTemp} className="rounded-md border border-arcane/40 px-3 py-1.5 text-sm font-semibold text-arcane hover:bg-arcane hover:text-parchment-50">
-              Temp
-            </button>
-          </div>
+          {canEdit && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                type="number"
+                value={hpAmount || ""}
+                onChange={(e) => setHpAmount(Number(e.target.value) || 0)}
+                placeholder="0"
+                aria-label="HP amount"
+                className="numerals h-9 w-20 rounded-md border border-parchment-400 bg-parchment-50 px-2 text-center font-bold text-ink focus:border-brass focus:outline-none focus:ring-2 focus:ring-brass/40"
+              />
+              <button onClick={applyDamage} className="rounded-md border border-oxblood/40 px-3 py-1.5 text-sm font-semibold text-oxblood hover:bg-oxblood hover:text-parchment-50">
+                Damage
+              </button>
+              <button onClick={applyHeal} className="rounded-md border border-forest/40 px-3 py-1.5 text-sm font-semibold text-forest hover:bg-forest hover:text-parchment-50">
+                Heal
+              </button>
+              <button onClick={applyTemp} className="rounded-md border border-arcane/40 px-3 py-1.5 text-sm font-semibold text-arcane hover:bg-arcane hover:text-parchment-50">
+                Temp
+              </button>
+            </div>
+          )}
 
           {/* Death saving throws — surfaced once dropped to 0 HP. */}
           {c.currentHp === 0 && (
@@ -297,6 +306,7 @@ export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
                     <button
                       key={i}
                       aria-label={`Success ${i + 1}`}
+                      disabled={!canEdit}
                       onClick={() =>
                         setDeath("successes", i < deaths.successes ? i : i + 1)
                       }
@@ -315,6 +325,7 @@ export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
                     <button
                       key={i}
                       aria-label={`Failure ${i + 1}`}
+                      disabled={!canEdit}
                       onClick={() =>
                         setDeath("failures", i < deaths.failures ? i : i + 1)
                       }
@@ -350,6 +361,7 @@ export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
       </Panel>
 
       {/* Rest & recovery — hit dice, long rest, exhaustion, concentration */}
+      {canEdit && (
       <Panel title="Rest &amp; Recovery" eyebrow="Hit dice · exhaustion">
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="rounded-card border border-parchment-400/60 bg-parchment-100/70 p-3">
@@ -435,6 +447,7 @@ export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
           </div>
         )}
       </Panel>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Abilities + saves */}
@@ -593,6 +606,7 @@ export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
                             <button
                               key={i}
                               aria-label={`Level ${level} slot ${i + 1}`}
+                              disabled={!canEdit}
                               title={
                                 spent
                                   ? "Spent — tap to restore"
@@ -622,6 +636,7 @@ export function CharacterSheet({ character: c, onUpdate }: SheetProps) {
                           <button
                             key={s.id}
                             type="button"
+                            disabled={!canEdit}
                             title={
                               s.description
                                 ? `${s.description}\n(tap to toggle concentration)`
