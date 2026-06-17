@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/icons";
 import { NAV_ITEMS } from "@/components/shell/nav-items";
 import {
+  useActiveCampaign,
   useCampaigns,
   useCharacters,
   useCombat,
@@ -62,8 +63,11 @@ export default function HearthPage() {
   const { items: sessions } = useSessionLogs();
   const { value: combat } = useCombat();
   const { isDM } = usePermissions();
+  const { campaign: activeCampaign } = useActiveCampaign();
 
-  const campaign = campaigns[0];
+  // Show the campaign you're actually in (the joined/opened one), not just the
+  // first in your list — falling back to the only one in solo mode.
+  const campaign = activeCampaign ?? campaigns[0];
   const latestSession = [...sessions].sort((a, b) =>
     b.date.localeCompare(a.date),
   )[0];
