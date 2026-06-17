@@ -124,9 +124,14 @@ export function applyHeal(
 ): CombatState {
   const c = findCombatant(state, id);
   if (!c) return state;
-  return patchCombatant(state, id, {
+  const patch: Partial<Combatant> = {
     currentHp: Math.min(c.maxHp, c.currentHp + Math.abs(amount)),
-  });
+  };
+  // Rising off 0 HP ends the dying state — clear death saves.
+  if (c.currentHp <= 0 && Math.abs(amount) > 0) {
+    patch.deathSaves = { successes: 0, failures: 0 };
+  }
+  return patchCombatant(state, id, patch);
 }
 
 export function setTempHp(

@@ -38,11 +38,15 @@ export function CombatantRow({
 
   const hpPct = Math.max(0, Math.min(100, (c.currentHp / Math.max(1, c.maxHp)) * 100));
   const down = c.currentHp <= 0;
+  const ds = c.deathSaves ?? { successes: 0, failures: 0 };
 
   function applyAndReset(fn: (n: number) => void) {
     if (!amount) return;
     fn(Math.abs(amount));
     setAmount(0);
+  }
+  function setDeath(kind: "successes" | "failures", n: number) {
+    onPatch({ deathSaves: { ...ds, [kind]: Math.max(0, Math.min(3, n)) } });
   }
 
   return (
@@ -196,6 +200,63 @@ export function CombatantRow({
           {c.tempHp > 0 && <span className="text-forest"> +{c.tempHp}</span>}
         </span>
       </div>
+
+      {/* Death saves — for a downed PC */}
+      {c.isPC && down && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-oxblood/30 bg-oxblood/5 px-3 py-2">
+          <span className="text-[0.6rem] font-bold uppercase tracking-wide text-oxblood">
+            Death saves
+          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[0.65rem] font-semibold text-forest">Save</span>
+            {[0, 1, 2].map((i) => {
+              const on = i < ds.successes;
+              return (
+                <button
+                  key={i}
+                  aria-label={`Success ${i + 1}`}
+                  onClick={() => setDeath("successes", on ? i : i + 1)}
+                  className={cn(
+                    "h-4 w-4 rounded-full border-2 transition-colors",
+                    on
+                      ? "border-forest bg-forest"
+                      : "border-forest/50 hover:bg-forest/20",
+                  )}
+                />
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[0.65rem] font-semibold text-oxblood">Fail</span>
+            {[0, 1, 2].map((i) => {
+              const on = i < ds.failures;
+              return (
+                <button
+                  key={i}
+                  aria-label={`Failure ${i + 1}`}
+                  onClick={() => setDeath("failures", on ? i : i + 1)}
+                  className={cn(
+                    "h-4 w-4 rounded-full border-2 transition-colors",
+                    on
+                      ? "border-oxblood bg-oxblood"
+                      : "border-oxblood/50 hover:bg-oxblood/20",
+                  )}
+                />
+              );
+            })}
+          </div>
+          {ds.successes >= 3 && (
+            <span className="text-[0.65rem] font-semibold text-forest">
+              Stabilized
+            </span>
+          )}
+          {ds.failures >= 3 && (
+            <span className="text-[0.65rem] font-semibold text-oxblood">
+              Dead
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Expanded editor */}
       {expanded && (
