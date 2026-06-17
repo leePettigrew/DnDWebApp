@@ -189,8 +189,11 @@ export interface RealtimeController {
   ping(mapId: ID, x: number, y: number): void;
   subscribePings(listener: (ping: MapPing) => void): Unsubscribe;
 
-  /** Push a handout (text/image) to the whole table (DM only; broadcast). */
-  shareHandout(handout: Handout): void;
+  /**
+   * Push a handout (text/image) to the table (DM only). With `targets` (user
+   * ids) it goes only to those players; otherwise to everyone.
+   */
+  shareHandout(handout: Handout, targets?: ID[]): void;
   subscribeHandouts(listener: (handout: Handout) => void): Unsubscribe;
 
   /** Campaign chat (multiplayer only; empty/no-op in local mode). */

@@ -150,6 +150,7 @@ const message = z.discriminatedUnion("type", [
     title: z.string().max(120).optional(),
     body: z.string().max(4000).optional(),
     imageUrl: z.string().max(2000).optional(),
+    targets: z.array(z.string().max(80)).max(50).optional(),
   }),
   z.object({ type: z.literal("ping") }),
 ]);

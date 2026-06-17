@@ -450,13 +450,14 @@ export class RealtimeDataProvider implements DataProvider {
         this.pingListeners.add(l);
         return () => this.pingListeners.delete(l);
       },
-      shareHandout: (handout) => {
+      shareHandout: (handout, targets) => {
         if (this.activeCampaignId && this.conn.isOpen()) {
           this.conn.send({
             type: "dm:handout",
             title: handout.title,
             body: handout.body,
             imageUrl: handout.imageUrl,
+            targets: targets && targets.length ? targets : undefined,
           });
         } else {
           this.emitHandout(handout);

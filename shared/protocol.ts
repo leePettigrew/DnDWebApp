@@ -262,19 +262,23 @@ export interface PingMessage {
   type: "ping";
 }
 
-/** A DM handout pushed to the whole table (text and/or an image). */
+/** A DM handout pushed to the table (text and/or an image). */
 export interface Handout {
   title?: string;
   body?: string;
   imageUrl?: string;
   /** Display name of the DM who shared it (filled in server-side). */
   fromName?: string;
+  /** True when it was sent to specific players rather than the whole table. */
+  private?: boolean;
 }
 export interface DmHandoutMessage {
   type: "dm:handout";
   title?: string;
   body?: string;
   imageUrl?: string;
+  /** Recipient user ids. Empty/absent = everyone at the table. */
+  targets?: ID[];
 }
 
 export type ClientMessage =

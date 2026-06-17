@@ -26,7 +26,8 @@ export function HandoutOverlay() {
         <header className="flex items-center justify-between gap-3 border-b border-parchment-400/60 bg-parchment-200/50 px-5 py-3">
           <span className="flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-[0.15em] text-brass-dark">
             <ScrollIcon className="h-4 w-4" />
-            Handout{handout.fromName ? ` — ${handout.fromName}` : ""}
+            {handout.private ? "Private Handout" : "Handout"}
+            {handout.fromName ? ` — ${handout.fromName}` : ""}
           </span>
           <button
             type="button"

@@ -509,10 +509,22 @@ export class ClientSession {
     const body = msg.body?.trim() || undefined;
     const imageUrl = msg.imageUrl?.trim() || undefined;
     if (!title && !body && !imageUrl) return;
-    this.rooms.get(this.campaignId!).broadcast({
-      type: "dm:handout:shown",
-      handout: { title, body, imageUrl, fromName: this.displayName },
-    });
+    const targets = msg.targets?.filter(Boolean) ?? [];
+    const isTargeted = targets.length > 0;
+    this.rooms.get(this.campaignId!).broadcast(
+      {
+        type: "dm:handout:shown",
+        handout: {
+          title,
+          body,
+          imageUrl,
+          fromName: this.displayName,
+          private: isTargeted,
+        },
+      },
+      // Targeted handouts reach only the chosen players; otherwise everyone.
+      isTargeted ? (m) => targets.includes(m.userId) : undefined,
+    );
   }
 
   // --- chat ----------------------------------------------------------------
