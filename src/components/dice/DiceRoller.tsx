@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -68,18 +68,10 @@ export function DiceRoller() {
   const [label, setLabel] = useState("");
   const [result, setResult] = useState<RollResult | null>(null);
   const [rolling, setRolling] = useState(false);
-  const [, forceTick] = useState(0);
   const [savingOpen, setSavingOpen] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [hiddenRoll, setHiddenRoll] = useState(false);
   const [rollError, setRollError] = useState<string | null>(null);
-
-  // While rolling, re-render fast so the chips flicker through random values.
-  useEffect(() => {
-    if (!rolling) return;
-    const interval = window.setInterval(() => forceTick((t) => t + 1), 70);
-    return () => window.clearInterval(interval);
-  }, [rolling]);
 
   const poolCount = DIE_SIDES.reduce((n, s) => n + (counts[s] ?? 0), 0);
 
@@ -105,7 +97,7 @@ export function DiceRoller() {
         setRolling(false);
         return;
       }
-      window.setTimeout(() => setRolling(false), 650);
+      window.setTimeout(() => setRolling(false), 980);
     } catch (err) {
       setRolling(false);
       setRollError(err instanceof Error ? err.message : "Roll failed.");
@@ -342,17 +334,7 @@ export function DiceRoller() {
               )}
               <div className="flex flex-wrap items-center justify-center gap-3">
                 {displayRolls.map((r, i) => (
-                  <Dice3D
-                    key={i}
-                    roll={r}
-                    rolling={rolling}
-                    delayMs={i * 60}
-                    display={
-                      rolling
-                        ? Math.floor(Math.random() * r.sides) + 1
-                        : undefined
-                    }
-                  />
+                  <Dice3D key={i} roll={r} rolling={rolling} delayMs={i * 55} />
                 ))}
                 {result.modifier !== 0 && (
                   <span className="numerals font-display text-2xl font-bold text-ink-soft">
