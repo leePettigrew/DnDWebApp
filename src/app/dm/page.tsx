@@ -3,16 +3,18 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { cn } from "@/components/ui/cn";
-import { SparkIcon, HelmIcon, BookIcon } from "@/components/ui/icons";
+import { SparkIcon, HelmIcon, BookIcon, ScrollIcon } from "@/components/ui/icons";
 import { TreasureGenerator } from "@/components/dm/TreasureGenerator";
 import { NpcGenerator } from "@/components/dm/NpcGenerator";
 import { DmScreen } from "@/components/dm/DmScreen";
+import { HandoutComposer } from "@/components/dm/HandoutComposer";
 
-type Tab = "treasure" | "npcs" | "screen";
+type Tab = "treasure" | "npcs" | "handouts" | "screen";
 
 const TABS: { key: Tab; label: string; icon: typeof SparkIcon }[] = [
   { key: "treasure", label: "Treasure", icon: SparkIcon },
   { key: "npcs", label: "NPC Forge", icon: HelmIcon },
+  { key: "handouts", label: "Handouts", icon: ScrollIcon },
   { key: "screen", label: "DM Screen", icon: BookIcon },
 ];
 
@@ -50,6 +52,7 @@ export default function DmPage() {
 
       {tab === "treasure" && <TreasureGenerator />}
       {tab === "npcs" && <NpcGenerator />}
+      {tab === "handouts" && <HandoutComposer />}
       {tab === "screen" && <DmScreen />}
     </div>
   );

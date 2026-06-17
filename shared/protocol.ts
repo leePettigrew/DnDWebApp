@@ -234,6 +234,21 @@ export interface PingMessage {
   type: "ping";
 }
 
+/** A DM handout pushed to the whole table (text and/or an image). */
+export interface Handout {
+  title?: string;
+  body?: string;
+  imageUrl?: string;
+  /** Display name of the DM who shared it (filled in server-side). */
+  fromName?: string;
+}
+export interface DmHandoutMessage {
+  type: "dm:handout";
+  title?: string;
+  body?: string;
+  imageUrl?: string;
+}
+
 export type ClientMessage =
   | AuthMessage
   | CampaignCreateMessage
@@ -251,6 +266,7 @@ export type ClientMessage =
   | ChatSendMessage
   | MapTokenMoveMessage
   | MapPingMessage
+  | DmHandoutMessage
   | PingMessage;
 
 export type ClientMessageType = ClientMessage["type"];
@@ -325,6 +341,10 @@ export interface MapPingedMessage {
   by: string;
   color: string;
 }
+export interface DmHandoutShownMessage {
+  type: "dm:handout:shown";
+  handout: Handout;
+}
 export interface PongMessage {
   type: "pong";
 }
@@ -343,6 +363,7 @@ export type ServerMessage =
   | ChatMessageMessage
   | MapTokenMovedMessage
   | MapPingedMessage
+  | DmHandoutShownMessage
   | PongMessage;
 
 export type ServerMessageType = ServerMessage["type"];

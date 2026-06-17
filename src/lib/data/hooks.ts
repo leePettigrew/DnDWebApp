@@ -13,6 +13,7 @@ import type {
   ConnectionStatus,
   CreateInput,
   CurrentUser,
+  Handout,
   MapPing,
   RealtimeController,
   Repository,
@@ -182,6 +183,17 @@ export function useMapPings(): MapPing[] {
     [provider],
   );
   return pings;
+}
+
+/** The most recent DM handout pushed to the table, until dismissed. */
+export function useHandout(): { handout: Handout | null; dismiss: () => void } {
+  const provider = useDataProvider();
+  const [handout, setHandout] = useState<Handout | null>(null);
+  useEffect(
+    () => provider.realtime.subscribeHandouts((h) => setHandout(h)),
+    [provider],
+  );
+  return { handout, dismiss: () => setHandout(null) };
 }
 
 /** Campaign chat — live messages + a send function (no-op in solo mode). */

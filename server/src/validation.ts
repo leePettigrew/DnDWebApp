@@ -142,6 +142,12 @@ const message = z.discriminatedUnion("type", [
     x: z.number().finite(),
     y: z.number().finite(),
   }),
+  z.object({
+    type: z.literal("dm:handout"),
+    title: z.string().max(120).optional(),
+    body: z.string().max(4000).optional(),
+    imageUrl: z.string().max(2000).optional(),
+  }),
   z.object({ type: z.literal("ping") }),
 ]);
 

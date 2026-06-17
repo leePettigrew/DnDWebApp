@@ -26,6 +26,7 @@ import type {
   DataProvider,
   DataProviderCapabilities,
   LoginInput,
+  Handout,
   MapPing,
   RealtimeController,
   RegisterInput,
@@ -202,6 +203,7 @@ class LocalRealtimeController implements RealtimeController {
   private summaries: CampaignSummary[] = [];
 
   private pingListeners = new Set<(p: MapPing) => void>();
+  private handoutListeners = new Set<(h: Handout) => void>();
 
   constructor(
     private readonly campaigns: Repository<Campaign>,
@@ -318,6 +320,14 @@ class LocalRealtimeController implements RealtimeController {
   subscribePings(listener: (p: MapPing) => void): Unsubscribe {
     this.pingListeners.add(listener);
     return () => this.pingListeners.delete(listener);
+  }
+  shareHandout(handout: Handout): void {
+    // Solo has no table, but surface it locally as a preview.
+    this.handoutListeners.forEach((l) => l(handout));
+  }
+  subscribeHandouts(listener: (h: Handout) => void): Unsubscribe {
+    this.handoutListeners.add(listener);
+    return () => this.handoutListeners.delete(listener);
   }
 
   getChat(): ChatMessage[] {

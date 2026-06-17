@@ -14,6 +14,7 @@ import {
 import { SessionPanel } from "@/components/multiplayer/SessionPanel";
 import { ConnectionPill } from "@/components/multiplayer/ConnectionPill";
 import { ChatWidget } from "@/components/multiplayer/ChatWidget";
+import { HandoutOverlay } from "@/components/dm/HandoutOverlay";
 import { ThemeToggle } from "./ThemeToggle";
 import { NAV_ITEMS } from "./nav-items";
 
@@ -184,6 +185,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </main>
 
       <ChatWidget />
+      <HandoutOverlay />
     </div>
   );
 }

@@ -35,6 +35,7 @@ import type {
   CurrentUser,
   DataProvider,
   DataProviderCapabilities,
+  Handout,
   LoginInput,
   MapPing,
   RealtimeController,
@@ -324,6 +325,7 @@ export class RealtimeDataProvider implements DataProvider {
   private chat: ChatMessage[] = [];
   private chatListeners = new Set<(m: ChatMessage[]) => void>();
   private pingListeners = new Set<(p: MapPing) => void>();
+  private handoutListeners = new Set<(h: Handout) => void>();
   private statusListeners = new Set<(s: ConnectionStatus) => void>();
   private pendingCampaign = new Map<
     string,
@@ -439,6 +441,22 @@ export class RealtimeDataProvider implements DataProvider {
         this.pingListeners.add(l);
         return () => this.pingListeners.delete(l);
       },
+      shareHandout: (handout) => {
+        if (this.activeCampaignId && this.conn.isOpen()) {
+          this.conn.send({
+            type: "dm:handout",
+            title: handout.title,
+            body: handout.body,
+            imageUrl: handout.imageUrl,
+          });
+        } else {
+          this.emitHandout(handout);
+        }
+      },
+      subscribeHandouts: (l) => {
+        this.handoutListeners.add(l);
+        return () => this.handoutListeners.delete(l);
+      },
       getChat: () => this.chat,
       subscribeChat: (l) => {
         this.chatListeners.add(l);
@@ -485,6 +503,9 @@ export class RealtimeDataProvider implements DataProvider {
   }
   private emitPing(ping: MapPing): void {
     this.pingListeners.forEach((fn) => fn(ping));
+  }
+  private emitHandout(handout: Handout): void {
+    this.handoutListeners.forEach((fn) => fn(handout));
   }
 
   private setScopedMode(mode: Mode): void {
@@ -712,6 +733,10 @@ export class RealtimeDataProvider implements DataProvider {
           by: msg.by,
           color: msg.color,
         });
+        break;
+      }
+      case "dm:handout:shown": {
+        this.emitHandout(msg.handout);
         break;
       }
       case "pong":

@@ -17,9 +17,12 @@ import type { ID } from "@/lib/domain/ids";
 import type {
   CampaignSummary,
   ChatMessage,
+  Handout,
   PresenceUser,
   Role,
 } from "@shared/protocol";
+
+export type { Handout };
 
 /**
  * ===========================================================================
@@ -180,6 +183,10 @@ export interface RealtimeController {
   /** Drop a transient ping on the map for the whole table. */
   ping(mapId: ID, x: number, y: number): void;
   subscribePings(listener: (ping: MapPing) => void): Unsubscribe;
+
+  /** Push a handout (text/image) to the whole table (DM only; broadcast). */
+  shareHandout(handout: Handout): void;
+  subscribeHandouts(listener: (handout: Handout) => void): Unsubscribe;
 
   /** Campaign chat (multiplayer only; empty/no-op in local mode). */
   getChat(): ChatMessage[];

@@ -18,6 +18,7 @@ import type {
   ClientMessage,
   DicePhysicalMessage,
   DiceRollMessage,
+  DmHandoutMessage,
   MapPingMessage,
   MapTokenMoveMessage,
   EntityCreateMessage,
@@ -128,6 +129,8 @@ export class ClientSession {
         return this.onMapTokenMove(msg);
       case "map:ping":
         return this.onMapPing(msg);
+      case "dm:handout":
+        return this.onDmHandout(msg);
     }
   }
 
@@ -493,6 +496,21 @@ export class ClientSession {
       y: msg.y,
       by: this.displayName,
       color,
+    });
+  }
+
+  // --- DM handouts (DM only) -----------------------------------------------
+
+  private onDmHandout(msg: DmHandoutMessage): void {
+    if (!this.requireCampaign()) return;
+    if (this.role !== "dm") return; // only the DM may push handouts
+    const title = msg.title?.trim() || undefined;
+    const body = msg.body?.trim() || undefined;
+    const imageUrl = msg.imageUrl?.trim() || undefined;
+    if (!title && !body && !imageUrl) return;
+    this.rooms.get(this.campaignId!).broadcast({
+      type: "dm:handout:shown",
+      handout: { title, body, imageUrl, fromName: this.displayName },
     });
   }
 
