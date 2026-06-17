@@ -7,6 +7,7 @@ import {
   HelmIcon,
   HomeIcon,
   ScrollIcon,
+  SparkIcon,
   SwordsIcon,
 } from "@/components/ui/icons";
 
@@ -26,5 +27,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/compendium", label: "Compendium", icon: FeatherIcon, blurb: "SRD spells, gear & monsters" },
   { href: "/encounters", label: "Encounters", icon: SwordsIcon, blurb: "Assemble and arm your battles" },
   { href: "/combat", label: "War Table", icon: BookIcon, blurb: "Initiative & combat tracker" },
+  { href: "/dm", label: "DM Tools", icon: SparkIcon, blurb: "Loot, NPCs & a DM screen" },
   { href: "/codex", label: "Codex", icon: ScrollIcon, blurb: "Notes, maps & session logs" },
 ];
