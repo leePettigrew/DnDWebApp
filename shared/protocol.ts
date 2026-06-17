@@ -40,6 +40,8 @@ export interface UserDTO {
   id: ID;
   username: string;
   displayName: string;
+  /** True for the server owner (matches ADMIN_USERNAME). Unlocks the admin panel. */
+  isAdmin?: boolean;
 }
 
 /** A campaign as seen by a member, with their role. joinCode is DM-only. */

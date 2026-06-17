@@ -34,7 +34,7 @@ import type { CombatState } from "../../shared/domain";
 import type { Repositories } from "./repositories";
 import type { RoomMember, RoomManager } from "./rooms";
 import { parseClientMessage } from "./validation";
-import { verifyToken } from "./auth";
+import { isAdminUser, verifyToken } from "./auth";
 import { cryptoRng, emptyCombat, generateJoinCode } from "./util";
 
 /** Collections only the DM may write. characters + rollPresets have own rules. */
@@ -148,6 +148,7 @@ export class ClientSession {
         id: user.id,
         username: user.username,
         displayName: user.displayName,
+        isAdmin: isAdminUser(user),
       },
     });
     this.sendCampaignList();

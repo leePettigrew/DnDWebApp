@@ -32,6 +32,12 @@ export const config = {
   authSecret: process.env.AUTH_SECRET ?? "",
   dbPath: process.env.DB_PATH ?? "./data/dragons-ledger.sqlite",
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
+  /**
+   * Username of the server owner / superadmin (case-insensitive). When that
+   * account logs in it gets the admin panel. Empty = no admin. Set
+   * ADMIN_USERNAME in the server env; the account still has to register first.
+   */
+  adminUsername: process.env.ADMIN_USERNAME ?? "",
   /** Token lifetime — long, since this is a private group. */
   tokenTtlSeconds: 60 * 60 * 24 * 30,
 };

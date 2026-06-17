@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { AppError, loginUser, registerUser, statusFor } from "./auth";
+import { handleAdminRequest } from "./admin";
 import type { Repositories } from "./repositories";
 import { config } from "./config";
 
@@ -16,8 +17,11 @@ function resolveOrigin(req: IncomingMessage): string {
 
 function setCors(req: IncomingMessage, res: ServerResponse): void {
   res.setHeader("Access-Control-Allow-Origin", resolveOrigin(req));
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PATCH, PUT, DELETE, OPTIONS",
+  );
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Vary", "Origin");
 }
 
@@ -64,6 +68,10 @@ export async function handleHttpRequest(
     res.writeHead(204);
     res.end();
     return true;
+  }
+  // Admin panel API (any method). Gated server-side to the admin user.
+  if ((req.url ?? "").startsWith("/admin/")) {
+    return handleAdminRequest(req, res, repos);
   }
   if (req.method !== "POST") return false;
   if (req.url !== "/auth/register" && req.url !== "/auth/login") return false;

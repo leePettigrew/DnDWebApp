@@ -48,8 +48,35 @@ const loginSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
+/** The server owner, identified by the ADMIN_USERNAME env (case-insensitive). */
+export function isAdminUser(u: Pick<UserRecord, "username">): boolean {
+  const admin = config.adminUsername.trim().toLowerCase();
+  return admin !== "" && u.username.trim().toLowerCase() === admin;
+}
+
 function toDTO(u: UserRecord): UserDTO {
-  return { id: u.id, username: u.username, displayName: u.displayName };
+  return {
+    id: u.id,
+    username: u.username,
+    displayName: u.displayName,
+    isAdmin: isAdminUser(u),
+  };
+}
+
+/** Verify a Bearer token and return the user only if they are the admin. */
+export function requireAdmin(
+  repos: Repositories,
+  authHeader: string | undefined,
+): UserRecord | null {
+  const token = authHeader?.startsWith("Bearer ")
+    ? authHeader.slice(7).trim()
+    : null;
+  if (!token) return null;
+  const verified = verifyToken(token);
+  if (!verified) return null;
+  const user = repos.users.findById(verified.userId);
+  if (!user || !isAdminUser(user)) return null;
+  return user;
 }
 
 function firstIssue(err: z.ZodError): string {

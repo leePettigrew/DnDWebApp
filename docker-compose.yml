@@ -19,6 +19,7 @@ services:
       - DB_PATH=/app/server/data/dragons-ledger.sqlite
       - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
       - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-}
     volumes:
       - ${DATA_DIR:-./data}:/app/server/data
     ports:

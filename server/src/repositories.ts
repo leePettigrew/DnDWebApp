@@ -89,6 +89,16 @@ export interface ChatRepository {
   list(campaignId: string, limit?: number): ChatMessage[];
 }
 
+/** Cross-campaign queries used only by the admin panel. */
+export interface AdminRepository {
+  listUsers(): UserRecord[];
+  listCampaigns(): CampaignRecord[];
+  /** Delete a campaign and ALL of its data (entities, combat, rolls, chat, members). */
+  deleteCampaign(id: string): void;
+  /** Delete a user and their memberships (their campaigns are left intact). */
+  deleteUser(id: string): void;
+}
+
 export interface Repositories {
   users: UserRepository;
   campaigns: CampaignRepository;
@@ -97,4 +107,5 @@ export interface Repositories {
   combat: CombatRepository;
   rollLog: RollLogRepository;
   chat: ChatRepository;
+  admin: AdminRepository;
 }

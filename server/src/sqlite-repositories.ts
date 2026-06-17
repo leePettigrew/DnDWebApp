@@ -7,6 +7,7 @@ import type {
 import type { ChatMessage, ScopedCollection } from "../../shared/protocol";
 import { SCOPED_TABLES } from "./db";
 import type {
+  AdminRepository,
   CampaignRecord,
   CampaignRepository,
   ChatRepository,
@@ -272,6 +273,61 @@ function createChatRepository(db: DatabaseSync): ChatRepository {
   };
 }
 
+function createAdminRepository(db: DatabaseSync): AdminRepository {
+  const userRows = db.prepare(`SELECT * FROM users ORDER BY created_at`);
+  const campaignRows = db.prepare(`SELECT * FROM campaigns ORDER BY created_at`);
+  const mapUser = (r: Row): UserRecord => ({
+    id: str(r.id),
+    username: str(r.username),
+    displayName: str(r.display_name),
+    passwordHash: str(r.password_hash),
+    createdAt: str(r.created_at),
+  });
+  const mapCampaign = (r: Row): CampaignRecord => ({
+    id: str(r.id),
+    name: str(r.name),
+    setting: opt(r.setting),
+    description: opt(r.description),
+    joinCode: str(r.join_code),
+    createdAt: str(r.created_at),
+    updatedAt: str(r.updated_at),
+  });
+  const delScoped = Object.values(SCOPED_TABLES).map((t) =>
+    db.prepare(`DELETE FROM ${t} WHERE campaign_id = ?`),
+  );
+  const delCombat = db.prepare(`DELETE FROM combat_state WHERE campaign_id = ?`);
+  const delRolls = db.prepare(`DELETE FROM roll_log WHERE campaign_id = ?`);
+  const delChat = db.prepare(`DELETE FROM chat_messages WHERE campaign_id = ?`);
+  const delMembersByCampaign = db.prepare(
+    `DELETE FROM memberships WHERE campaign_id = ?`,
+  );
+  const delCampaign = db.prepare(`DELETE FROM campaigns WHERE id = ?`);
+  const delMembersByUser = db.prepare(
+    `DELETE FROM memberships WHERE user_id = ?`,
+  );
+  const delUser = db.prepare(`DELETE FROM users WHERE id = ?`);
+  return {
+    listUsers() {
+      return (userRows.all() as Row[]).map(mapUser);
+    },
+    listCampaigns() {
+      return (campaignRows.all() as Row[]).map(mapCampaign);
+    },
+    deleteCampaign(id) {
+      for (const stmt of delScoped) stmt.run(id);
+      delCombat.run(id);
+      delRolls.run(id);
+      delChat.run(id);
+      delMembersByCampaign.run(id);
+      delCampaign.run(id);
+    },
+    deleteUser(id) {
+      delMembersByUser.run(id);
+      delUser.run(id);
+    },
+  };
+}
+
 export function createSqliteRepositories(db: DatabaseSync): Repositories {
   const entities = {} as Record<ScopedCollection, EntityRepository>;
   for (const [collection, table] of Object.entries(SCOPED_TABLES)) {
@@ -285,5 +341,6 @@ export function createSqliteRepositories(db: DatabaseSync): Repositories {
     combat: createCombatRepository(db),
     rollLog: createRollLogRepository(db),
     chat: createChatRepository(db),
+    admin: createAdminRepository(db),
   };
 }
