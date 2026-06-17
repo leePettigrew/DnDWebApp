@@ -64,6 +64,18 @@ export function CharacterEditor({
   const setCoin = (key: keyof Currency, value: number) =>
     set("currency", { ...currency, [key]: value });
 
+  const slotMax = (level: number) =>
+    d.spellSlots?.find((s) => s.level === level)?.max ?? 0;
+  function setSlotMax(level: number, max: number) {
+    const existing = d.spellSlots?.find((s) => s.level === level);
+    const slots = (d.spellSlots ?? []).filter((s) => s.level !== level);
+    if (max > 0) {
+      slots.push({ level, max, used: Math.min(existing?.used ?? 0, max) });
+    }
+    slots.sort((a, b) => a.level - b.level);
+    set("spellSlots", slots);
+  }
+
   return (
     <div className="space-y-6">
       {/* Sticky save bar */}
@@ -109,6 +121,17 @@ export function CharacterEditor({
             <NumberField label="Current HP" value={d.currentHp} onChange={(e) => set("currentHp", num(e.target.value))} />
             <NumberField label="Temp HP" value={d.tempHp} onChange={(e) => set("tempHp", num(e.target.value))} />
             <TextField label="Hit Dice" value={d.hitDice ?? ""} onChange={(e) => set("hitDice", e.target.value)} />
+            <SelectField
+              label="Hit die"
+              value={d.hitDieSize ?? 8}
+              onChange={(e) => set("hitDieSize", num(e.target.value))}
+            >
+              {[6, 8, 10, 12].map((s) => (
+                <option key={s} value={s}>
+                  d{s}
+                </option>
+              ))}
+            </SelectField>
           </div>
         </Panel>
 
@@ -174,6 +197,26 @@ export function CharacterEditor({
               </option>
             ))}
           </SelectField>
+
+          <div className="mt-4">
+            <p className="mb-1.5 font-display text-xs font-semibold uppercase tracking-[0.12em] text-ink-soft">
+              Spell slots — max per level
+            </p>
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((lvl) => (
+                <NumberField
+                  key={lvl}
+                  label={`Lvl ${lvl}`}
+                  min={0}
+                  max={9}
+                  value={slotMax(lvl)}
+                  onChange={(e) =>
+                    setSlotMax(lvl, Math.max(0, Math.min(9, num(e.target.value))))
+                  }
+                />
+              ))}
+            </div>
+          </div>
         </Panel>
       </div>
 
