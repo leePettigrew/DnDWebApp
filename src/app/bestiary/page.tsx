@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/components/ui/cn";
 import { ClawIcon, HeartIcon, PlusIcon, ShieldIcon, TrashIcon } from "@/components/ui/icons";
-import { useCampaigns, useStatBlocks } from "@/lib/data/hooks";
+import { useCampaigns, usePermissions, useStatBlocks } from "@/lib/data/hooks";
 import { newStatBlockInput } from "@/lib/domain/factories";
 import type { StatBlock } from "@/lib/domain/types";
 
@@ -21,6 +21,7 @@ export default function BestiaryPage() {
   const router = useRouter();
   const { items: campaigns } = useCampaigns();
   const { items, create, remove } = useStatBlocks();
+  const canManage = usePermissions().canEdit("statBlocks");
   const [filter, setFilter] = useState<Filter>("all");
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
 
@@ -43,14 +44,16 @@ export default function BestiaryPage() {
         title="Monsters & NPCs"
         description="Store stat blocks for every foe and friend, then drop them into encounters."
         actions={
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => createBlock("npc")}>
-              <PlusIcon className="h-4 w-4" /> NPC
-            </Button>
-            <Button onClick={() => createBlock("monster")}>
-              <PlusIcon className="h-4 w-4" /> Monster
-            </Button>
-          </div>
+          canManage ? (
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => createBlock("npc")}>
+                <PlusIcon className="h-4 w-4" /> NPC
+              </Button>
+              <Button onClick={() => createBlock("monster")}>
+                <PlusIcon className="h-4 w-4" /> Monster
+              </Button>
+            </div>
+          ) : undefined
         }
       />
 
@@ -75,11 +78,17 @@ export default function BestiaryPage() {
         <EmptyState
           icon={<ClawIcon />}
           title="The bestiary is empty"
-          description="Add a monster or NPC stat block to begin your menagerie."
+          description={
+            canManage
+              ? "Add a monster or NPC stat block to begin your menagerie."
+              : "Only the DM can add stat blocks to the bestiary."
+          }
           action={
-            <Button onClick={() => createBlock("monster")}>
-              <PlusIcon className="h-4 w-4" /> New Monster
-            </Button>
+            canManage ? (
+              <Button onClick={() => createBlock("monster")}>
+                <PlusIcon className="h-4 w-4" /> New Monster
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -110,14 +119,16 @@ export default function BestiaryPage() {
                   </div>
                 </div>
               </Link>
-              <button
-                type="button"
-                onClick={() => setDeleting({ id: s.id, name: s.name })}
-                aria-label={`Delete ${s.name}`}
-                className="absolute right-2 top-2 rounded-md p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-oxblood hover:text-parchment-50 focus:opacity-100 group-hover:opacity-100"
-              >
-                <TrashIcon className="h-4 w-4" />
-              </button>
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => setDeleting({ id: s.id, name: s.name })}
+                  aria-label={`Delete ${s.name}`}
+                  className="absolute right-2 top-2 rounded-md p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-oxblood hover:text-parchment-50 focus:opacity-100 group-hover:opacity-100"
+                >
+                  <TrashIcon className="h-4 w-4" />
+                </button>
+              )}
             </div>
           ))}
         </div>

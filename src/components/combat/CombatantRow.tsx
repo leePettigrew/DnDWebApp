@@ -17,6 +17,7 @@ import {
 export function CombatantRow({
   combatant: c,
   isActive,
+  readOnly = false,
   onDamage,
   onHeal,
   onSetTemp,
@@ -26,6 +27,7 @@ export function CombatantRow({
 }: {
   combatant: Combatant;
   isActive: boolean;
+  readOnly?: boolean;
   onDamage: (amt: number) => void;
   onHeal: (amt: number) => void;
   onSetTemp: (amt: number) => void;
@@ -153,20 +155,23 @@ export function CombatantRow({
           </span>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          aria-label="Toggle combatant details"
-          className="shrink-0 rounded-md p-1.5 text-ink-faint hover:bg-parchment-300/60 hover:text-ink"
-        >
-          <ChevronRightIcon
-            className={cn("h-5 w-5 transition-transform", expanded && "rotate-90")}
-          />
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            aria-label="Toggle combatant details"
+            className="shrink-0 rounded-md p-1.5 text-ink-faint hover:bg-parchment-300/60 hover:text-ink"
+          >
+            <ChevronRightIcon
+              className={cn("h-5 w-5 transition-transform", expanded && "rotate-90")}
+            />
+          </button>
+        )}
       </div>
 
       {/* Quick HP row (always visible, compact) */}
+      {!readOnly && (
       <div className="flex flex-wrap items-center gap-2 border-t border-parchment-400/40 px-3 py-2">
         <input
           type="number"
@@ -200,6 +205,7 @@ export function CombatantRow({
           {c.tempHp > 0 && <span className="text-forest"> +{c.tempHp}</span>}
         </span>
       </div>
+      )}
 
       {/* Death saves — for a downed PC */}
       {c.isPC && down && (
@@ -215,6 +221,7 @@ export function CombatantRow({
                 <button
                   key={i}
                   aria-label={`Success ${i + 1}`}
+                  disabled={readOnly}
                   onClick={() => setDeath("successes", on ? i : i + 1)}
                   className={cn(
                     "h-4 w-4 rounded-full border-2 transition-colors",
@@ -234,6 +241,7 @@ export function CombatantRow({
                 <button
                   key={i}
                   aria-label={`Failure ${i + 1}`}
+                  disabled={readOnly}
                   onClick={() => setDeath("failures", on ? i : i + 1)}
                   className={cn(
                     "h-4 w-4 rounded-full border-2 transition-colors",
@@ -259,7 +267,7 @@ export function CombatantRow({
       )}
 
       {/* Expanded editor */}
-      {expanded && (
+      {expanded && !readOnly && (
         <div className="space-y-3 border-t border-parchment-400/40 bg-parchment-100/40 p-3 animate-fade-in">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <label className="text-xs">

@@ -16,7 +16,12 @@ import {
   SwordsIcon,
   TrashIcon,
 } from "@/components/ui/icons";
-import { useCombat, useEncounters, useStatBlocks } from "@/lib/data/hooks";
+import {
+  useCombat,
+  useEncounters,
+  usePermissions,
+  useStatBlocks,
+} from "@/lib/data/hooks";
 import {
   combatantsFromEncounter,
   sortByInitiative,
@@ -32,6 +37,7 @@ export default function EncounterDetailPage() {
   const { items, loading, update } = useEncounters();
   const { items: statBlocks } = useStatBlocks();
   const { set: setCombat } = useCombat();
+  const canManage = usePermissions().canEdit("encounters");
   const encounter = items.find((e) => e.id === id);
 
   const [name, setName] = useState("");
@@ -143,9 +149,11 @@ export default function EncounterDetailPage() {
         >
           <ChevronLeftIcon className="h-4 w-4" /> Encounters
         </Link>
-        <Button onClick={sendToWarTable} disabled={total === 0}>
-          <SwordsIcon className="h-4 w-4" /> Send to War Table
-        </Button>
+        {canManage && (
+          <Button onClick={sendToWarTable} disabled={total === 0}>
+            <SwordsIcon className="h-4 w-4" /> Send to War Table
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -154,6 +162,7 @@ export default function EncounterDetailPage() {
             <TextField
               label="Name"
               value={name}
+              disabled={!canManage}
               onChange={(e) => setName(e.target.value)}
               onBlur={() => persist()}
             />
@@ -161,6 +170,7 @@ export default function EncounterDetailPage() {
               label="Description"
               rows={5}
               value={description}
+              disabled={!canManage}
               onChange={(e) => setDescription(e.target.value)}
               onBlur={() => persist()}
             />
@@ -172,26 +182,28 @@ export default function EncounterDetailPage() {
           eyebrow={`${total} total`}
           action={<Badge tone="oxblood">{entries.length} kinds</Badge>}
         >
-          <div className="mb-4 flex gap-2">
-            <select
-              value={selectedBlock}
-              onChange={(e) => setSelectedBlock(e.target.value)}
-              aria-label="Choose a stat block"
-              className="flex-1 rounded-md border border-parchment-400 bg-parchment-50 px-3 py-2 text-ink focus:border-brass focus:outline-none"
-            >
-              <option value="">
-                {statBlocks.length ? "Choose a creature…" : "No stat blocks — add some in the Bestiary"}
-              </option>
-              {statBlocks.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} (CR {s.challengeRating ?? "—"})
+          {canManage && (
+            <div className="mb-4 flex gap-2">
+              <select
+                value={selectedBlock}
+                onChange={(e) => setSelectedBlock(e.target.value)}
+                aria-label="Choose a stat block"
+                className="flex-1 rounded-md border border-parchment-400 bg-parchment-50 px-3 py-2 text-ink focus:border-brass focus:outline-none"
+              >
+                <option value="">
+                  {statBlocks.length ? "Choose a creature…" : "No stat blocks — add some in the Bestiary"}
                 </option>
-              ))}
-            </select>
-            <Button variant="secondary" onClick={addEntry} disabled={statBlocks.length === 0}>
-              <PlusIcon className="h-4 w-4" /> Add
-            </Button>
-          </div>
+                {statBlocks.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} (CR {s.challengeRating ?? "—"})
+                  </option>
+                ))}
+              </select>
+              <Button variant="secondary" onClick={addEntry} disabled={statBlocks.length === 0}>
+                <PlusIcon className="h-4 w-4" /> Add
+              </Button>
+            </div>
+          )}
 
           {entries.length === 0 ? (
             <p className="text-sm text-ink-faint">
@@ -207,32 +219,40 @@ export default function EncounterDetailPage() {
                   <span className="flex-1 font-display text-sm font-semibold text-ink">
                     {entry.label}
                   </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setCount(entry.id, -1)}
-                      aria-label="Decrease count"
-                      className="rounded-md border border-parchment-400 p-1 hover:border-oxblood hover:text-oxblood"
-                    >
-                      <MinusIcon className="h-3.5 w-3.5" />
-                    </button>
-                    <span className="numerals w-7 text-center font-display font-bold text-ink">
-                      {entry.count}
+                  {canManage ? (
+                    <>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setCount(entry.id, -1)}
+                          aria-label="Decrease count"
+                          className="rounded-md border border-parchment-400 p-1 hover:border-oxblood hover:text-oxblood"
+                        >
+                          <MinusIcon className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="numerals w-7 text-center font-display font-bold text-ink">
+                          {entry.count}
+                        </span>
+                        <button
+                          onClick={() => setCount(entry.id, 1)}
+                          aria-label="Increase count"
+                          className="rounded-md border border-parchment-400 p-1 hover:border-brass hover:text-brass-dark"
+                        >
+                          <PlusIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => removeEntry(entry.id)}
+                        aria-label={`Remove ${entry.label}`}
+                        className="ml-1 rounded-md p-1.5 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <span className="numerals font-display font-bold text-ink">
+                      ×{entry.count}
                     </span>
-                    <button
-                      onClick={() => setCount(entry.id, 1)}
-                      aria-label="Increase count"
-                      className="rounded-md border border-parchment-400 p-1 hover:border-brass hover:text-brass-dark"
-                    >
-                      <PlusIcon className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => removeEntry(entry.id)}
-                    aria-label={`Remove ${entry.label}`}
-                    className="ml-1 rounded-md p-1.5 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
-                  >
-                    <TrashIcon className="h-4 w-4" />
-                  </button>
+                  )}
                 </li>
               ))}
             </ul>

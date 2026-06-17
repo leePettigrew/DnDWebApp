@@ -9,7 +9,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ChevronLeftIcon, ClawIcon, EditIcon, TrashIcon } from "@/components/ui/icons";
 import { StatBlockView } from "@/components/bestiary/StatBlockView";
 import { StatBlockEditor } from "@/components/bestiary/StatBlockEditor";
-import { useStatBlocks } from "@/lib/data/hooks";
+import { usePermissions, useStatBlocks } from "@/lib/data/hooks";
 import type { StatBlock } from "@/lib/domain/types";
 
 export default function StatBlockDetailPage() {
@@ -18,16 +18,20 @@ export default function StatBlockDetailPage() {
   const router = useRouter();
 
   const { items, loading, update, remove } = useStatBlocks();
+  const canManage = usePermissions().canEdit("statBlocks");
   const statBlock = items.find((s) => s.id === id);
 
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("edit") === "1") {
+    if (
+      canManage &&
+      new URLSearchParams(window.location.search).get("edit") === "1"
+    ) {
       setEditing(true);
     }
-  }, []);
+  }, [canManage]);
 
   if (loading && !statBlock) {
     return (
@@ -72,7 +76,7 @@ export default function StatBlockDetailPage() {
         >
           <ChevronLeftIcon className="h-4 w-4" /> Bestiary
         </Link>
-        {!editing && (
+        {!editing && canManage && (
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
               <EditIcon className="h-4 w-4" /> Edit
@@ -84,7 +88,7 @@ export default function StatBlockDetailPage() {
         )}
       </div>
 
-      {editing ? (
+      {editing && canManage ? (
         <StatBlockEditor
           statBlock={statBlock}
           onSave={save}

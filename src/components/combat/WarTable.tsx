@@ -18,7 +18,12 @@ import {
   TrashIcon,
 } from "@/components/ui/icons";
 import { CombatantRow } from "./CombatantRow";
-import { useCharacters, useCombat, useStatBlocks } from "@/lib/data/hooks";
+import {
+  useCharacters,
+  useCombat,
+  usePermissions,
+  useStatBlocks,
+} from "@/lib/data/hooks";
 import type { Combatant } from "@/lib/domain/types";
 import {
   combatantFromCharacter,
@@ -143,6 +148,7 @@ function AddCombatants({ onAdd }: { onAdd: (c: Combatant) => void }) {
 
 export function WarTable() {
   const { value: combat, loading, set } = useCombat();
+  const canEdit = usePermissions().canEditCombat;
   const [roster, setRoster] = useState<Combatant[]>([]);
   const [confirmEnd, setConfirmEnd] = useState(false);
 
@@ -157,6 +163,17 @@ export function WarTable() {
 
   // -------- Setup (no active combat) --------
   if (!combat?.active) {
+    if (!canEdit) {
+      return (
+        <Panel title="The War Table" eyebrow="Initiative">
+          <EmptyState
+            icon={<SwordsIcon />}
+            title="No battle underway"
+            description="The DM hasn't started combat yet. When they do, the initiative order appears here."
+          />
+        </Panel>
+      );
+    }
     return (
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title="Muster the Combatants" eyebrow="Step 1">
@@ -275,24 +292,26 @@ export function WarTable() {
           </div>
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => set(Combat.prevTurn(combat))}
-            disabled={combat.combatants.length === 0}
-          >
-            <ChevronLeftIcon className="h-4 w-4" /> Prev
-          </Button>
-          <Button
-            onClick={() => set(Combat.nextTurn(combat))}
-            disabled={combat.combatants.length === 0}
-          >
-            Next Turn <ChevronRightIcon className="h-4 w-4" />
-          </Button>
-          <Button variant="danger" onClick={() => setConfirmEnd(true)}>
-            End
-          </Button>
-        </div>
+        {canEdit && (
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => set(Combat.prevTurn(combat))}
+              disabled={combat.combatants.length === 0}
+            >
+              <ChevronLeftIcon className="h-4 w-4" /> Prev
+            </Button>
+            <Button
+              onClick={() => set(Combat.nextTurn(combat))}
+              disabled={combat.combatants.length === 0}
+            >
+              Next Turn <ChevronRightIcon className="h-4 w-4" />
+            </Button>
+            <Button variant="danger" onClick={() => setConfirmEnd(true)}>
+              End
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Initiative list */}
@@ -309,6 +328,7 @@ export function WarTable() {
               key={c.id}
               combatant={c}
               isActive={i === combat.turnIndex}
+              readOnly={!canEdit}
               onDamage={(amt) => set(Combat.applyDamage(combat, c.id, amt))}
               onHeal={(amt) => set(Combat.applyHeal(combat, c.id, amt))}
               onSetTemp={(amt) => set(Combat.setTempHp(combat, c.id, amt))}
@@ -322,9 +342,11 @@ export function WarTable() {
         </ul>
       )}
 
-      <Panel title="Reinforcements" eyebrow="Add mid-fight">
-        <AddCombatants onAdd={(c) => set(Combat.addCombatant(combat, c))} />
-      </Panel>
+      {canEdit && (
+        <Panel title="Reinforcements" eyebrow="Add mid-fight">
+          <AddCombatants onAdd={(c) => set(Combat.addCombatant(combat, c))} />
+        </Panel>
+      )}
 
       <ConfirmDialog
         open={confirmEnd}
