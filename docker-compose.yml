@@ -1,0 +1,43 @@
+# Dragon's Ledger — full stack (frontend + realtime backend) for self-hosting.
+#
+# 1. Copy .env.deploy.example -> .env and fill in the values.
+# 2. docker compose up -d --build
+#
+# Both containers publish to the host so Nginx Proxy Manager (or a Cloudflare
+# Tunnel) can proxy your domains to them. The SQLite DB is bind-mounted to a
+# host folder so it survives rebuilds/updates.
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: dragons-ledger-server
+    container_name: dragons-ledger-server
+    restart: unless-stopped
+    environment:
+      - PORT=8787
+      - DB_PATH=/app/server/data/dragons-ledger.sqlite
+      - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+    volumes:
+      - ${DATA_DIR:-./data}:/app/server/data
+    ports:
+      - "${SERVER_PORT:-8787}:8787"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Baked into the client at build time — the public URL of `server`.
+        NEXT_PUBLIC_MULTIPLAYER_WS_URL: ${NEXT_PUBLIC_MULTIPLAYER_WS_URL:?Set NEXT_PUBLIC_MULTIPLAYER_WS_URL in .env}
+    image: dragons-ledger-web
+    container_name: dragons-ledger-web
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - server

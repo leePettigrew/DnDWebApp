@@ -76,6 +76,7 @@ desktop.ini
 /server/node_modules
 /server/dist
 /server/data
+/data
 *.sqlite
 *.sqlite3
 *.sqlite-journal
