@@ -94,6 +94,8 @@ export interface SingletonRepository<T> {
 export interface CurrentUser {
   id: string;
   name: string;
+  /** True for the server owner (ADMIN_USERNAME) — unlocks the admin panel. */
+  isAdmin?: boolean;
 }
 
 /**

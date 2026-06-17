@@ -18,6 +18,7 @@ import {
   useCampaigns,
   useCharacters,
   useCombat,
+  useCurrentUser,
   useEncounters,
   usePermissions,
   useSessionLogs,
@@ -63,6 +64,7 @@ export default function HearthPage() {
   const { items: sessions } = useSessionLogs();
   const { value: combat } = useCombat();
   const { isDM } = usePermissions();
+  const user = useCurrentUser();
   const { campaign: activeCampaign } = useActiveCampaign();
 
   // Show the campaign you're actually in (the joined/opened one), not just the
@@ -122,7 +124,10 @@ export default function HearthPage() {
           <Panel title="The Scriptorium" eyebrow="Where to next">
             <div className="grid gap-3 sm:grid-cols-2">
               {NAV_ITEMS.filter(
-                (item) => item.href !== "/" && (isDM || !item.dmOnly),
+                (item) =>
+                  item.href !== "/" &&
+                  (isDM || !item.dmOnly) &&
+                  (user?.isAdmin || !item.adminOnly),
               ).map((item) => {
                 const Icon = item.icon;
                 return (

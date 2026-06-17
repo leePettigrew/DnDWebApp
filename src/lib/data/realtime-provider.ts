@@ -570,7 +570,11 @@ export class RealtimeDataProvider implements DataProvider {
   private onAuthenticated(res: AuthResponse): void {
     this.token = res.token;
     saveToken(res.token);
-    this.setUser({ id: res.user.id, name: res.user.displayName });
+    this.setUser({
+      id: res.user.id,
+      name: res.user.displayName,
+      isAdmin: res.user.isAdmin,
+    });
     this.conn.connect(); // onOpen will send the auth message
   }
   private async logout(): Promise<void> {
@@ -647,7 +651,11 @@ export class RealtimeDataProvider implements DataProvider {
   private handleMessage(msg: ServerMessage): void {
     switch (msg.type) {
       case "authed": {
-        this.setUser({ id: msg.user.id, name: msg.user.displayName });
+        this.setUser({
+          id: msg.user.id,
+          name: msg.user.displayName,
+          isAdmin: msg.user.isAdmin,
+        });
         // After a reconnect, rejoin the campaign we were in.
         if (this.activeCampaignId) {
           this.conn.send({

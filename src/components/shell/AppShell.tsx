@@ -27,9 +27,13 @@ function isActive(pathname: string, href: string): boolean {
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { isDM } = usePermissions();
+  const user = useCurrentUser();
   return (
     <nav className="flex flex-col gap-1" aria-label="Primary">
-      {NAV_ITEMS.filter((item) => isDM || !item.dmOnly).map((item) => {
+      {NAV_ITEMS.filter(
+        (item) =>
+          (isDM || !item.dmOnly) && (user?.isAdmin || !item.adminOnly),
+      ).map((item) => {
         const active = isActive(pathname, item.href);
         const Icon = item.icon;
         return (

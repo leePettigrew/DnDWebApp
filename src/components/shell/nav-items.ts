@@ -8,6 +8,7 @@ import {
   HomeIcon,
   MapIcon,
   ScrollIcon,
+  ShieldIcon,
   SparkIcon,
   SwordsIcon,
 } from "@/components/ui/icons";
@@ -20,6 +21,8 @@ export interface NavItem {
   blurb: string;
   /** Only shown to the DM (hidden from players in a multiplayer campaign). */
   dmOnly?: boolean;
+  /** Only shown to the server owner (ADMIN_USERNAME). */
+  adminOnly?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -33,4 +36,5 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dm", label: "DM Tools", icon: SparkIcon, blurb: "Loot, NPCs & a DM screen", dmOnly: true },
   { href: "/world", label: "World", icon: MapIcon, blurb: "Quests, factions, timeline & atlas" },
   { href: "/codex", label: "Codex", icon: ScrollIcon, blurb: "Notes, maps & session logs" },
+  { href: "/admin", label: "Admin", icon: ShieldIcon, blurb: "Server-wide control", adminOnly: true },
 ];
