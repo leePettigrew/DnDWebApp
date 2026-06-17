@@ -147,13 +147,13 @@ function numberTexture(THREE: Three, value: number, sides: number) {
 }
 
 const PLANE_SIZE: Record<number, number> = {
-  4: 0.5,
-  6: 0.62,
-  8: 0.5,
-  10: 0.4,
-  12: 0.48,
-  20: 0.32,
-  100: 0.4,
+  4: 0.56,
+  6: 0.7,
+  8: 0.56,
+  10: 0.46,
+  12: 0.54,
+  20: 0.38,
+  100: 0.46,
 };
 
 /** Values to print on each face. The rolled value sits on faces[0]. */
@@ -207,8 +207,8 @@ export function DiceTray3D({
       container.appendChild(renderer.domElement);
 
       const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(34, width / height, 0.1, 100);
-      camera.position.set(0, 3.4, 6.4);
+      const camera = new THREE.PerspectiveCamera(36, width / height, 0.1, 100);
+      camera.position.set(0, 3.0, 5.6);
       camera.lookAt(0, 0, 0);
 
       scene.add(new THREE.AmbientLight(0xffe9c4, 0.8));
@@ -354,11 +354,12 @@ export function DiceTray3D({
           });
         });
 
-        // Auto-fit the whole pool into the camera's view.
+        // Auto-fit the pool into the camera's view: small pools scale UP to
+        // fill the tray (capped) and big pools shrink to fit.
         const box = new THREE.Box3().setFromObject(root);
         const s = new THREE.Vector3();
         box.getSize(s);
-        const scale = Math.min(5.4 / (s.x || 1), 2.8 / (s.z || 1), 1);
+        const scale = Math.min(6.2 / (s.x || 1), 3.2 / (s.z || 1), 2.1);
         root.scale.setScalar(scale);
       }
 
@@ -427,7 +428,7 @@ export function DiceTray3D({
   return (
     <div
       ref={containerRef}
-      className="relative h-44 w-full"
+      className="relative h-72 w-full sm:h-80"
       aria-hidden="true"
       data-rolling={rolling ? "true" : undefined}
     />
