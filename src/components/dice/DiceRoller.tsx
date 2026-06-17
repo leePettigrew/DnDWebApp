@@ -14,7 +14,7 @@ import {
   TrashIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/components/ui/cn";
-import { Dice3D } from "./Dice3D";
+import { DiceTray3D } from "./DiceTray3D";
 import { DIE_SIDES, formatSpec } from "@/lib/domain/dice";
 import type {
   DieRoll,
@@ -332,16 +332,15 @@ export function DiceRoller() {
                   {result.label}
                 </p>
               )}
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                {displayRolls.map((r, i) => (
-                  <Dice3D key={i} roll={r} rolling={rolling} delayMs={i * 55} />
-                ))}
-                {result.modifier !== 0 && (
-                  <span className="numerals font-display text-2xl font-bold text-ink-soft">
-                    {result.modifier > 0 ? `+ ${result.modifier}` : `− ${Math.abs(result.modifier)}`}
-                  </span>
-                )}
-              </div>
+              <DiceTray3D rolls={displayRolls} rolling={rolling} />
+              {result.modifier !== 0 && (
+                <span className="numerals font-display text-lg font-bold text-ink-soft">
+                  modifier{" "}
+                  {result.modifier > 0
+                    ? `+${result.modifier}`
+                    : `−${Math.abs(result.modifier)}`}
+                </span>
+              )}
 
               <div className="flex flex-col items-center">
                 <span className="font-display text-xs uppercase tracking-[0.25em] text-ink-faint">
