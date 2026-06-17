@@ -83,6 +83,57 @@ export async function handleAdminRequest(
         }
         return { ...c, members, counts };
       });
+
+      // --- server-wide analytics ---
+      const entitiesByCollection: Record<string, number> = {};
+      let totalRolls = 0;
+      let totalChat = 0;
+      let totalEntities = 0;
+      for (const c of campaigns) {
+        for (const [k, v] of Object.entries(c.counts)) {
+          if (k === "rolls") totalRolls += v;
+          else if (k === "chat") totalChat += v;
+          else {
+            entitiesByCollection[k] = (entitiesByCollection[k] ?? 0) + v;
+            totalEntities += v;
+          }
+        }
+      }
+
+      const rolls = repos.admin.listAllRolls(5000);
+      const d20 = new Array<number>(21).fill(0);
+      let crits = 0;
+      let fumbles = 0;
+      let totalD20 = 0;
+      const byPlayer = new Map<string, number>();
+      const byDay = new Map<string, number>();
+      for (const r of rolls) {
+        if (r.isCrit) crits++;
+        if (r.isFumble) fumbles++;
+        const name = (r.rolledByName ?? "Unknown").trim() || "Unknown";
+        byPlayer.set(name, (byPlayer.get(name) ?? 0) + 1);
+        const day = String(r.timestamp ?? r.createdAt ?? "").slice(0, 10);
+        if (day) byDay.set(day, (byDay.get(day) ?? 0) + 1);
+        for (const die of r.rolls ?? []) {
+          if (die.sides === 20 && die.value >= 1 && die.value <= 20) {
+            d20[die.value]++;
+            totalD20++;
+          }
+        }
+      }
+      const topPlayers = [...byPlayer.entries()]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 8);
+      const activity: { day: string; count: number }[] = [];
+      const today = new Date();
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(today);
+        d.setUTCDate(d.getUTCDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        activity.push({ day: key, count: byDay.get(key) ?? 0 });
+      }
+
       json(res, 200, {
         users: users.map((u) => ({
           id: u.id,
@@ -93,6 +144,19 @@ export async function handleAdminRequest(
         })),
         campaigns,
         collections: SCOPED_COLLECTIONS,
+        analytics: {
+          totals: {
+            users: users.length,
+            campaigns: campaigns.length,
+            rolls: totalRolls,
+            chat: totalChat,
+            entities: totalEntities,
+          },
+          entitiesByCollection,
+          dice: { d20, crits, fumbles, totalD20 },
+          topPlayers,
+          activity,
+        },
       });
       return true;
     }

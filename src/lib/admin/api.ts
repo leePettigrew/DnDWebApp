@@ -74,10 +74,25 @@ export interface AdminCampaignSummary extends AdminCampaign {
   members: AdminMember[];
   counts: Record<string, number>;
 }
+export interface AdminAnalytics {
+  totals: {
+    users: number;
+    campaigns: number;
+    rolls: number;
+    chat: number;
+    entities: number;
+  };
+  entitiesByCollection: Record<string, number>;
+  /** d20 face counts; index 1..20 (index 0 unused). */
+  dice: { d20: number[]; crits: number; fumbles: number; totalD20: number };
+  topPlayers: { name: string; count: number }[];
+  activity: { day: string; count: number }[];
+}
 export interface AdminOverview {
   users: AdminUser[];
   campaigns: AdminCampaignSummary[];
   collections: string[];
+  analytics: AdminAnalytics;
 }
 export interface AdminEntity {
   id: string;

@@ -93,6 +93,8 @@ export interface ChatRepository {
 export interface AdminRepository {
   listUsers(): UserRecord[];
   listCampaigns(): CampaignRecord[];
+  /** Most recent rolls across ALL campaigns (for server analytics). */
+  listAllRolls(limit: number): RollHistoryEntry[];
   /** Delete a campaign and ALL of its data (entities, combat, rolls, chat, members). */
   deleteCampaign(id: string): void;
   /** Delete a user and their memberships (their campaigns are left intact). */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -8,6 +8,7 @@ import { cn } from "@/components/ui/cn";
 import { ChevronLeftIcon, TrashIcon } from "@/components/ui/icons";
 import {
   adminApi,
+  type AdminAnalytics,
   type AdminCampaignDump,
   type AdminEntity,
   type AdminOverview,
@@ -15,6 +16,154 @@ import {
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong.";
+}
+
+function StatTile({
+  label,
+  value,
+  tone = "ink",
+}: {
+  label: string;
+  value: ReactNode;
+  tone?: "ink" | "brass" | "oxblood" | "forest" | "arcane";
+}) {
+  const color =
+    tone === "brass"
+      ? "text-brass-dark"
+      : tone === "oxblood"
+        ? "text-oxblood"
+        : tone === "forest"
+          ? "text-forest"
+          : tone === "arcane"
+            ? "text-arcane"
+            : "text-ink";
+  return (
+    <div className="rounded-card border border-parchment-400/60 bg-parchment-100/70 px-3 py-3 text-center">
+      <div className={cn("numerals font-display text-2xl font-bold", color)}>
+        {value}
+      </div>
+      <div className="text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-ink-faint">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function AnalyticsView({ a }: { a: AdminAnalytics }) {
+  const maxD20 = Math.max(1, ...a.dice.d20.slice(1));
+  const maxAct = Math.max(1, ...a.activity.map((x) => x.count));
+  const maxTop = Math.max(1, ...a.topPlayers.map((x) => x.count));
+  const pct = (n: number) =>
+    a.dice.totalD20 ? ((n / a.dice.totalD20) * 100).toFixed(1) : "0.0";
+
+  return (
+    <Panel title="Server Analytics" eyebrow="At a glance">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <StatTile label="Players" value={a.totals.users} />
+        <StatTile label="Campaigns" value={a.totals.campaigns} tone="brass" />
+        <StatTile label="Total rolls" value={a.totals.rolls} tone="arcane" />
+        <StatTile label="Records" value={a.totals.entities} />
+        <StatTile label="Nat 20s" value={a.dice.crits} tone="forest" />
+        <StatTile label="Nat 1s" value={a.dice.fumbles} tone="oxblood" />
+      </div>
+
+      {/* d20 distribution */}
+      <div className="mt-6">
+        <div className="mb-2 flex items-baseline justify-between">
+          <p className="font-display text-xs font-semibold uppercase tracking-[0.14em] text-ink-soft">
+            d20 distribution
+          </p>
+          <p className="text-xs text-ink-faint">
+            {a.dice.totalD20.toLocaleString()} d20s · {pct(a.dice.crits)}% crit ·{" "}
+            {pct(a.dice.fumbles)}% fumble{" "}
+            <span className="text-ink-faint/70">(fair ≈ 5%)</span>
+          </p>
+        </div>
+        <div className="flex h-32 items-end gap-1">
+          {Array.from({ length: 20 }, (_, i) => i + 1).map((face) => {
+            const n = a.dice.d20[face] ?? 0;
+            const h = Math.max(2, (n / maxD20) * 100);
+            const color =
+              face === 20
+                ? "bg-forest"
+                : face === 1
+                  ? "bg-oxblood"
+                  : "bg-brass/70";
+            return (
+              <div
+                key={face}
+                className="flex flex-1 flex-col items-center justify-end"
+                title={`${face}: ${n} (${pct(n)}%)`}
+              >
+                <div
+                  className={cn("w-full rounded-t-sm transition-all", color)}
+                  style={{ height: `${h}%` }}
+                />
+                <span className="numerals mt-1 text-[0.55rem] text-ink-faint">
+                  {face}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        {/* Activity timeline */}
+        <div>
+          <p className="mb-2 font-display text-xs font-semibold uppercase tracking-[0.14em] text-ink-soft">
+            Rolls · last 14 days
+          </p>
+          <div className="flex h-24 items-end gap-1">
+            {a.activity.map((d) => (
+              <div
+                key={d.day}
+                className="flex flex-1 flex-col items-center justify-end"
+                title={`${d.day}: ${d.count}`}
+              >
+                <div
+                  className="w-full rounded-t-sm bg-arcane/70"
+                  style={{ height: `${Math.max(2, (d.count / maxAct) * 100)}%` }}
+                />
+                <span className="text-[0.5rem] text-ink-faint">
+                  {d.day.slice(5)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Top rollers */}
+        <div>
+          <p className="mb-2 font-display text-xs font-semibold uppercase tracking-[0.14em] text-ink-soft">
+            Most active rollers
+          </p>
+          {a.topPlayers.length === 0 ? (
+            <p className="text-sm text-ink-faint">No rolls yet.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {a.topPlayers.map((p) => (
+                <li key={p.name} className="flex items-center gap-2 text-sm">
+                  <span className="w-24 shrink-0 truncate text-ink-soft">
+                    {p.name}
+                  </span>
+                  <div className="h-3 flex-1 overflow-hidden rounded-full bg-parchment-300/60">
+                    <div
+                      className="h-full rounded-full bg-brass"
+                      style={{ width: `${(p.count / maxTop) * 100}%` }}
+                    />
+                  </div>
+                  <span className="numerals w-10 shrink-0 text-right font-semibold text-ink">
+                    {p.count}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </Panel>
+  );
 }
 
 export function AdminPanel() {
@@ -68,7 +217,18 @@ export function AdminPanel() {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-ink-faint">
+          Live from the server database. Edits and deletes are immediate.
+        </p>
+        <Button variant="secondary" size="sm" onClick={loadOverview}>
+          Refresh
+        </Button>
+      </div>
+
       {error && <p className="text-sm text-oxblood">{error}</p>}
+
+      <AnalyticsView a={overview.analytics} />
 
       <Panel title="Users" eyebrow={`${overview.users.length} total`}>
         <ul className="divide-y divide-parchment-400/40">

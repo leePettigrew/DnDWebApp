@@ -276,6 +276,9 @@ function createChatRepository(db: DatabaseSync): ChatRepository {
 function createAdminRepository(db: DatabaseSync): AdminRepository {
   const userRows = db.prepare(`SELECT * FROM users ORDER BY created_at`);
   const campaignRows = db.prepare(`SELECT * FROM campaigns ORDER BY created_at`);
+  const allRolls = db.prepare(
+    `SELECT data FROM roll_log ORDER BY created_at DESC LIMIT ?`,
+  );
   const mapUser = (r: Row): UserRecord => ({
     id: str(r.id),
     username: str(r.username),
@@ -312,6 +315,11 @@ function createAdminRepository(db: DatabaseSync): AdminRepository {
     },
     listCampaigns() {
       return (campaignRows.all() as Row[]).map(mapCampaign);
+    },
+    listAllRolls(limit) {
+      return (allRolls.all(limit) as Row[]).map(
+        (r) => JSON.parse(str(r.data)) as RollHistoryEntry,
+      );
     },
     deleteCampaign(id) {
       for (const stmt of delScoped) stmt.run(id);
