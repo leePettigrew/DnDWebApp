@@ -240,6 +240,31 @@ export function DiceTray3D({
         dice = [];
       }
 
+      /**
+       * Scale the pool to fit what the camera actually sees. The visible width
+       * depends on the panel's aspect ratio, so derive it from the frustum (not
+       * a fixed number) — otherwise wide pools clip on narrow panels. Measured
+       * at scale 1 so it never compounds with the previous fit.
+       */
+      function refit() {
+        if (dice.length === 0) return;
+        root.scale.setScalar(1);
+        root.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(root);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const dist = camera.position.length();
+        const halfH = Math.tan((camera.fov * Math.PI) / 360) * dist;
+        const visW = halfH * camera.aspect * 2;
+        const visD = halfH * 2;
+        const scale = Math.min(
+          (visW * 0.82) / (size.x || 1),
+          (visD * 0.72) / (size.z || 1),
+          2.1,
+        );
+        root.scale.setScalar(scale);
+      }
+
       function rebuild(list: DieRoll[]) {
         clearDice();
         const n = list.length;
@@ -354,16 +379,7 @@ export function DiceTray3D({
           });
         });
 
-        // Auto-fit the pool into the camera's view: small pools scale UP to
-        // fill the tray (capped) and big pools shrink to fit. Measure at scale
-        // 1 so the result doesn't compound with the previous throw's scale.
-        root.scale.setScalar(1);
-        root.updateMatrixWorld(true);
-        const box = new THREE.Box3().setFromObject(root);
-        const s = new THREE.Vector3();
-        box.getSize(s);
-        const scale = Math.min(6.2 / (s.x || 1), 3.2 / (s.z || 1), 2.1);
-        root.scale.setScalar(scale);
+        refit();
       }
 
       const delta = new THREE.Quaternion();
@@ -393,6 +409,7 @@ export function DiceTray3D({
           renderer.setSize(w, h);
           camera.aspect = w / h;
           camera.updateProjectionMatrix();
+          refit();
         }
       });
       ro.observe(container);
