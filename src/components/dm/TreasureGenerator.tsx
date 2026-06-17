@@ -8,6 +8,9 @@ import { cn } from "@/components/ui/cn";
 import { PlusIcon, SparkIcon } from "@/components/ui/icons";
 import { useCharacters } from "@/lib/data/hooks";
 import { itemToInventoryItem } from "@/lib/compendium";
+import { emptyCurrency } from "@/lib/domain/character";
+import { newId } from "@/lib/domain/ids";
+import type { InventoryItem } from "@/lib/domain/types";
 import {
   LOOT_TIERS,
   coinsToString,
@@ -29,14 +32,45 @@ export function TreasureGenerator() {
   const character =
     characters.find((c) => c.id === charId) ?? characters[0] ?? null;
 
+  function announce(msg: string) {
+    setFlash(msg);
+    window.setTimeout(() => setFlash((f) => (f === msg ? null : f)), 2400);
+  }
   function addItem(idx: number) {
     if (!loot || !character) return;
     const it = loot.magicItems[idx];
     void update(character.id, {
       inventory: [...character.inventory, itemToInventoryItem(it)],
     });
-    setFlash(`Added ${it.name} to ${character.name}.`);
-    window.setTimeout(() => setFlash(null), 2400);
+    announce(`Added ${it.name} to ${character.name}.`);
+  }
+  function addCoins() {
+    if (!loot || !character) return;
+    const cur = character.currency ?? emptyCurrency();
+    void update(character.id, {
+      currency: {
+        cp: cur.cp + loot.coins.cp,
+        sp: cur.sp + loot.coins.sp,
+        ep: cur.ep + loot.coins.ep,
+        gp: cur.gp + loot.coins.gp,
+        pp: cur.pp + loot.coins.pp,
+      },
+    });
+    announce(`Added coins to ${character.name}.`);
+  }
+  function valuableToItem(v: string): InventoryItem {
+    const m = v.match(/\(([\d,]+)\s*gp\)/i);
+    const value = m ? Number(m[1].replace(/,/g, "")) : undefined;
+    const name = v.replace(/\s*\([\d,]+\s*gp\)\s*$/i, "").trim() || v;
+    return { id: newId(), name, quantity: 1, category: "treasure", value };
+  }
+  function addValuable(idx: number) {
+    if (!loot || !character) return;
+    const item = valuableToItem(loot.valuables[idx]);
+    void update(character.id, {
+      inventory: [...character.inventory, item],
+    });
+    announce(`Added ${item.name} to ${character.name}.`);
   }
 
   return (
@@ -84,13 +118,27 @@ export function TreasureGenerator() {
 
       {loot && (
         <div className="mt-4 space-y-4">
-          <div className="rounded-card border border-brass/40 bg-brass/5 px-4 py-3">
-            <p className="font-display text-xs font-semibold uppercase tracking-[0.12em] text-brass-dark">
-              Coins
-            </p>
-            <p className="numerals mt-1 text-lg font-bold text-ink">
-              {coinsToString(loot.coins)}
-            </p>
+          <div className="flex flex-wrap items-center gap-3 rounded-card border border-brass/40 bg-brass/5 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-xs font-semibold uppercase tracking-[0.12em] text-brass-dark">
+                Coins
+              </p>
+              <p className="numerals mt-1 text-lg font-bold text-ink">
+                {coinsToString(loot.coins)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={addCoins}
+              disabled={!character}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1 rounded-md border border-brass/50 px-2.5 py-1 text-xs font-semibold text-brass-dark hover:bg-brass hover:text-parchment-50",
+                !character &&
+                  "cursor-not-allowed opacity-40 hover:bg-transparent hover:text-brass-dark",
+              )}
+            >
+              <PlusIcon className="h-3.5 w-3.5" /> Add to purse
+            </button>
           </div>
 
           <div>
@@ -100,13 +148,28 @@ export function TreasureGenerator() {
             {loot.valuables.length === 0 ? (
               <p className="text-sm text-ink-faint">None this time.</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <ul className="space-y-1.5">
                 {loot.valuables.map((v, i) => (
-                  <Badge key={i} tone="brass">
-                    {v}
-                  </Badge>
+                  <li
+                    key={i}
+                    className="flex items-center gap-2 rounded-md border border-brass/30 bg-brass/5 px-3 py-2"
+                  >
+                    <Badge tone="brass">{v}</Badge>
+                    <button
+                      type="button"
+                      onClick={() => addValuable(i)}
+                      disabled={!character}
+                      className={cn(
+                        "ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-brass/50 px-2 py-1 text-xs font-semibold text-brass-dark hover:bg-brass hover:text-parchment-50",
+                        !character &&
+                          "cursor-not-allowed opacity-40 hover:bg-transparent hover:text-brass-dark",
+                      )}
+                    >
+                      <PlusIcon className="h-3.5 w-3.5" /> Add
+                    </button>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
           </div>
 
