@@ -5,13 +5,16 @@ import type {
   CombatState,
   Encounter,
   Entity,
+  Faction,
   Note,
+  Quest,
   RollHistoryEntry,
   RollPreset,
   RollResult,
   RollSpec,
   SessionLog,
   StatBlock,
+  TimelineEvent,
 } from "@/lib/domain/types";
 import { newId, nowISO, type ID } from "@/lib/domain/ids";
 import type {
@@ -301,6 +304,9 @@ export class RealtimeDataProvider implements DataProvider {
   readonly sessionLogs: SwitchableCollection<SessionLog>;
   readonly maps: SwitchableCollection<BattleMap>;
   readonly rollPresets: SwitchableCollection<RollPreset>;
+  readonly quests: SwitchableCollection<Quest>;
+  readonly factions: SwitchableCollection<Faction>;
+  readonly timeline: SwitchableCollection<TimelineEvent>;
   readonly rollHistory: SwitchableCollection<RollHistoryEntry>;
   readonly campaigns: SwitchableCollection<Campaign>;
   readonly combat: SwitchableSingleton;
@@ -349,6 +355,9 @@ export class RealtimeDataProvider implements DataProvider {
     this.sessionLogs = new SwitchableCollection(this.local.sessionLogs, send, "sessionLogs");
     this.maps = new SwitchableCollection(this.local.maps, send, "maps");
     this.rollPresets = new SwitchableCollection(this.local.rollPresets, send, "rollPresets");
+    this.quests = new SwitchableCollection(this.local.quests, send, "quests");
+    this.factions = new SwitchableCollection(this.local.factions, send, "factions");
+    this.timeline = new SwitchableCollection(this.local.timeline, send, "timeline");
     this.rollHistory = new SwitchableCollection(this.local.rollHistory, send);
     this.campaigns = new SwitchableCollection(this.local.campaigns, send);
     this.combat = new SwitchableSingleton(this.local.combat, send);
@@ -516,6 +525,9 @@ export class RealtimeDataProvider implements DataProvider {
     this.sessionLogs.setMode(mode);
     this.maps.setMode(mode);
     this.rollPresets.setMode(mode);
+    this.quests.setMode(mode);
+    this.factions.setMode(mode);
+    this.timeline.setMode(mode);
     this.rollHistory.setMode(mode);
     this.combat.setMode(mode);
   }
@@ -781,6 +793,9 @@ export class RealtimeDataProvider implements DataProvider {
     this.sessionLogs.setLive(snap.sessionLogs);
     this.maps.setLive(snap.maps);
     this.rollPresets.setLive(snap.rollPresets);
+    this.quests.setLive(snap.quests);
+    this.factions.setLive(snap.factions);
+    this.timeline.setLive(snap.timeline);
     this.rollHistory.setLive(snap.rollLog);
     this.combat.setLive(snap.combat);
     this.presence = snap.presence;

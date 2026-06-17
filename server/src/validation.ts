@@ -16,6 +16,9 @@ const scopedCollection = z.enum([
   "sessionLogs",
   "maps",
   "rollPresets",
+  "quests",
+  "factions",
+  "timeline",
 ]);
 
 const diceGroup = z.object({

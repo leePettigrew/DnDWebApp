@@ -17,6 +17,9 @@ export const SCOPED_TABLES: Record<string, string> = {
   sessionLogs: "session_logs",
   maps: "maps",
   rollPresets: "roll_presets",
+  quests: "quests",
+  factions: "factions",
+  timeline: "timeline_events",
 };
 
 export function openDatabase(dbPath: string): DatabaseSync {

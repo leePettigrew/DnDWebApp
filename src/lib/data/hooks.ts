@@ -110,6 +110,9 @@ export const useNotes = () => useCollection(useDataProvider().notes);
 export const useSessionLogs = () => useCollection(useDataProvider().sessionLogs);
 export const useMaps = () => useCollection(useDataProvider().maps);
 export const useRollPresets = () => useCollection(useDataProvider().rollPresets);
+export const useQuests = () => useCollection(useDataProvider().quests);
+export const useFactions = () => useCollection(useDataProvider().factions);
+export const useTimeline = () => useCollection(useDataProvider().timeline);
 export const useRollHistory = () => useCollection(useDataProvider().rollHistory);
 export const useCombat = () => useSingleton(useDataProvider().combat);
 

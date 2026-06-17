@@ -413,6 +413,60 @@ export interface SessionLog extends Entity {
   body: string;
 }
 
+// --- Campaign & world ------------------------------------------------------
+
+export interface QuestObjective {
+  id: ID;
+  text: string;
+  done: boolean;
+}
+export type QuestStatus = "active" | "completed" | "failed";
+
+export interface Quest extends Entity {
+  campaignId?: ID;
+  title: string;
+  description?: string;
+  status: QuestStatus;
+  objectives: QuestObjective[];
+  reward?: string;
+  pinned?: boolean;
+}
+
+export type FactionStanding =
+  | "ally"
+  | "friendly"
+  | "neutral"
+  | "suspicious"
+  | "hostile";
+
+export const FACTION_STANDINGS: { key: FactionStanding; label: string }[] = [
+  { key: "ally", label: "Ally" },
+  { key: "friendly", label: "Friendly" },
+  { key: "neutral", label: "Neutral" },
+  { key: "suspicious", label: "Suspicious" },
+  { key: "hostile", label: "Hostile" },
+];
+
+export interface Faction extends Entity {
+  campaignId?: ID;
+  name: string;
+  description?: string;
+  standing: FactionStanding;
+  goals?: string;
+  notes?: string;
+}
+
+/** A dated event on the campaign's in-world timeline. */
+export interface TimelineEvent extends Entity {
+  campaignId?: ID;
+  /** Free-form in-world date label, e.g. "15th of Mirtul, 1492 DR". */
+  date: string;
+  title: string;
+  description?: string;
+  /** Sort key (lower = earlier) so events order without parsing dates. */
+  order: number;
+}
+
 /**
  * Tactical map layers (Phase 3). All coordinates are in MAP IMAGE PIXELS, so
  * they're resolution-independent of the viewer's pan/zoom.
@@ -453,12 +507,24 @@ export interface MapToken {
   portraitUrl?: string;
 }
 
+/** A labelled point of interest on an overworld map (percent coordinates). */
+export interface MapLocation {
+  id: ID;
+  name: string;
+  description?: string;
+  /** Position as a percentage (0..100) of the map image's width/height. */
+  x: number;
+  y: number;
+}
+
 export interface BattleMap extends Entity {
   campaignId?: ID;
   name: string;
   /** Image slot: a URL or data: URL to the battle map art. */
   imageUrl: string;
   notes?: string;
+  /** Overworld points of interest (opaque to the tactical layer). */
+  locations?: MapLocation[];
 
   // --- tactical layer (optional; absent on plain Codex maps) ---
   /** Natural image size in px (for fog/vision bounds). */

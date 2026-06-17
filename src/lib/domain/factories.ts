@@ -2,9 +2,12 @@ import type {
   Campaign,
   Character,
   Encounter,
+  Faction,
   Note,
+  Quest,
   SessionLog,
   StatBlock,
+  TimelineEvent,
   BattleMap,
 } from "./types";
 import { emptyAbilityScores, emptyCurrency } from "./character";
@@ -108,6 +111,41 @@ export function newNoteInput(campaignId?: string): CreateInput<Note> {
     body: "",
     tags: [],
     pinned: false,
+  };
+}
+
+export function newQuestInput(campaignId?: string): CreateInput<Quest> {
+  return {
+    campaignId,
+    title: "New Quest",
+    description: "",
+    status: "active",
+    objectives: [],
+    reward: "",
+    pinned: false,
+  };
+}
+
+export function newFactionInput(campaignId?: string): CreateInput<Faction> {
+  return {
+    campaignId,
+    name: "New Faction",
+    description: "",
+    standing: "neutral",
+    goals: "",
+    notes: "",
+  };
+}
+
+export function newTimelineEventInput(
+  campaignId?: string,
+): CreateInput<TimelineEvent> {
+  return {
+    campaignId,
+    date: "",
+    title: "New Event",
+    description: "",
+    order: Date.now(),
   };
 }
 

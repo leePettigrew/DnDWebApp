@@ -5,13 +5,16 @@ import type {
   CombatState,
   Encounter,
   Entity,
+  Faction,
   Note,
+  Quest,
   RollHistoryEntry,
   RollPreset,
   RollResult,
   RollSpec,
   SessionLog,
   StatBlock,
+  TimelineEvent,
 } from "@/lib/domain/types";
 import type { ID } from "@/lib/domain/ids";
 import type {
@@ -237,6 +240,9 @@ export interface DataProvider {
   readonly sessionLogs: Repository<SessionLog>;
   readonly maps: Repository<BattleMap>;
   readonly rollPresets: Repository<RollPreset>;
+  readonly quests: Repository<Quest>;
+  readonly factions: Repository<Faction>;
+  readonly timeline: Repository<TimelineEvent>;
   readonly rollHistory: Repository<RollHistoryEntry>;
   readonly combat: SingletonRepository<CombatState>;
 

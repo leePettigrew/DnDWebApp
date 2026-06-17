@@ -4,10 +4,13 @@ import type {
   Campaign,
   Character,
   Encounter,
+  Faction,
   Note,
+  Quest,
   RollPreset,
   SessionLog,
   StatBlock,
+  TimelineEvent,
 } from "@/lib/domain/types";
 
 /**
@@ -25,6 +28,9 @@ export interface SeedData {
   sessionLogs: SessionLog[];
   maps: BattleMap[];
   rollPresets: RollPreset[];
+  quests: Quest[];
+  factions: Faction[];
+  timeline: TimelineEvent[];
 }
 
 export function buildSeedData(): SeedData {
@@ -490,6 +496,95 @@ export function buildSeedData(): SeedData {
     { ...base, id: newId(), name: "Stealth (Advantage)", spec: { groups: [{ count: 1, sides: 20 }], modifier: 7, mode: "advantage" } },
   ];
 
+  // --- Quests ------------------------------------------------------------
+  const quests: Quest[] = [
+    {
+      ...base,
+      id: newId(),
+      campaignId,
+      title: "Recover the Sunken Crown",
+      description:
+        "The drowned crown has surfaced in the Gloomfen barrows. Reach it before the raiders — or the cult — claim its power over the tides.",
+      status: "active",
+      objectives: [
+        { id: newId(), text: "Find a guide through the Gloomfen", done: true },
+        { id: newId(), text: "Reach the drowned barrows", done: false },
+        { id: newId(), text: "Claim the crown", done: false },
+      ],
+      reward: "The gratitude of Oakhollow — and the crown itself.",
+      pinned: true,
+    },
+    {
+      ...base,
+      id: newId(),
+      campaignId,
+      title: "The Lantern's Debt",
+      description:
+        "Mirella of the Gilded Lantern quietly funds the party. She'd like a smuggler's cache in the marsh recovered before the raiders find it.",
+      status: "active",
+      objectives: [
+        { id: newId(), text: "Locate the cache", done: false },
+        { id: newId(), text: "Return it to Mirella", done: false },
+      ],
+      reward: "Free lodging and a friend in low places.",
+    },
+  ];
+
+  // --- Factions ----------------------------------------------------------
+  const factions: Faction[] = [
+    {
+      ...base,
+      id: newId(),
+      campaignId,
+      name: "Oakhollow Village",
+      description: "The marsh-edge village the heroes call home.",
+      standing: "ally",
+      goals: "Survive the coming of the raiders and keep the crown from evil hands.",
+      notes: "",
+    },
+    {
+      ...base,
+      id: newId(),
+      campaignId,
+      name: "The Gloomfen Raiders",
+      description: "Smugglers and reavers who want the crown to sell, not to wear.",
+      standing: "hostile",
+      goals: "Seize the crown and auction it to the highest bidder.",
+      notes: "Led by a cunning captain who avoids open battle.",
+    },
+  ];
+
+  // --- Timeline ----------------------------------------------------------
+  const timeline: TimelineEvent[] = [
+    {
+      ...base,
+      id: newId(),
+      campaignId,
+      date: "Long ago",
+      title: "The Crown Drowns",
+      description: "Eldermoor sinks beneath the rising marsh, its crown lost to the tides.",
+      order: 1,
+    },
+    {
+      ...base,
+      id: newId(),
+      campaignId,
+      date: "Last Mirtul",
+      title: "The Crown Surfaces",
+      description: "The receding floodwaters reveal the barrows — and the crown's glow.",
+      order: 2,
+    },
+    {
+      ...base,
+      id: newId(),
+      campaignId,
+      date: "Now",
+      title: "The Heroes Gather",
+      description: "Warbands and cults march on the Gloomfen. Oakhollow stands in their way.",
+      order: 3,
+    },
+  ];
+
   return {
     campaigns,
     characters,
@@ -499,5 +594,8 @@ export function buildSeedData(): SeedData {
     sessionLogs,
     maps,
     rollPresets,
+    quests,
+    factions,
+    timeline,
   };
 }

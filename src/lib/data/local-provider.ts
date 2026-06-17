@@ -393,6 +393,9 @@ class LocalDataProvider implements DataProvider {
   readonly sessionLogs;
   readonly maps;
   readonly rollPresets;
+  readonly quests;
+  readonly factions;
+  readonly timeline;
   readonly rollHistory;
   readonly combat;
   readonly session: SessionController;
@@ -411,6 +414,9 @@ class LocalDataProvider implements DataProvider {
     this.sessionLogs = new LocalCollection("sessionLogs", persistence, seed.sessionLogs);
     this.maps = new LocalCollection("maps", persistence, seed.maps);
     this.rollPresets = new LocalCollection("rollPresets", persistence, seed.rollPresets);
+    this.quests = new LocalCollection("quests", persistence, seed.quests);
+    this.factions = new LocalCollection("factions", persistence, seed.factions);
+    this.timeline = new LocalCollection("timeline", persistence, seed.timeline);
     this.rollHistory = new LocalCollection("rollHistory", persistence, []);
     this.combat = new LocalSingleton("combat", persistence, emptyCombatState);
 

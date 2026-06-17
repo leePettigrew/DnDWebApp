@@ -4,12 +4,15 @@ import type {
   Character,
   CombatState,
   Encounter,
+  Faction,
   Note,
+  Quest,
   RollHistoryEntry,
   RollPreset,
   RollSpec,
   SessionLog,
   StatBlock,
+  TimelineEvent,
 } from "./domain";
 import type { ID, ISODateString } from "./ids";
 
@@ -76,6 +79,9 @@ export interface ScopedEntityMap {
   sessionLogs: SessionLog;
   maps: BattleMap;
   rollPresets: RollPreset;
+  quests: Quest;
+  factions: Faction;
+  timeline: TimelineEvent;
 }
 export type ScopedCollection = keyof ScopedEntityMap;
 export type AnyScopedEntity = ScopedEntityMap[ScopedCollection];
@@ -88,6 +94,9 @@ export const SCOPED_COLLECTIONS: ScopedCollection[] = [
   "sessionLogs",
   "maps",
   "rollPresets",
+  "quests",
+  "factions",
+  "timeline",
 ];
 
 /** Everything a client receives when it joins/resyncs a campaign. */
@@ -99,6 +108,9 @@ export interface CampaignSnapshot {
   sessionLogs: SessionLog[];
   maps: BattleMap[];
   rollPresets: RollPreset[];
+  quests: Quest[];
+  factions: Faction[];
+  timeline: TimelineEvent[];
   combat: CombatState;
   rollLog: RollHistoryEntry[];
   presence: PresenceUser[];
