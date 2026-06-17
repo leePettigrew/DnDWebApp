@@ -544,6 +544,82 @@ export interface BattleMap extends Entity {
   tokens?: MapToken[];
 }
 
+// ---------------------------------------------------------------------------
+// Homebrew / custom content — admin-global or per-campaign.
+// ---------------------------------------------------------------------------
+
+export interface CustomSpell {
+  id: ID;
+  name: string;
+  level: number; // 0 = cantrip … 9
+  school?: string;
+  classes: string[];
+  castingTime?: string;
+  range?: string;
+  components?: string;
+  duration?: string;
+  concentration?: boolean;
+  description?: string;
+}
+
+export interface CustomItem {
+  id: ID;
+  name: string;
+  category: ItemCategory;
+  rarity?: ItemRarity;
+  weight?: number;
+  value?: number;
+  properties?: string;
+  damage?: string;
+  description?: string;
+}
+
+export type CoinDenomination = keyof Currency; // cp | sp | ep | gp | pp
+
+/** A dice-based coin reward, e.g. 2d6 × 10 gp. */
+export interface LootCoinSpec {
+  count: number;
+  sides: number;
+  multiplier: number;
+  denomination: CoinDenomination;
+}
+
+/** One weighted outcome on a loot table. A blank name means "nothing". */
+export interface LootTableEntry {
+  id: ID;
+  weight: number;
+  name: string;
+  category?: ItemCategory;
+  rarity?: ItemRarity;
+  value?: number;
+  /** Item weight in lb. */
+  itemWeight?: number;
+  properties?: string;
+  damage?: string;
+  description?: string;
+}
+
+export interface LootTable {
+  id: ID;
+  name: string;
+  description?: string;
+  coins?: LootCoinSpec;
+  /** Number of weighted picks per roll. */
+  picks: number;
+  entries: LootTableEntry[];
+}
+
+export type CustomContentKind = "spell" | "item" | "loot";
+export type CustomContentScope = "global" | "campaign";
+
+/** A stored homebrew record wrapping one of the content payloads. */
+export interface CustomContentRecord extends Entity {
+  scope: CustomContentScope;
+  campaignId?: ID;
+  kind: CustomContentKind;
+  data: CustomSpell | CustomItem | LootTable;
+}
+
 /** Dice — see ./dice for the engine. */
 export type RollMode = "normal" | "advantage" | "disadvantage";
 

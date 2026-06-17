@@ -11,6 +11,8 @@ import type {
   CampaignRecord,
   CampaignRepository,
   ChatRepository,
+  ContentRecord,
+  ContentRepository,
   CombatRepository,
   EntityRepository,
   MembershipRecord,
@@ -273,6 +275,62 @@ function createChatRepository(db: DatabaseSync): ChatRepository {
   };
 }
 
+function createContentRepository(db: DatabaseSync): ContentRepository {
+  const insert = db.prepare(
+    `INSERT INTO custom_content (id, scope, campaign_id, kind, data, owner_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       data = excluded.data, kind = excluded.kind, updated_at = excluded.updated_at`,
+  );
+  const byId = db.prepare(`SELECT * FROM custom_content WHERE id = ?`);
+  const globalRows = db.prepare(
+    `SELECT * FROM custom_content WHERE scope = 'global' ORDER BY created_at`,
+  );
+  const campaignRows = db.prepare(
+    `SELECT * FROM custom_content WHERE scope = 'campaign' AND campaign_id = ? ORDER BY created_at`,
+  );
+  const del = db.prepare(`DELETE FROM custom_content WHERE id = ?`);
+  const map = (r: Row | undefined): ContentRecord | null =>
+    r
+      ? {
+          id: str(r.id),
+          scope: str(r.scope) as ContentRecord["scope"],
+          campaignId: opt(r.campaign_id),
+          kind: str(r.kind),
+          data: JSON.parse(str(r.data)),
+          ownerId: opt(r.owner_id),
+          createdAt: str(r.created_at),
+          updatedAt: str(r.updated_at),
+        }
+      : null;
+  return {
+    listGlobal() {
+      return (globalRows.all() as Row[]).map((r) => map(r)!);
+    },
+    listForCampaign(campaignId) {
+      return (campaignRows.all(campaignId) as Row[]).map((r) => map(r)!);
+    },
+    get(id) {
+      return map(byId.get(id) as Row | undefined);
+    },
+    upsert(record) {
+      insert.run(
+        record.id,
+        record.scope,
+        record.campaignId ?? null,
+        record.kind,
+        JSON.stringify(record.data),
+        record.ownerId ?? null,
+        record.createdAt,
+        record.updatedAt,
+      );
+    },
+    remove(id) {
+      del.run(id);
+    },
+  };
+}
+
 function createAdminRepository(db: DatabaseSync): AdminRepository {
   const userRows = db.prepare(`SELECT * FROM users ORDER BY created_at`);
   const campaignRows = db.prepare(`SELECT * FROM campaigns ORDER BY created_at`);
@@ -349,6 +407,7 @@ export function createSqliteRepositories(db: DatabaseSync): Repositories {
     combat: createCombatRepository(db),
     rollLog: createRollLogRepository(db),
     chat: createChatRepository(db),
+    content: createContentRepository(db),
     admin: createAdminRepository(db),
   };
 }

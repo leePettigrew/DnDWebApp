@@ -89,6 +89,26 @@ export interface ChatRepository {
   list(campaignId: string, limit?: number): ChatMessage[];
 }
 
+/** A stored homebrew record (global or per-campaign). */
+export interface ContentRecord {
+  id: string;
+  scope: "global" | "campaign";
+  campaignId?: string;
+  kind: string;
+  data: unknown;
+  ownerId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContentRepository {
+  listGlobal(): ContentRecord[];
+  listForCampaign(campaignId: string): ContentRecord[];
+  get(id: string): ContentRecord | null;
+  upsert(record: ContentRecord): void;
+  remove(id: string): void;
+}
+
 /** Cross-campaign queries used only by the admin panel. */
 export interface AdminRepository {
   listUsers(): UserRecord[];
@@ -109,5 +129,6 @@ export interface Repositories {
   combat: CombatRepository;
   rollLog: RollLogRepository;
   chat: ChatRepository;
+  content: ContentRepository;
   admin: AdminRepository;
 }

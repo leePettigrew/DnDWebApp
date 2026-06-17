@@ -87,6 +87,19 @@ function applySchema(db: DatabaseSync): void {
       created_at  TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_chat_campaign ON chat_messages(campaign_id);
+
+    CREATE TABLE IF NOT EXISTS custom_content (
+      id          TEXT PRIMARY KEY,
+      scope       TEXT NOT NULL,
+      campaign_id TEXT,
+      kind        TEXT NOT NULL,
+      data        TEXT NOT NULL,
+      owner_id    TEXT,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_custom_content_scope
+      ON custom_content(scope, campaign_id);
   `);
 
   for (const table of Object.values(SCOPED_TABLES)) {

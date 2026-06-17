@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { AppError, loginUser, registerUser, statusFor } from "./auth";
 import { handleAdminRequest } from "./admin";
+import { handleContentRequest } from "./content";
 import type { Repositories } from "./repositories";
 import { config } from "./config";
 
@@ -72,6 +73,10 @@ export async function handleHttpRequest(
   // Admin panel API (any method). Gated server-side to the admin user.
   if ((req.url ?? "").startsWith("/admin/")) {
     return handleAdminRequest(req, res, repos);
+  }
+  // Homebrew content API (read for members, write for DM/admin).
+  if ((req.url ?? "").startsWith("/content/")) {
+    return handleContentRequest(req, res, repos);
   }
   if (req.method !== "POST") return false;
   if (req.url !== "/auth/register" && req.url !== "/auth/login") return false;
