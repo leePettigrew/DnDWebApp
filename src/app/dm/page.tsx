@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Panel } from "@/components/ui/Panel";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/components/ui/cn";
 import { SparkIcon, HelmIcon, BookIcon, ScrollIcon } from "@/components/ui/icons";
+import { usePermissions } from "@/lib/data/hooks";
 import { TreasureGenerator } from "@/components/dm/TreasureGenerator";
 import { NpcGenerator } from "@/components/dm/NpcGenerator";
 import { DmScreen } from "@/components/dm/DmScreen";
@@ -20,6 +23,26 @@ const TABS: { key: Tab; label: string; icon: typeof SparkIcon }[] = [
 
 export default function DmPage() {
   const [tab, setTab] = useState<Tab>("treasure");
+  const { isDM } = usePermissions();
+
+  if (!isDM) {
+    return (
+      <div className="animate-fade-in space-y-6">
+        <PageHeader
+          eyebrow="The DM's Lectern"
+          title="Dungeon Master Tools"
+          description="Tools for running the table."
+        />
+        <Panel tone="flat">
+          <EmptyState
+            icon={<SparkIcon />}
+            title="For the Dungeon Master"
+            description="This area is reserved for the campaign's DM."
+          />
+        </Panel>
+      </div>
+    );
+  }
 
   return (
     <div className="animate-fade-in space-y-6">

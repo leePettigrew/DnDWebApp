@@ -10,6 +10,7 @@ import {
   useCampaigns,
   useCurrentUser,
   useDataProvider,
+  usePermissions,
 } from "@/lib/data/hooks";
 import { SessionPanel } from "@/components/multiplayer/SessionPanel";
 import { ConnectionPill } from "@/components/multiplayer/ConnectionPill";
@@ -25,9 +26,10 @@ function isActive(pathname: string, href: string): boolean {
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const { isDM } = usePermissions();
   return (
     <nav className="flex flex-col gap-1" aria-label="Primary">
-      {NAV_ITEMS.map((item) => {
+      {NAV_ITEMS.filter((item) => isDM || !item.dmOnly).map((item) => {
         const active = isActive(pathname, item.href);
         const Icon = item.icon;
         return (

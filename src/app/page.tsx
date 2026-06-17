@@ -18,6 +18,7 @@ import {
   useCharacters,
   useCombat,
   useEncounters,
+  usePermissions,
   useSessionLogs,
   useStatBlocks,
 } from "@/lib/data/hooks";
@@ -60,6 +61,7 @@ export default function HearthPage() {
   const { items: encounters } = useEncounters();
   const { items: sessions } = useSessionLogs();
   const { value: combat } = useCombat();
+  const { isDM } = usePermissions();
 
   const campaign = campaigns[0];
   const latestSession = [...sessions].sort((a, b) =>
@@ -115,7 +117,9 @@ export default function HearthPage() {
         <div className="lg:col-span-2">
           <Panel title="The Scriptorium" eyebrow="Where to next">
             <div className="grid gap-3 sm:grid-cols-2">
-              {NAV_ITEMS.filter((item) => item.href !== "/").map((item) => {
+              {NAV_ITEMS.filter(
+                (item) => item.href !== "/" && (isDM || !item.dmOnly),
+              ).map((item) => {
                 const Icon = item.icon;
                 return (
                   <Link
