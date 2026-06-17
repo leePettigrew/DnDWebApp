@@ -6,6 +6,7 @@ import {
   FeatherIcon,
   HelmIcon,
   HomeIcon,
+  MapIcon,
   ScrollIcon,
   SparkIcon,
   SwordsIcon,
@@ -28,5 +29,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/encounters", label: "Encounters", icon: SwordsIcon, blurb: "Assemble and arm your battles" },
   { href: "/combat", label: "War Table", icon: BookIcon, blurb: "Initiative & combat tracker" },
   { href: "/dm", label: "DM Tools", icon: SparkIcon, blurb: "Loot, NPCs & a DM screen" },
+  { href: "/world", label: "World", icon: MapIcon, blurb: "Quests, factions, timeline & atlas" },
   { href: "/codex", label: "Codex", icon: ScrollIcon, blurb: "Notes, maps & session logs" },
 ];
