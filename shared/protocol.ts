@@ -99,6 +99,20 @@ export const SCOPED_COLLECTIONS: ScopedCollection[] = [
   "timeline",
 ];
 
+/**
+ * Collections only the DM may write. `characters` is owner-scoped and
+ * `rollPresets`/`quests`/`factions`/`timeline` are collaborative, so none of
+ * those appear here. Shared so the client UI and the server enforce the same
+ * rule without drifting.
+ */
+export const DM_ONLY_COLLECTIONS: ScopedCollection[] = [
+  "statBlocks",
+  "encounters",
+  "notes",
+  "sessionLogs",
+  "maps",
+];
+
 /** Everything a client receives when it joins/resyncs a campaign. */
 export interface CampaignSnapshot {
   characters: Character[];

@@ -7,7 +7,9 @@ import type {
   ChatMessage,
   PresenceUser,
   Role,
+  ScopedCollection,
 } from "@shared/protocol";
+import { DM_ONLY_COLLECTIONS } from "@shared/protocol";
 import type {
   AuthController,
   ConnectionStatus,
@@ -161,6 +163,61 @@ export function useActiveCampaign(): {
     [provider],
   );
   return state;
+}
+
+const DM_ONLY = new Set<ScopedCollection>(DM_ONLY_COLLECTIONS);
+
+export interface Permissions {
+  /** True only in a real multiplayer session (false in solo). */
+  multiUser: boolean;
+  /** Solo player, or the DM of the active campaign. */
+  isDM: boolean;
+  userId: string | null;
+  /** May the current user create entities in this collection? */
+  canCreate: (collection: ScopedCollection) => boolean;
+  /** May the current user edit/delete this entity? Pass it for owner checks. */
+  canEdit: (
+    collection: ScopedCollection,
+    entity?: { ownerId?: string } | null,
+  ) => boolean;
+  /** May the current user run/modify the shared combat tracker? (DM only) */
+  canEditCombat: boolean;
+}
+
+/**
+ * Client-side mirror of the server's write rules, so the UI can hide controls
+ * a player isn't allowed to use. The server still enforces everything — this is
+ * UX, not security. In solo mode you're always the DM, so everything is open.
+ */
+export function usePermissions(): Permissions {
+  const { capabilities } = useDataProvider();
+  const { role } = useActiveCampaign();
+  const user = useCurrentUser();
+  const multiUser = capabilities.multiUser;
+  const isDM = !multiUser || role === "dm";
+  const userId = user?.id ?? null;
+
+  return {
+    multiUser,
+    isDM,
+    userId,
+    canCreate: (collection) => {
+      if (isDM) return true;
+      if (collection === "characters" || collection === "rollPresets")
+        return true;
+      return !DM_ONLY.has(collection);
+    },
+    canEdit: (collection, entity) => {
+      if (isDM) return true;
+      if (collection === "characters") {
+        const owner = entity?.ownerId ?? null;
+        return owner === null || owner === userId;
+      }
+      if (collection === "rollPresets") return true;
+      return !DM_ONLY.has(collection);
+    },
+    canEditCombat: isDM,
+  };
 }
 
 export function usePresence(): PresenceUser[] {

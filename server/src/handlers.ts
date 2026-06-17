@@ -29,6 +29,7 @@ import type {
   ScopedCollection,
   ServerMessage,
 } from "../../shared/protocol";
+import { DM_ONLY_COLLECTIONS } from "../../shared/protocol";
 import type { CombatState } from "../../shared/domain";
 import type { Repositories } from "./repositories";
 import type { RoomMember, RoomManager } from "./rooms";
@@ -37,13 +38,9 @@ import { verifyToken } from "./auth";
 import { cryptoRng, emptyCombat, generateJoinCode } from "./util";
 
 /** Collections only the DM may write. characters + rollPresets have own rules. */
-const DM_ONLY: ReadonlySet<ScopedCollection> = new Set<ScopedCollection>([
-  "statBlocks",
-  "encounters",
-  "notes",
-  "sessionLogs",
-  "maps",
-]);
+const DM_ONLY: ReadonlySet<ScopedCollection> = new Set<ScopedCollection>(
+  DM_ONLY_COLLECTIONS,
+);
 
 /**
  * Per-socket session. Holds who this connection is (after auth) and which
