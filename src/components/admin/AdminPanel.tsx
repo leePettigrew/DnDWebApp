@@ -177,19 +177,22 @@ function AnalyticsView({ a }: { a: AdminAnalytics }) {
             return (
               <div
                 key={face}
-                className="flex flex-1 flex-col items-center justify-end"
+                className={cn("flex-1 rounded-t-sm transition-all", color)}
+                style={{ height: `${h}%` }}
                 title={`${face}: ${n} (${pct(n)}%)`}
-              >
-                <div
-                  className={cn("w-full rounded-t-sm transition-all", color)}
-                  style={{ height: `${h}%` }}
-                />
-                <span className="numerals mt-1 text-[0.55rem] text-ink-faint">
-                  {face}
-                </span>
-              </div>
+              />
             );
           })}
+        </div>
+        <div className="mt-1 flex gap-1">
+          {Array.from({ length: 20 }, (_, i) => i + 1).map((face) => (
+            <span
+              key={face}
+              className="numerals flex-1 text-center text-[0.55rem] text-ink-faint"
+            >
+              {face}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -203,17 +206,20 @@ function AnalyticsView({ a }: { a: AdminAnalytics }) {
             {a.activity.map((d) => (
               <div
                 key={d.day}
-                className="flex flex-1 flex-col items-center justify-end"
+                className="flex-1 rounded-t-sm bg-arcane/70"
+                style={{ height: `${Math.max(2, (d.count / maxAct) * 100)}%` }}
                 title={`${d.day}: ${d.count}`}
+              />
+            ))}
+          </div>
+          <div className="mt-1 flex gap-1">
+            {a.activity.map((d) => (
+              <span
+                key={d.day}
+                className="flex-1 text-center text-[0.5rem] text-ink-faint"
               >
-                <div
-                  className="w-full rounded-t-sm bg-arcane/70"
-                  style={{ height: `${Math.max(2, (d.count / maxAct) * 100)}%` }}
-                />
-                <span className="text-[0.5rem] text-ink-faint">
-                  {d.day.slice(5)}
-                </span>
-              </div>
+                {d.day.slice(5)}
+              </span>
             ))}
           </div>
         </div>
