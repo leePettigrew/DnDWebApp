@@ -73,7 +73,7 @@ interface Engine {
   /** Rebuild in-scene POI marker sprites from the given list. */
   syncPois(list: WorldPoi[]): void;
   /** Rebuild in-scene path tubes (rivers/roads/routes/borders). */
-  syncPaths(list: WorldPath[]): void;
+  syncPaths(): void;
   /** Begin drawing a path of the given kind (terrain clicks add points). */
   startDraw(kind: WorldPath["kind"]): void;
   /** Finish the in-progress path; returns its points (>=2) or null. */
@@ -92,6 +92,8 @@ interface Engine {
   clearRegion(idx: number): void;
   /** Rebuild the instanced trees (after a density change). */
   rebuildTrees(): void;
+  /** Rebuild the region name labels (after a territory/name change). */
+  syncRegionLabels(): void;
   /** Re-shade (e.g. after toggling DM "view as player" or region colours). */
   reshade(): void;
   /** Camera azimuth (radians) for the compass. */
@@ -321,6 +323,11 @@ export function WorldMapBuilder({
       const roadTarget = new Float32Array(size * size);
       const roadW = new Float32Array(size * size);
       const dispArr = new Float32Array(size * size); // displayed height = base + mods
+      // Paths painted into the surface (so they mesh with the terrain).
+      const pathR = new Float32Array(size * size);
+      const pathG = new Float32Array(size * size);
+      const pathB = new Float32Array(size * size);
+      const pathWt = new Float32Array(size * size);
       let seaLevel = world.seaLevel;
       let fogOn = !!world.fog;
 
@@ -739,13 +746,14 @@ export function WorldMapBuilder({
       function updatePoiLabels() {
         for (const [id, rec] of poiMap) {
           const d = camera.position.distanceTo(rec.group.position);
-          const show = d < 30 || id === hoveredPoiId;
+          const show = d < 34 || id === hoveredPoiId;
           rec.label.visible = show;
           if (show) {
-            const s = Math.min(1.05, Math.max(0.5, d * 0.022));
+            // quadratic in distance → on-screen size shrinks as you zoom in
+            const s = Math.min(1.4, Math.max(0.1, d * d * 0.0007));
             rec.label.position.set(
               rec.group.position.x,
-              rec.group.position.y + 0.5 + s * 0.4,
+              rec.group.position.y + 0.35 + s * 0.45,
               rec.group.position.z,
             );
             rec.label.scale.set(s * rec.aspect, s, 1);
@@ -759,19 +767,21 @@ export function WorldMapBuilder({
       }
 
       // --- path tubes (rivers / roads / routes / borders) ---
-      const PATH_STYLE: Record<
+      // Paint colours per path kind (rgb 0..1, blend weight). Paths are painted
+      // into the terrain surface, not built as floating meshes.
+      const PATH_PAINT: Record<
         WorldPath["kind"],
-        { color: number; radius: number }
+        { rgb: [number, number, number]; w: number }
       > = {
-        river: { color: 0x2f6e9e, radius: 0.2 },
-        road: { color: 0x6e503a, radius: 0.17 },
-        route: { color: 0xd9b066, radius: 0.13 },
-        border: { color: 0x5a4636, radius: 0.11 },
+        river: { rgb: [0.17, 0.41, 0.58], w: 0.85 },
+        road: { rgb: [0.42, 0.3, 0.21], w: 0.88 },
+        route: { rgb: [0.78, 0.62, 0.34], w: 0.7 },
+        border: { rgb: [0.28, 0.22, 0.16], w: 0.8 },
       };
-      const pathMap = new Map<
-        string,
-        { mesh: InstanceType<typeof THREE.Mesh>; sig: string; kind: WorldPath["kind"] }
-      >();
+      const hex01 = (hex: string): [number, number, number] => {
+        const n = parseInt(hex.replace("#", ""), 16);
+        return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+      };
       function disposePathMesh(mesh: InstanceType<typeof THREE.Mesh>) {
         scene.remove(mesh);
         mesh.geometry.dispose();
@@ -780,196 +790,44 @@ export function WorldMapBuilder({
         m.dispose();
       }
       const PATH_WIDTH: Record<WorldPath["kind"], number> = {
-        river: 0.42,
-        road: 0.3,
-        route: 0.22,
-        border: 0.18,
+        river: 0.9,
+        road: 0.7,
+        route: 0.5,
+        border: 0.42,
       };
-      // Fade the across-width edges to alpha so a ribbon blends into terrain.
-      function fadeEdges(ctx: CanvasRenderingContext2D, s: number, center: number) {
-        const f = document.createElement("canvas");
-        f.width = f.height = s;
-        const fc = f.getContext("2d")!;
-        const g = fc.createLinearGradient(0, 0, s, 0);
-        g.addColorStop(0, "rgba(0,0,0,0)");
-        g.addColorStop(0.16, `rgba(0,0,0,${center})`);
-        g.addColorStop(0.84, `rgba(0,0,0,${center})`);
-        g.addColorStop(1, "rgba(0,0,0,0)");
-        fc.fillStyle = g;
-        fc.fillRect(0, 0, s, s);
-        ctx.globalCompositeOperation = "destination-in";
-        ctx.drawImage(f, 0, 0);
-        ctx.globalCompositeOperation = "source-over";
-      }
-      function makePathTexture(kind: WorldPath["kind"]) {
-        const s = 128;
-        const c = document.createElement("canvas");
-        c.width = c.height = s;
-        const ctx = c.getContext("2d")!;
-        if (kind === "river") {
-          const g = ctx.createLinearGradient(0, 0, s, 0);
-          g.addColorStop(0, "#27577e");
-          g.addColorStop(0.5, "#3a83b3");
-          g.addColorStop(1, "#27577e");
-          ctx.fillStyle = g;
-          ctx.fillRect(0, 0, s, s);
-          ctx.lineWidth = 1.6;
-          for (let yy = -4; yy < s; yy += 6) {
-            ctx.strokeStyle = `rgba(205,230,248,${0.1 + Math.random() * 0.12})`;
-            ctx.beginPath();
-            for (let x = 0; x <= s; x += 4) {
-              const y = yy + Math.sin(x * 0.13 + yy) * 2.2;
-              if (x === 0) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-          }
-          fadeEdges(ctx, s, 0.9);
-        } else {
-          // road: packed dirt + stones
-          ctx.fillStyle = "#6b4d37";
-          ctx.fillRect(0, 0, s, s);
-          for (let i = 0; i < 110; i++) {
-            const x = Math.random() * s;
-            const y = Math.random() * s;
-            const r = 1.4 + Math.random() * 4.5;
-            ctx.fillStyle =
-              Math.random() > 0.5
-                ? `rgba(122,99,74,${0.3 + Math.random() * 0.45})`
-                : `rgba(52,38,27,${0.3 + Math.random() * 0.45})`;
-            ctx.beginPath();
-            ctx.ellipse(x, y, r, r * 0.75, Math.random() * 3, 0, Math.PI * 2);
-            ctx.fill();
-          }
-          fadeEdges(ctx, s, 1);
-        }
-        const tex = new THREE.CanvasTexture(c);
-        tex.wrapS = THREE.ClampToEdgeWrapping;
-        tex.wrapT = THREE.RepeatWrapping;
-        tex.anisotropy = 8;
-        tex.needsUpdate = true;
-        return tex;
-      }
-      const riverTextures: InstanceType<typeof THREE.CanvasTexture>[] = [];
-      // A flat ribbon draped on the terrain (painted on, not a raised tube).
-      // Borders and routes render dashed + raised so they read as markings, not
-      // as rivers/roads.
-      function buildPath(points: number[], kind: WorldPath["kind"], colorHex?: string) {
-        const ctrl: InstanceType<typeof THREE.Vector3>[] = [];
+      // A thin draped tube — used only as a live guide while drawing a path.
+      function buildPreviewTube(points: number[], kind: WorldPath["kind"]) {
+        const v: InstanceType<typeof THREE.Vector3>[] = [];
         for (let i = 0; i + 1 < points.length; i += 2) {
-          ctrl.push(new THREE.Vector3((points[i] - 0.5) * W, 0, (points[i + 1] - 0.5) * W));
+          const nx = points[i];
+          const ny = points[i + 1];
+          v.push(
+            new THREE.Vector3(
+              (nx - 0.5) * W,
+              heightAtNorm(nx, ny) * HEIGHT + 0.14,
+              (ny - 0.5) * W,
+            ),
+          );
         }
-        if (ctrl.length < 2) return null;
-        const curve = new THREE.CatmullRomCurve3(ctrl, false, "catmullrom", 0.5);
-        const segs = Math.max(20, ctrl.length * 18);
-        const sample = curve.getSpacedPoints(segs);
-        const half = (PATH_WIDTH[kind] ?? 0.3) / 2;
-        const dashed = kind === "border" || kind === "route";
-        const yOff =
-          kind === "river" ? 0.01 : kind === "border" ? 0.16 : kind === "route" ? 0.09 : 0.04;
-        const isWater = kind === "river";
-        const textured = isWater || kind === "road";
-        const tile = isWater ? 2.6 : 1.6;
-        const Lx: number[] = [];
-        const Ly: number[] = [];
-        const Lz: number[] = [];
-        const Rx: number[] = [];
-        const Ry: number[] = [];
-        const Rz: number[] = [];
-        const cum: number[] = [0];
-        for (let i = 0; i <= segs; i++) {
-          const p = sample[i];
-          const prev = sample[Math.max(0, i - 1)];
-          const next = sample[Math.min(segs, i + 1)];
-          const tx = next.x - prev.x;
-          const tz = next.z - prev.z;
-          const tl = Math.hypot(tx, tz) || 1;
-          const px = -tz / tl;
-          const pz = tx / tl;
-          const lx = p.x + px * half;
-          const lz = p.z + pz * half;
-          const rx = p.x - px * half;
-          const rz = p.z - pz * half;
-          Lx.push(lx);
-          Ly.push(heightAtNorm(lx / W + 0.5, lz / W + 0.5) * HEIGHT + yOff);
-          Lz.push(lz);
-          Rx.push(rx);
-          Ry.push(heightAtNorm(rx / W + 0.5, rz / W + 0.5) * HEIGHT + yOff);
-          Rz.push(rz);
-          if (i > 0) cum[i] = cum[i - 1] + p.distanceTo(sample[i - 1]);
-        }
-        const pos: number[] = [];
-        const idx: number[] = [];
-        const uv: number[] = [];
-        const pushQuad = (i: number) => {
-          const b = pos.length / 3;
-          const vi = cum[i] / tile;
-          const vj = cum[i + 1] / tile;
-          pos.push(Lx[i], Ly[i], Lz[i], Rx[i], Ry[i], Rz[i], Lx[i + 1], Ly[i + 1], Lz[i + 1], Rx[i + 1], Ry[i + 1], Rz[i + 1]);
-          uv.push(0, vi, 1, vi, 0, vj, 1, vj);
-          idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
-        };
-        for (let i = 0; i < segs; i++) {
-          if (dashed && i % 4 >= 2) continue; // 2 on, 2 off
-          pushQuad(i);
-        }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
-        geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uv), 2));
-        geo.setIndex(idx);
-        geo.computeVertexNormals();
-        const style = PATH_STYLE[kind] ?? PATH_STYLE.route;
-        let mat: InstanceType<typeof THREE.MeshStandardMaterial>;
-        if (textured) {
-          const map = makePathTexture(kind);
-          mat = new THREE.MeshStandardMaterial({
-            map,
-            transparent: true,
-            roughness: isWater ? 0.18 : 0.95,
-            metalness: isWater ? 0.25 : 0,
-            side: THREE.DoubleSide,
-          });
-        } else {
-          mat = new THREE.MeshStandardMaterial({
-            color: new THREE.Color(colorHex || style.color),
-            roughness: 0.9,
-            metalness: 0,
-            transparent: kind === "route",
-            opacity: kind === "route" ? 0.85 : 1,
-            side: THREE.DoubleSide,
-          });
-        }
+        if (v.length < 2) return null;
+        const curve = new THREE.CatmullRomCurve3(v, false, "catmullrom", 0.5);
+        const geo = new THREE.TubeGeometry(curve, Math.max(8, v.length * 8), 0.06, 6, false);
+        const c = PATH_PAINT[kind]?.rgb ?? [0.8, 0.6, 0.3];
+        const mat = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(c[0], c[1], c[2]),
+          emissive: new THREE.Color(c[0] * 0.4, c[1] * 0.4, c[2] * 0.4),
+          roughness: 0.6,
+        });
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.renderOrder = isWater ? 1 : kind === "border" ? 4 : 2;
+        mesh.renderOrder = 3;
         return mesh;
       }
-      function syncPaths(list: WorldPath[]) {
-        // Re-carve rivers / re-flatten roads, then reflow the surface + objects.
+      // Paths are painted into the terrain by computeMods; this just reflows the
+      // surface + objects when the path list changes.
+      function syncPaths() {
         computeMods();
         refreshPositions();
         refreshColors();
-        // Rebuild every ribbon (terrain under it may have moved).
-        for (const rec of pathMap.values()) disposePathMesh(rec.mesh);
-        pathMap.clear();
-        for (const p of list) {
-          const mesh = buildPath(p.points, p.kind, p.color);
-          if (mesh) {
-            scene.add(mesh);
-            pathMap.set(p.id, {
-              mesh,
-              kind: p.kind,
-              sig: `${p.kind}|${p.color ?? ""}|${p.points.join(",")}`,
-            });
-          }
-        }
-        // Collect river textures to animate (flow).
-        riverTextures.length = 0;
-        for (const rec of pathMap.values()) {
-          if (rec.kind === "river") {
-            const map = (rec.mesh.material as InstanceType<typeof THREE.MeshStandardMaterial>).map;
-            if (map) riverTextures.push(map as InstanceType<typeof THREE.CanvasTexture>);
-          }
-        }
         buildTrees();
         buildLanterns();
         repositionPois();
@@ -985,13 +843,8 @@ export function WorldMapBuilder({
           disposePathMesh(previewMesh);
           previewMesh = null;
         }
-        const m = buildPath(draftPoints, draftKind);
+        const m = buildPreviewTube(draftPoints, draftKind);
         if (m) {
-          (m.material as InstanceType<typeof THREE.MeshStandardMaterial>).color.offsetHSL(
-            0,
-            0,
-            0.12,
-          );
           previewMesh = m;
           scene.add(m);
         }
@@ -1160,7 +1013,7 @@ export function WorldMapBuilder({
         }
         const b = { x: nx, y: ny };
         clearMeasureObjs();
-        measureLine = buildPath([measureA.x, measureA.y, b.x, b.y], "route", "#d8b24a");
+        measureLine = buildPreviewTube([measureA.x, measureA.y, b.x, b.y], "route");
         if (measureLine) scene.add(measureLine);
         const dnx = b.x - measureA.x;
         const dny = b.y - measureA.y;
@@ -1197,14 +1050,21 @@ export function WorldMapBuilder({
         carveArr.fill(0);
         roadTarget.fill(0);
         roadW.fill(0);
+        pathR.fill(0);
+        pathG.fill(0);
+        pathB.fill(0);
+        pathWt.fill(0);
         const cell = W / size;
         for (const p of worldRef.current.paths ?? []) {
           const isRiver = p.kind === "river";
           const isRoad = p.kind === "road";
-          if (!isRiver && !isRoad) continue;
-          const rad = Math.max(1, Math.round((isRiver ? 0.8 : 0.6) / cell));
+          const dashed = p.kind === "border" || p.kind === "route";
+          const paint = PATH_PAINT[p.kind] ?? PATH_PAINT.route;
+          const rgb = p.color ? hex01(p.color) : paint.rgb;
+          const rad = Math.max(1, Math.round((PATH_WIDTH[p.kind] ?? 0.5) / 2 / cell));
           const depth = 0.075;
           const pts = p.points;
+          let dashCounter = 0;
           for (let s = 0; s + 3 < pts.length; s += 2) {
             const ax = pts[s];
             const ay = pts[s + 1];
@@ -1216,6 +1076,8 @@ export function WorldMapBuilder({
               const sc = Math.round((ax + (bx - ax) * f) * N);
               const sr = Math.round((ay + (by - ay) * f) * N);
               const baseH = heightArr[Math.max(0, Math.min(size * size - 1, sr * size + sc))];
+              const dashOn = !dashed || Math.floor(dashCounter / 3) % 2 === 0;
+              dashCounter++;
               for (let dy = -rad; dy <= rad; dy++) {
                 for (let dx = -rad; dx <= rad; dx++) {
                   const x = sc + dx;
@@ -1228,11 +1090,20 @@ export function WorldMapBuilder({
                   if (isRiver) {
                     const c = -depth * fall;
                     if (c < carveArr[i]) carveArr[i] = c;
-                  } else {
+                  } else if (isRoad) {
                     const w = fall * 0.92;
                     if (w > roadW[i]) {
                       roadW[i] = w;
                       roadTarget[i] = baseH;
+                    }
+                  }
+                  if (dashOn) {
+                    const w = paint.w * (0.4 + fall * 0.6);
+                    if (w > pathWt[i]) {
+                      pathWt[i] = w;
+                      pathR[i] = rgb[0];
+                      pathG[i] = rgb[1];
+                      pathB[i] = rgb[2];
                     }
                   }
                 }
@@ -1361,6 +1232,13 @@ export function WorldMapBuilder({
             b = b * (1 - bf) + 0.09 * bf;
           }
         }
+        // paths painted into the surface (rivers/roads/routes/borders)
+        const pw = pathWt[i];
+        if (pw > 0) {
+          r = r * (1 - pw) + pathR[i] * pw;
+          g = g * (1 - pw) + pathG[i] * pw;
+          b = b * (1 - pw) + pathB[i] * pw;
+        }
         // fog of exploration: shroud unrevealed cells
         if (fogOn && exploredArr[i] === 0) {
           const asPlayer = !canEdit || previewPlayerRef.current;
@@ -1397,6 +1275,7 @@ export function WorldMapBuilder({
       let nightFactor = 0;
       let curTime = world.timeOfDay ?? 0.5;
       let baseAmbient = 0.5;
+      let lanternBase = 0.5;
       let flash = 0;
       let boltTimer = 3;
       let weatherPoints: InstanceType<typeof THREE.Points> | null = null;
@@ -1439,14 +1318,16 @@ export function WorldMapBuilder({
       }
 
       // --- lanterns (towns + along roads) ---
-      const lanternPostMat = new THREE.MeshStandardMaterial({ color: 0x3a3027, roughness: 0.85 });
+      const lanternPostMat = new THREE.MeshStandardMaterial({ color: 0x6b5234, roughness: 0.75 });
+      const lanternHeadMat = new THREE.MeshStandardMaterial({ color: 0x2a2620, roughness: 0.6, metalness: 0.4 });
       const lanternGlowMat = new THREE.MeshStandardMaterial({
-        color: 0xffe2a6,
-        emissive: 0xffb347,
-        emissiveIntensity: 0.4,
-        roughness: 0.4,
+        color: 0xffdf9e,
+        emissive: 0xff9b30,
+        emissiveIntensity: 0.5,
+        roughness: 0.35,
       });
       let lanternPosts: InstanceType<typeof THREE.InstancedMesh> | null = null;
+      let lanternHeads: InstanceType<typeof THREE.InstancedMesh> | null = null;
       let lanternGlows: InstanceType<typeof THREE.InstancedMesh> | null = null;
       function lanternPositions() {
         const out: { x: number; y: number }[] = [];
@@ -1488,42 +1369,113 @@ export function WorldMapBuilder({
         }
         return out.slice(0, 500);
       }
+      function disposeLanterns() {
+        for (const im of [lanternPosts, lanternHeads, lanternGlows]) {
+          if (im) {
+            scene.remove(im);
+            im.geometry.dispose();
+          }
+        }
+        lanternPosts = lanternHeads = lanternGlows = null;
+      }
       function buildLanterns() {
-        if (lanternPosts) {
-          scene.remove(lanternPosts);
-          lanternPosts.geometry.dispose();
-          lanternPosts = null;
-        }
-        if (lanternGlows) {
-          scene.remove(lanternGlows);
-          lanternGlows.geometry.dispose();
-          lanternGlows = null;
-        }
+        disposeLanterns();
         const ps = lanternPositions();
         const n = ps.length;
         if (n === 0) return;
-        const postGeo = new THREE.CylinderGeometry(0.03, 0.045, 0.95, 5);
-        postGeo.translate(0, 0.47, 0);
-        const glowGeo = new THREE.SphereGeometry(0.1, 8, 8);
-        glowGeo.translate(0, 1.0, 0);
+        const postGeo = new THREE.CylinderGeometry(0.05, 0.07, 1.0, 6);
+        postGeo.translate(0, 0.5, 0);
+        const headGeo = new THREE.BoxGeometry(0.22, 0.26, 0.22);
+        headGeo.translate(0, 1.07, 0);
+        const glowGeo = new THREE.SphereGeometry(0.13, 8, 8);
+        glowGeo.translate(0, 1.07, 0);
         lanternPosts = new THREE.InstancedMesh(postGeo, lanternPostMat, n);
+        lanternHeads = new THREE.InstancedMesh(headGeo, lanternHeadMat, n);
         lanternGlows = new THREE.InstancedMesh(glowGeo, lanternGlowMat, n);
         const m = new THREE.Matrix4();
         const q = new THREE.Quaternion();
-        const sv = new THREE.Vector3(0.16, 0.16, 0.16);
+        const sv = new THREE.Vector3(0.18, 0.18, 0.18);
         const pv = new THREE.Vector3();
         for (let i = 0; i < n; i++) {
           const { x, y } = ps[i];
           pv.set((x - 0.5) * W, heightAtNorm(x, y) * HEIGHT, (y - 0.5) * W);
           m.compose(pv, q, sv);
           lanternPosts.setMatrixAt(i, m);
+          lanternHeads.setMatrixAt(i, m);
           lanternGlows.setMatrixAt(i, m);
         }
         lanternPosts.instanceMatrix.needsUpdate = true;
+        lanternHeads.instanceMatrix.needsUpdate = true;
         lanternGlows.instanceMatrix.needsUpdate = true;
         lanternGlows.renderOrder = 3;
         scene.add(lanternPosts);
+        scene.add(lanternHeads);
         scene.add(lanternGlows);
+      }
+
+      // --- region name labels (spread across owned territory) ---
+      const regionLabelMap = new Map<
+        number,
+        { sprite: InstanceType<typeof THREE.Sprite>; aspect: number }
+      >();
+      function disposeRegionLabel(rec: { sprite: InstanceType<typeof THREE.Sprite> }) {
+        scene.remove(rec.sprite);
+        (rec.sprite.material.map as InstanceType<typeof THREE.CanvasTexture>)?.dispose();
+        rec.sprite.material.dispose();
+      }
+      function syncRegionLabels() {
+        if (!(worldRef.current.regions ?? []).length) {
+          for (const rec of regionLabelMap.values()) disposeRegionLabel(rec);
+          regionLabelMap.clear();
+          return;
+        }
+        const sx = new Map<number, number>();
+        const sy = new Map<number, number>();
+        const cn = new Map<number, number>();
+        for (let i = 0; i < regionArr.length; i++) {
+          const nnum = regionArr[i];
+          if (nnum === 0) continue;
+          sx.set(nnum, (sx.get(nnum) ?? 0) + (i % size) / N);
+          sy.set(nnum, (sy.get(nnum) ?? 0) + ((i / size) | 0) / N);
+          cn.set(nnum, (cn.get(nnum) ?? 0) + 1);
+        }
+        const present = new Set<number>();
+        for (const rg of worldRef.current.regions ?? []) {
+          const num = rg.num ?? 0;
+          const c = cn.get(num);
+          if (!num || !c) continue;
+          present.add(num);
+          const cx = sx.get(num)! / c;
+          const cy = sy.get(num)! / c;
+          const name = rg.name || "Region";
+          let rec = regionLabelMap.get(num);
+          if (!rec || rec.sprite.userData.sig !== name) {
+            if (rec) disposeRegionLabel(rec);
+            const { tex, aspect } = makeTextLabel(name, "#3a2f22");
+            const sp = new THREE.Sprite(
+              new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }),
+            );
+            sp.renderOrder = 14;
+            sp.userData.sig = name;
+            scene.add(sp);
+            rec = { sprite: sp, aspect };
+            regionLabelMap.set(num, rec);
+          }
+          const sc = Math.min(7, Math.max(1.8, Math.sqrt(c) / size * W * 0.6));
+          rec.sprite.scale.set(sc * rec.aspect, sc, 1);
+          rec.sprite.position.set(
+            (cx - 0.5) * W,
+            heightAtNorm(cx, cy) * HEIGHT + sc * 0.45 + 0.4,
+            (cy - 0.5) * W,
+          );
+          rec.sprite.visible = showRegionsRef.current;
+        }
+        for (const [num, rec] of regionLabelMap) {
+          if (!present.has(num)) {
+            disposeRegionLabel(rec);
+            regionLabelMap.delete(num);
+          }
+        }
       }
 
       function makeWeather(kind: WorldWeather) {
@@ -1597,7 +1549,8 @@ export function WorldMapBuilder({
         ambient.color.setRGB(0.6 + day * 0.4, 0.65 + day * 0.35, 0.8);
         const lv = lightLevel();
         for (const l of lightMap.values()) l.intensity = lv;
-        lanternGlowMat.emissiveIntensity = 0.2 + nightFactor * 2.6 + (1 - dim) * 0.6;
+        lanternBase = 0.2 + nightFactor * 2.6 + (1 - dim) * 0.6;
+        lanternGlowMat.emissiveIntensity = lanternBase;
       }
       applyWeather(weatherKind);
       syncPois(
@@ -1605,8 +1558,9 @@ export function WorldMapBuilder({
           ? resolvedPoisRef.current
           : resolvedPoisRef.current.filter((p) => !p.hidden),
       );
-      // Rebuilds tubes, carves/flattens terrain, then reseats trees/POIs/party.
-      syncPaths(worldRef.current.paths ?? []);
+      // Paints/carves paths into terrain, then reseats trees/POIs/party.
+      syncPaths();
+      syncRegionLabels();
 
       // --- brushing ---
       const ray = new THREE.Raycaster();
@@ -1771,6 +1725,7 @@ export function WorldMapBuilder({
               toolRef.current === "smooth") {
               repositionPois();
             }
+            if (toolRef.current === "region") syncRegionLabels();
           }
           scheduleSave();
         } else if (
@@ -1815,9 +1770,14 @@ export function WorldMapBuilder({
           hoveredPoiId = null;
         }
         updatePoiLabels();
+        for (const rec of regionLabelMap.values()) {
+          rec.sprite.visible = showRegionsRef.current;
+        }
 
-        // River flow.
-        for (const t of riverTextures) t.offset.y -= dt * 0.12;
+        // Lantern flame flicker.
+        if (lanternBase > 0.3) {
+          lanternGlowMat.emissiveIntensity = lanternBase * (0.9 + 0.1 * Math.sin(now * 0.012));
+        }
 
         // Weather animation.
         if (weatherPoints) {
@@ -1889,8 +1849,8 @@ export function WorldMapBuilder({
           if (wm.size !== size) return; // size changes rebuild via the effect
           loadArrays(wm);
           setWater();
-          // Recomputes terrain mods, repaints, and reseats tubes/trees/POIs.
-          syncPaths(worldRef.current.paths ?? []);
+          // Recomputes terrain mods, repaints, and reseats trees/POIs.
+          syncPaths();
         },
         exportWorld(): WorldMap {
           const h = new Uint8Array(size * size);
@@ -1949,6 +1909,7 @@ export function WorldMapBuilder({
         rebuildTrees() {
           buildTrees();
         },
+        syncRegionLabels,
         reshade() {
           refreshColors();
         },
@@ -1975,8 +1936,6 @@ export function WorldMapBuilder({
           poiMap.clear();
           for (const l of lightMap.values()) scene.remove(l);
           lightMap.clear();
-          for (const rec of pathMap.values()) disposePathMesh(rec.mesh);
-          pathMap.clear();
           if (previewMesh) disposePathMesh(previewMesh);
           if (treeTrunks) {
             scene.remove(treeTrunks);
@@ -1986,14 +1945,9 @@ export function WorldMapBuilder({
             scene.remove(treeLeaves);
             treeLeaves.geometry.dispose();
           }
-          if (lanternPosts) {
-            scene.remove(lanternPosts);
-            lanternPosts.geometry.dispose();
-          }
-          if (lanternGlows) {
-            scene.remove(lanternGlows);
-            lanternGlows.geometry.dispose();
-          }
+          disposeLanterns();
+          for (const rec of regionLabelMap.values()) disposeRegionLabel(rec);
+          regionLabelMap.clear();
           if (partySprite) disposeSprite(partySprite);
           clearMeasureObjs();
           if (weatherPoints) {
@@ -2024,6 +1978,7 @@ export function WorldMapBuilder({
   useEffect(() => engineRef.current?.reshade(), [previewPlayer]);
   useEffect(() => engineRef.current?.reshade(), [regionColors]);
   useEffect(() => engineRef.current?.reshade(), [showRegions]);
+  useEffect(() => engineRef.current?.syncRegionLabels(), [world.regions, regionColors]);
 
   // Rotate the compass every frame.
   useEffect(() => {
@@ -2045,7 +2000,7 @@ export function WorldMapBuilder({
 
   // Rebuild path tubes when paths change.
   useEffect(() => {
-    engineRef.current?.syncPaths(paths);
+    engineRef.current?.syncPaths();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paths]);
 
