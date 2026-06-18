@@ -9,8 +9,16 @@ import { BIOME_RGB, PAINT_BIOMES } from "@/lib/world/biomes";
 import { decodeBytes, encodeBytes } from "@/lib/world/codec";
 import { generateWorld } from "@/lib/world/generate";
 
-const W = 24; // world span (units)
-const HEIGHT = 4; // max elevation (units)
+const W = 28; // world span (units)
+const HEIGHT = 4.6; // max elevation (units)
+
+/** Selectable world resolutions (cells per side). */
+const SIZES: { label: string; size: number }[] = [
+  { label: "Small", size: 96 },
+  { label: "Medium", size: 128 },
+  { label: "Large", size: 192 },
+  { label: "Huge", size: 256 },
+];
 
 type Tool = "look" | "raise" | "lower" | "smooth" | "paint";
 
@@ -47,8 +55,9 @@ export function WorldMapBuilder({
   const [sea, setSea] = useState(world.seaLevel);
   const [time, setTime] = useState(world.timeOfDay ?? 0.5);
   const [weather, setWeather] = useState<WorldWeather>(world.weather ?? "clear");
+  const [genSize, setGenSize] = useState(world.size);
 
-  // Live refs the pointer handlers read.
+  // Live refs the pointer handlers / exporter read.
   const toolRef = useRef(tool);
   toolRef.current = canEdit ? tool : "look";
   const sizeRef = useRef(brushSize);
@@ -57,6 +66,10 @@ export function WorldMapBuilder({
   strengthRef.current = brushStrength;
   const biomeRef = useRef(paintBiome);
   biomeRef.current = paintBiome;
+  const timeRef = useRef(time);
+  timeRef.current = time;
+  const weatherRef = useRef(weather);
+  weatherRef.current = weather;
 
   const scheduleSave = () => {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -110,8 +123,9 @@ export function WorldMapBuilder({
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.target.set(0, 0, 0);
-      controls.maxDistance = 90;
-      controls.minDistance = 6;
+      controls.maxDistance = 160;
+      controls.minDistance = 4;
+      controls.zoomSpeed = 1.1;
 
       const ambient = new THREE.AmbientLight(0xffffff, 0.6);
       scene.add(ambient);
@@ -136,16 +150,18 @@ export function WorldMapBuilder({
       terrain.rotation.x = -Math.PI / 2;
       scene.add(terrain);
 
-      // Water.
+      // Water — its own translucent surface; terrain colour stays land-toned.
       const waterMat = new THREE.MeshStandardMaterial({
-        color: 0x2f6ea0,
+        color: 0x2b6a93,
         transparent: true,
-        opacity: 0.66,
-        roughness: 0.25,
-        metalness: 0.1,
+        opacity: 0.62,
+        roughness: 0.15,
+        metalness: 0.25,
+        depthWrite: false,
       });
-      const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 1.6, W * 1.6), waterMat);
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 2, W * 2), waterMat);
       water.rotation.x = -Math.PI / 2;
+      water.renderOrder = 1;
       scene.add(water);
 
       const pos = geo.getAttribute("position") as InstanceType<
@@ -159,28 +175,95 @@ export function WorldMapBuilder({
         pos.needsUpdate = true;
         geo.computeVertexNormals();
       }
-      function refreshColors() {
-        for (let i = 0; i < heightArr.length; i++) {
-          const h = heightArr[i];
-          let r: number, g: number, b: number;
-          if (h < seaLevel) {
-            const depth = Math.max(0, Math.min(1, (seaLevel - h) / seaLevel));
-            r = 0.13 - depth * 0.06;
-            g = 0.32 - depth * 0.14;
-            b = 0.45 - depth * 0.12;
-          } else {
-            const [br, bg, bb] = BIOME_RGB[biomeArr[i]] ?? [110, 140, 80];
-            const t = 0.82 + h * 0.32;
-            r = (br / 255) * t;
-            g = (bg / 255) * t;
-            b = (bb / 255) * t;
-          }
-          colorAttr.setXYZ(i, r, g, b);
+
+      // --- height/slope-blended procedural terrain shading ---
+      const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+      const sstep = (e0: number, e1: number, x: number) => {
+        const t = clamp01((x - e0) / (e1 - e0));
+        return t * t * (3 - 2 * t);
+      };
+      const vnoise = (i: number) => {
+        let h = Math.imul(i ^ 0x9e3779b9, 2246822519);
+        h ^= h >>> 15;
+        h = Math.imul(h, 3266489917);
+        return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+      };
+      function slopeAt(i: number) {
+        const x = i % size;
+        const y = (i / size) | 0;
+        const hl = x > 0 ? heightArr[i - 1] : heightArr[i];
+        const hr = x < size - 1 ? heightArr[i + 1] : heightArr[i];
+        const hu = y > 0 ? heightArr[i - size] : heightArr[i];
+        const hd = y < size - 1 ? heightArr[i + size] : heightArr[i];
+        const dx = hr - hl;
+        const dy = hd - hu;
+        return clamp01(Math.sqrt(dx * dx + dy * dy) * ((HEIGHT * size) / W) * 0.45);
+      }
+      // Elevation material stops (0..1 rgb).
+      const SAND = [0.82, 0.74, 0.54];
+      const GRASS = [0.41, 0.53, 0.27];
+      const FOREST = [0.22, 0.35, 0.18];
+      const ROCK = [0.45, 0.43, 0.39];
+      const SNOW = [0.95, 0.96, 0.98];
+      const BED = [0.3, 0.32, 0.3];
+      function setColorAt(i: number) {
+        const h = heightArr[i];
+        const landH = clamp01((h - seaLevel) / Math.max(0.001, 1 - seaLevel));
+        const slope = slopeAt(i);
+        let r = SAND[0];
+        let g = SAND[1];
+        let b = SAND[2];
+        let t = sstep(0.015, 0.16, landH); // beach → grass
+        r += (GRASS[0] - r) * t;
+        g += (GRASS[1] - g) * t;
+        b += (GRASS[2] - b) * t;
+        t = sstep(0.16, 0.44, landH); // grass → forest
+        r += (FOREST[0] - r) * t;
+        g += (FOREST[1] - g) * t;
+        b += (FOREST[2] - b) * t;
+        t = sstep(0.56, 0.82, landH); // forest → rock
+        r += (ROCK[0] - r) * t;
+        g += (ROCK[1] - g) * t;
+        b += (ROCK[2] - b) * t;
+        t = sstep(0.3, 0.65, slope); // steep → rock
+        r += (ROCK[0] - r) * t;
+        g += (ROCK[1] - g) * t;
+        b += (ROCK[2] - b) * t;
+        const snow = sstep(0.72, 0.93, landH) * (1 - sstep(0.4, 0.78, slope));
+        r += (SNOW[0] - r) * snow;
+        g += (SNOW[1] - g) * snow;
+        b += (SNOW[2] - b) * snow;
+        // tint by painted biome so regional identity (desert/swamp/…) shows
+        const bw = 0.42;
+        const br = BIOME_RGB[biomeArr[i]] ?? [110, 140, 80];
+        r = r * (1 - bw) + (br[0] / 255) * bw;
+        g = g * (1 - bw) + (br[1] / 255) * bw;
+        b = b * (1 - bw) + (br[2] / 255) * bw;
+        // procedural texture variance
+        const n = (vnoise(i) - 0.5) * 0.1;
+        r *= 1 + n;
+        g *= 1 + n;
+        b *= 1 + n;
+        // underwater: darken to a riverbed tone (the water plane supplies the blue)
+        if (h < seaLevel) {
+          const d = sstep(0, seaLevel, seaLevel - h);
+          const f = 0.5 * d;
+          r = r * (1 - f) + BED[0] * f;
+          g = g * (1 - f) + BED[1] * f;
+          b = b * (1 - f) + BED[2] * f;
+          const dk = 1 - 0.3 * d;
+          r *= dk;
+          g *= dk;
+          b *= dk;
         }
+        colorAttr.setXYZ(i, clamp01(r), clamp01(g), clamp01(b));
+      }
+      function refreshColors() {
+        for (let i = 0; i < heightArr.length; i++) setColorAt(i);
         colorAttr.needsUpdate = true;
       }
       function setWater() {
-        water.position.y = seaLevel * HEIGHT + 0.01;
+        water.position.y = seaLevel * HEIGHT + 0.02;
       }
 
       refreshPositions();
@@ -268,8 +351,23 @@ export function WorldMapBuilder({
             }
           }
         }
-        if (touchedHeight) refreshPositions();
-        refreshColors();
+        // Update only the touched region (+1 cell border for slope/normals).
+        const x0 = Math.max(0, cx - radius - 1);
+        const x1 = Math.min(size - 1, cx + radius + 1);
+        const y0 = Math.max(0, cy - radius - 1);
+        const y1 = Math.min(size - 1, cy + radius + 1);
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x <= x1; x++) {
+            const i = y * size + x;
+            if (touchedHeight) pos.setZ(i, heightArr[i] * HEIGHT);
+            setColorAt(i);
+          }
+        }
+        if (touchedHeight) {
+          pos.needsUpdate = true;
+          if (size <= 160) geo.computeVertexNormals(); // big maps defer to release
+        }
+        colorAttr.needsUpdate = true;
         edited = true;
       }
 
@@ -288,7 +386,11 @@ export function WorldMapBuilder({
         if (c !== null) applyBrush(c);
       }
       function onUp() {
-        if (painting && edited) scheduleSave();
+        if (painting && edited) {
+          geo.computeVertexNormals(); // accurate lighting after the stroke
+          refreshColors();
+          scheduleSave();
+        }
         painting = false;
         edited = false;
       }
@@ -341,6 +443,7 @@ export function WorldMapBuilder({
           /* weather visuals land in a later phase; stored on export */
         },
         load(wm) {
+          if (wm.size !== size) return; // size changes rebuild via the effect
           loadArrays(wm);
           refreshPositions();
           refreshColors();
@@ -355,6 +458,8 @@ export function WorldMapBuilder({
             height: encodeBytes(h),
             biome: encodeBytes(biomeArr),
             seaLevel,
+            timeOfDay: timeRef.current,
+            weather: weatherRef.current,
           };
         },
         dispose() {
@@ -378,9 +483,9 @@ export function WorldMapBuilder({
       cleanup();
       engineRef.current = null;
     };
-    // Rebuild only when switching maps.
+    // Rebuild when switching maps or changing world resolution.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map.id]);
+  }, [map.id, world.size]);
 
   // Push UI changes to the engine.
   useEffect(() => engineRef.current?.setView(view), [view]);
@@ -444,7 +549,7 @@ export function WorldMapBuilder({
                 <input
                   type="range"
                   min={2}
-                  max={24}
+                  max={Math.max(24, Math.round(world.size / 5))}
                   value={brushSize}
                   onChange={(e) => setBrushSize(Number(e.target.value))}
                   className="w-full accent-oxblood"
@@ -508,6 +613,7 @@ export function WorldMapBuilder({
                 step={0.01}
                 value={time}
                 onChange={(e) => setTime(Number(e.target.value))}
+                onPointerUp={scheduleSave}
                 className="w-28 accent-brass"
               />
             </label>
@@ -517,6 +623,7 @@ export function WorldMapBuilder({
                 const w = e.target.value as WorldWeather;
                 setWeather(w);
                 engineRef.current?.setWeather(w);
+                scheduleSave();
               }}
               aria-label="Weather"
               className="h-8 rounded-md border border-parchment-400 bg-parchment-50 px-2 text-xs text-ink focus:border-brass focus:outline-none"
@@ -527,13 +634,37 @@ export function WorldMapBuilder({
                 </option>
               ))}
             </select>
+            <label className="flex items-center gap-1.5">
+              Size
+              <select
+                value={genSize}
+                onChange={(e) => setGenSize(Number(e.target.value))}
+                aria-label="World size"
+                className="h-8 rounded-md border border-parchment-400 bg-parchment-50 px-2 text-xs text-ink focus:border-brass focus:outline-none"
+              >
+                {SIZES.map((s) => (
+                  <option key={s.size} value={s.size}>
+                    {s.label} ({s.size})
+                  </option>
+                ))}
+              </select>
+            </label>
             <Button
               size="sm"
               variant="secondary"
               onClick={() => {
-                const wm = generateWorld({ size: world.size, seed: Math.floor(Math.random() * 99999), seaLevel: sea });
-                engineRef.current?.load(wm);
-                onUpdate({ world: { ...engineRef.current!.exportWorld() } });
+                const wm = generateWorld({
+                  size: genSize,
+                  seed: Math.floor(Math.random() * 99999),
+                  seaLevel: sea,
+                });
+                if (genSize === world.size && engineRef.current) {
+                  engineRef.current.load(wm);
+                  onUpdate({ world: engineRef.current.exportWorld() });
+                } else {
+                  // Different resolution → save and let the effect rebuild.
+                  onUpdate({ world: { ...wm, timeOfDay: time, weather } });
+                }
               }}
             >
               Regenerate
