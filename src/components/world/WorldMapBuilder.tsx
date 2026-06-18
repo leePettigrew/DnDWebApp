@@ -46,7 +46,15 @@ export const POI_KINDS: { id: string; glyph: string; label: string }[] = [
 ];
 export const POI_GLYPH = new Map(POI_KINDS.map((k) => [k.id, k.glyph]));
 
-type Tool = "look" | "raise" | "lower" | "smooth" | "paint" | "reveal" | "shroud";
+type Tool =
+  | "look"
+  | "raise"
+  | "lower"
+  | "smooth"
+  | "paint"
+  | "reveal"
+  | "shroud"
+  | "region";
 
 interface Engine {
   setView(v: "3d" | "top"): void;
@@ -61,7 +69,9 @@ interface Engine {
   setFog(on: boolean): void;
   /** Reveal (1) or shroud (0) the entire map, then persist. */
   revealAll(v: 0 | 1): void;
-  /** Re-shade (e.g. after toggling DM "view as player"). */
+  /** Clear all cells owned by a region index, then persist. */
+  clearRegion(idx: number): void;
+  /** Re-shade (e.g. after toggling DM "view as player" or region colours). */
   reshade(): void;
   /** Camera azimuth (radians) for the compass. */
   azimuth(): number;
@@ -156,6 +166,41 @@ export function WorldMapBuilder({
   const previewPlayerRef = useRef(previewPlayer);
   previewPlayerRef.current = previewPlayer;
 
+  // --- political regions (territory paint) ---
+  const regions = world.regions ?? [];
+  const [activeRegion, setActiveRegion] = useState(regions[0]?.num ?? 1);
+  const activeRegionRef = useRef(activeRegion);
+  activeRegionRef.current = activeRegion;
+  const regColor = (rg: (typeof regions)[number]) =>
+    (rg.factionId ? factionColor(rg.factionId) ?? rg.color : rg.color) ?? "#8a4b2d";
+  const hexToRgb01 = (hex?: string): [number, number, number] => {
+    const h = (hex ?? "#8a4b2d").replace("#", "");
+    const n = parseInt(h.length === 3 ? h.replace(/(.)/g, "$1$1") : h, 16);
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  };
+  // region paint index (num) → resolved rgb (faction colour wins)
+  const regionColors = useMemo(() => {
+    const arr: (([number, number, number]) | undefined)[] = [];
+    for (const rg of regions) if (rg.num) arr[rg.num] = hexToRgb01(regColor(rg));
+    return arr;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regions, factions]);
+  const regionColorsRef = useRef(regionColors);
+  regionColorsRef.current = regionColors;
+
+  const saveRegions = (next: typeof regions) => saveWorld({ regions: next });
+  const updateRegion = (id: string, patch: Partial<(typeof regions)[number]>) =>
+    saveRegions(regions.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const addRegion = () => {
+    const num = regions.reduce((m, r) => Math.max(m, r.num ?? 0), 0) + 1;
+    saveRegions([
+      ...regions,
+      { id: newId(), num, name: `Region ${regions.length + 1}`, color: "#8a4b2d" },
+    ]);
+    setActiveRegion(num);
+    setTool("region");
+  };
+
   /** Persist world fields, preserving in-memory terrain edits. */
   const saveWorld = (patch: Partial<WorldMap>) => {
     const base = engineRef.current ? engineRef.current.exportWorld() : world;
@@ -209,22 +254,27 @@ export function WorldMapBuilder({
       let heightArr: Float32Array = new Float32Array(size * size);
       let biomeArr: Uint8Array = new Uint8Array(size * size);
       let exploredArr: Uint8Array = new Uint8Array(size * size);
+      let regionArr: Uint8Array = new Uint8Array(size * size);
       let seaLevel = world.seaLevel;
       let fogOn = !!world.fog;
 
+      const fitGrid = (a: Uint8Array) => {
+        if (a.length === size * size) return a;
+        const out = new Uint8Array(size * size);
+        out.set(a.subarray(0, size * size));
+        return out;
+      };
       function loadArrays(wm: WorldMap) {
         const h = decodeBytes(wm.height, size * size);
-        biomeArr = decodeBytes(wm.biome, size * size);
+        biomeArr = fitGrid(decodeBytes(wm.biome, size * size));
         heightArr = new Float32Array(size * size);
         for (let i = 0; i < heightArr.length; i++) heightArr[i] = (h[i] ?? 0) / 255;
-        exploredArr = wm.explored
-          ? decodeBytes(wm.explored, size * size)
-          : new Uint8Array(size * size);
-        if (exploredArr.length < size * size) {
-          const e = new Uint8Array(size * size);
-          e.set(exploredArr);
-          exploredArr = e;
-        }
+        exploredArr = fitGrid(
+          wm.explored ? decodeBytes(wm.explored, size * size) : new Uint8Array(0),
+        );
+        regionArr = fitGrid(
+          wm.regionMask ? decodeBytes(wm.regionMask, size * size) : new Uint8Array(0),
+        );
         seaLevel = wm.seaLevel;
       }
       loadArrays(world);
@@ -476,6 +526,17 @@ export function WorldMapBuilder({
           g *= dk;
           b *= dk;
         }
+        // territory tint (political overlay)
+        const reg = regionArr[i];
+        if (reg > 0) {
+          const rc = regionColorsRef.current[reg];
+          if (rc) {
+            const f = h < seaLevel ? 0.14 : 0.34;
+            r = r * (1 - f) + rc[0] * f;
+            g = g * (1 - f) + rc[1] * f;
+            b = b * (1 - f) + rc[2] * f;
+          }
+        }
         // fog of exploration: shroud unrevealed cells
         if (fogOn && exploredArr[i] === 0) {
           const asPlayer = !canEdit || previewPlayerRef.current;
@@ -690,6 +751,8 @@ export function WorldMapBuilder({
               exploredArr[i] = 1;
             } else if (t === "shroud") {
               exploredArr[i] = 0;
+            } else if (t === "region") {
+              regionArr[i] = activeRegionRef.current;
             }
           }
         }
@@ -864,6 +927,7 @@ export function WorldMapBuilder({
             weather: weatherRef.current,
             fog: fogOn,
             explored: encodeBytes(exploredArr),
+            regionMask: encodeBytes(regionArr),
           };
         },
         syncPois,
@@ -874,6 +938,13 @@ export function WorldMapBuilder({
         },
         revealAll(v) {
           exploredArr.fill(v);
+          refreshColors();
+          scheduleSave();
+        },
+        clearRegion(idx) {
+          for (let i = 0; i < regionArr.length; i++) {
+            if (regionArr[i] === idx) regionArr[i] = 0;
+          }
           refreshColors();
           scheduleSave();
         },
@@ -923,6 +994,7 @@ export function WorldMapBuilder({
   useEffect(() => engineRef.current?.setView(view), [view]);
   useEffect(() => engineRef.current?.setTime(time), [time]);
   useEffect(() => engineRef.current?.reshade(), [previewPlayer]);
+  useEffect(() => engineRef.current?.reshade(), [regionColors]);
 
   // Rotate the compass every frame.
   useEffect(() => {
@@ -988,7 +1060,7 @@ export function WorldMapBuilder({
       {canEdit && (
         <>
           {/* Tools */}
-          <div className="absolute left-3 top-3 max-w-[15rem] space-y-2 rounded-card border border-parchment-400/60 bg-parchment-100/95 p-2 shadow-card">
+          <div className="absolute left-3 top-3 max-h-[calc(100%-1.5rem)] w-52 space-y-2 overflow-y-auto rounded-card border border-parchment-400/60 bg-parchment-100/95 p-2 shadow-card">
             <div className="flex flex-wrap gap-1">
               {(
                 [
@@ -1076,6 +1148,98 @@ export function WorldMapBuilder({
                 </>
               )}
             </div>
+
+            {/* Territory / political regions */}
+            <div className="space-y-1 border-t border-parchment-400/50 pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-ink-soft">Territory</span>
+                <button
+                  onClick={addRegion}
+                  className="rounded bg-parchment-50 px-1.5 py-0.5 text-[0.65rem] text-ink-soft hover:bg-parchment-300/60"
+                >
+                  ＋ Add
+                </button>
+              </div>
+              {regions.length > 0 && (
+                <button
+                  onClick={() => setTool("region")}
+                  className={cn(
+                    "w-full rounded px-2 py-1 text-[0.65rem] font-semibold",
+                    tool === "region"
+                      ? "bg-oxblood text-parchment-50"
+                      : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                  )}
+                >
+                  {tool === "region" ? "Painting territory…" : "Paint territory"}
+                </button>
+              )}
+              {regions.map((rg) => {
+                const num = rg.num ?? 0;
+                return (
+                  <div
+                    key={rg.id}
+                    className={cn(
+                      "flex items-center gap-1 rounded border p-1",
+                      activeRegion === num
+                        ? "border-brass bg-parchment-50"
+                        : "border-parchment-400/40",
+                    )}
+                  >
+                    <button
+                      onClick={() => {
+                        setActiveRegion(num);
+                        setTool("region");
+                      }}
+                      title="Paint with this region"
+                      className="h-4 w-4 shrink-0 rounded-full border border-ink/20"
+                      style={{ background: regColor(rg) }}
+                    />
+                    <input
+                      key={`rn-${rg.id}`}
+                      defaultValue={rg.name}
+                      onBlur={(e) => updateRegion(rg.id, { name: e.target.value })}
+                      className="h-6 w-full min-w-0 rounded border border-parchment-400 bg-parchment-50 px-1 text-[0.65rem] text-ink"
+                    />
+                    <input
+                      type="color"
+                      value={rg.color ?? "#8a4b2d"}
+                      onChange={(e) => updateRegion(rg.id, { color: e.target.value })}
+                      title="Colour"
+                      className="h-6 w-6 shrink-0 cursor-pointer rounded border border-parchment-400"
+                    />
+                    <button
+                      onClick={() => {
+                        if (num) engineRef.current?.clearRegion(num);
+                        saveRegions(regions.filter((x) => x.id !== rg.id));
+                      }}
+                      title="Delete region"
+                      className="shrink-0 px-1 text-oxblood hover:text-oxblood-dark"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+              {regions.length > 0 && (
+                <select
+                  value={regions.find((r) => r.num === activeRegion)?.factionId ?? ""}
+                  onChange={(e) => {
+                    const rg = regions.find((r) => r.num === activeRegion);
+                    if (rg) updateRegion(rg.id, { factionId: e.target.value || undefined });
+                  }}
+                  aria-label="Region faction"
+                  className="h-7 w-full rounded border border-parchment-400 bg-parchment-50 px-1 text-[0.65rem] text-ink"
+                >
+                  <option value="">— faction (active region) —</option>
+                  {factions.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
             {tool !== "look" && tool !== "paint" && (
               <label className="block text-[0.65rem] text-ink-soft">
                 Brush size {brushSize}

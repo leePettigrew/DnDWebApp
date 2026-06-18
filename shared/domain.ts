@@ -700,8 +700,10 @@ export interface WorldPath {
 export interface WorldRegion {
   id: ID;
   name: string;
-  /** Polygon [x1,y1,…] in 0..1. */
-  points: number[];
+  /** Stable 1..255 paint index used by the region mask. */
+  num?: number;
+  /** Polygon [x1,y1,…] in 0..1 (unused by the paint-mask renderer). */
+  points?: number[];
   color?: string;
   factionId?: ID;
 }
@@ -737,6 +739,8 @@ export interface WorldMap {
   fog?: boolean;
   /** Fog-of-exploration: base64 of size*size bytes (1 = revealed). */
   explored?: string;
+  /** Territory ownership: base64 of size*size bytes (region index, 0 = none). */
+  regionMask?: string;
 }
 
 export interface BattleMap extends Entity {
