@@ -13,7 +13,13 @@ import {
   useStatBlocks,
 } from "@/lib/data/hooks";
 import { newId } from "@/lib/domain/ids";
-import type { BattleMap, WorldMap, WorldPoi, WorldWeather } from "@/lib/domain/types";
+import type {
+  BattleMap,
+  WorldMap,
+  WorldPath,
+  WorldPoi,
+  WorldWeather,
+} from "@/lib/domain/types";
 import { BIOME_RGB, PAINT_BIOMES } from "@/lib/world/biomes";
 import { decodeBytes, encodeBytes } from "@/lib/world/codec";
 import { generateWorld } from "@/lib/world/generate";
@@ -65,6 +71,14 @@ interface Engine {
   exportWorld(): WorldMap;
   /** Rebuild in-scene POI marker sprites from the given list. */
   syncPois(list: WorldPoi[]): void;
+  /** Rebuild in-scene path tubes (rivers/roads/routes/borders). */
+  syncPaths(list: WorldPath[]): void;
+  /** Begin drawing a path of the given kind (terrain clicks add points). */
+  startDraw(kind: WorldPath["kind"]): void;
+  /** Finish the in-progress path; returns its points (>=2) or null. */
+  finishDraw(): number[] | null;
+  /** Discard the in-progress path. */
+  cancelDraw(): void;
   /** Toggle fog-of-exploration masking. */
   setFog(on: boolean): void;
   /** Reveal (1) or shroud (0) the entire map, then persist. */
@@ -159,6 +173,14 @@ export function WorldMapBuilder({
   const onPlaceRef = useRef<((nx: number, ny: number) => void) | null>(null);
   const onSelectRef = useRef<((id: string) => void) | null>(null);
   onSelectRef.current = (id) => setSelectedPoi(id);
+
+  // --- paths (rivers/roads/routes/borders) ---
+  const paths = world.paths ?? [];
+  const [drawKind, setDrawKind] = useState<WorldPath["kind"]>("river");
+  const [drawing, setDrawing] = useState(false);
+  const drawKindRef = useRef<WorldPath["kind"] | null>(null);
+  drawKindRef.current = canEdit && drawing ? drawKind : null;
+  const savePaths = (next: WorldPath[]) => saveWorld({ paths: next });
 
   // --- fog of exploration ---
   const [fog, setFog] = useState(!!world.fog);
@@ -438,6 +460,100 @@ export function WorldMapBuilder({
         syncLights(list);
       }
 
+      // --- path tubes (rivers / roads / routes / borders) ---
+      const PATH_STYLE: Record<
+        WorldPath["kind"],
+        { color: number; radius: number }
+      > = {
+        river: { color: 0x2f6e9e, radius: 0.2 },
+        road: { color: 0x6e503a, radius: 0.17 },
+        route: { color: 0xb89968, radius: 0.13 },
+        border: { color: 0x2c2418, radius: 0.11 },
+      };
+      const pathMap = new Map<
+        string,
+        { mesh: InstanceType<typeof THREE.Mesh>; sig: string }
+      >();
+      function disposePathMesh(mesh: InstanceType<typeof THREE.Mesh>) {
+        scene.remove(mesh);
+        mesh.geometry.dispose();
+        (mesh.material as InstanceType<typeof THREE.MeshStandardMaterial>).dispose();
+      }
+      function buildPath(points: number[], kind: WorldPath["kind"], colorHex?: string) {
+        const v: InstanceType<typeof THREE.Vector3>[] = [];
+        for (let i = 0; i + 1 < points.length; i += 2) {
+          const nx = points[i];
+          const ny = points[i + 1];
+          v.push(
+            new THREE.Vector3(
+              (nx - 0.5) * W,
+              heightAtNorm(nx, ny) * HEIGHT + 0.16,
+              (ny - 0.5) * W,
+            ),
+          );
+        }
+        if (v.length < 2) return null;
+        const curve = new THREE.CatmullRomCurve3(v, false, "catmullrom", 0.5);
+        const style = PATH_STYLE[kind] ?? PATH_STYLE.route;
+        const geo = new THREE.TubeGeometry(curve, Math.max(8, v.length * 10), style.radius, 6, false);
+        const mat = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(colorHex || style.color),
+          roughness: kind === "river" ? 0.3 : 0.85,
+          metalness: kind === "river" ? 0.2 : 0,
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.renderOrder = 2;
+        return mesh;
+      }
+      function syncPaths(list: WorldPath[]) {
+        const ids = new Set(list.map((p) => p.id));
+        for (const [id, rec] of pathMap) {
+          if (!ids.has(id)) {
+            disposePathMesh(rec.mesh);
+            pathMap.delete(id);
+          }
+        }
+        for (const p of list) {
+          const sig = `${p.kind}|${p.color ?? ""}|${p.points.join(",")}`;
+          const ex = pathMap.get(p.id);
+          if (ex && ex.sig === sig) continue;
+          if (ex) {
+            disposePathMesh(ex.mesh);
+            pathMap.delete(p.id);
+          }
+          const mesh = buildPath(p.points, p.kind, p.color);
+          if (mesh) {
+            scene.add(mesh);
+            pathMap.set(p.id, { mesh, sig });
+          }
+        }
+      }
+
+      // In-progress path being drawn.
+      let draftPoints: number[] = [];
+      let draftKind: WorldPath["kind"] = "river";
+      let previewMesh: InstanceType<typeof THREE.Mesh> | null = null;
+      function rebuildPreview() {
+        if (previewMesh) {
+          disposePathMesh(previewMesh);
+          previewMesh = null;
+        }
+        const m = buildPath(draftPoints, draftKind);
+        if (m) {
+          (m.material as InstanceType<typeof THREE.MeshStandardMaterial>).color.offsetHSL(
+            0,
+            0,
+            0.12,
+          );
+          previewMesh = m;
+          scene.add(m);
+        }
+      }
+      function pushDraft(nx: number, ny: number) {
+        draftPoints.push(nx, ny);
+        rebuildPreview();
+      }
+
       function refreshPositions() {
         for (let i = 0; i < heightArr.length; i++) {
           pos.setZ(i, heightArr[i] * HEIGHT);
@@ -691,6 +807,7 @@ export function WorldMapBuilder({
           ? resolvedPoisRef.current
           : resolvedPoisRef.current.filter((p) => !p.hidden),
       );
+      syncPaths(worldRef.current.paths ?? []);
 
       // --- brushing ---
       const ray = new THREE.Raycaster();
@@ -792,6 +909,11 @@ export function WorldMapBuilder({
       function onDown(e: PointerEvent) {
         downX = e.clientX;
         downY = e.clientY;
+        if (drawKindRef.current) {
+          const c = cellFromEvent(e);
+          if (c) pushDraft(c.nx, c.ny);
+          return;
+        }
         if (onPlaceRef.current) {
           const c = cellFromEvent(e);
           if (c) onPlaceRef.current(c.nx, c.ny);
@@ -838,7 +960,8 @@ export function WorldMapBuilder({
         const now = performance.now();
         const dt = Math.min(0.05, (now - lastT) / 1000);
         lastT = now;
-        controls.enabled = toolRef.current === "look" && !onPlaceRef.current;
+        controls.enabled =
+          toolRef.current === "look" && !onPlaceRef.current && !drawKindRef.current;
         controls.update();
 
         // Weather animation.
@@ -931,6 +1054,22 @@ export function WorldMapBuilder({
           };
         },
         syncPois,
+        syncPaths,
+        startDraw(kind) {
+          draftKind = kind;
+          draftPoints = [];
+          rebuildPreview();
+        },
+        finishDraw() {
+          const pts = draftPoints.slice();
+          draftPoints = [];
+          rebuildPreview();
+          return pts.length >= 4 ? pts : null;
+        },
+        cancelDraw() {
+          draftPoints = [];
+          rebuildPreview();
+        },
         setFog(on) {
           fogOn = on;
           refreshColors();
@@ -968,6 +1107,9 @@ export function WorldMapBuilder({
           spriteMap.clear();
           for (const l of lightMap.values()) scene.remove(l);
           lightMap.clear();
+          for (const rec of pathMap.values()) disposePathMesh(rec.mesh);
+          pathMap.clear();
+          if (previewMesh) disposePathMesh(previewMesh);
           if (weatherPoints) {
             weatherPoints.geometry.dispose();
             (weatherPoints.material as InstanceType<typeof THREE.PointsMaterial>).dispose();
@@ -1014,9 +1156,15 @@ export function WorldMapBuilder({
     engineRef.current?.syncPois(visibleResolved);
   }, [visibleResolved]);
 
+  // Rebuild path tubes when paths change.
+  useEffect(() => {
+    engineRef.current?.syncPaths(paths);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paths]);
+
   const segBtn = "rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors";
 
-  const placeCursor = placing ? "cursor-crosshair" : "";
+  const placeCursor = placing || drawing ? "cursor-crosshair" : "";
 
   return (
     <div
@@ -1238,6 +1386,84 @@ export function WorldMapBuilder({
                   ))}
                 </select>
               )}
+            </div>
+
+            {/* Rivers / roads / paths */}
+            <div className="space-y-1 border-t border-parchment-400/50 pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-ink-soft">Paths</span>
+                <select
+                  value={drawKind}
+                  onChange={(e) => setDrawKind(e.target.value as WorldPath["kind"])}
+                  aria-label="Path kind"
+                  disabled={drawing}
+                  className="h-6 rounded border border-parchment-400 bg-parchment-50 px-1 text-[0.65rem] text-ink"
+                >
+                  <option value="river">River</option>
+                  <option value="road">Road</option>
+                  <option value="route">Route</option>
+                  <option value="border">Border</option>
+                </select>
+              </div>
+              {!drawing ? (
+                <button
+                  onClick={() => {
+                    engineRef.current?.startDraw(drawKind);
+                    setDrawing(true);
+                  }}
+                  className="w-full rounded bg-parchment-50 px-2 py-1 text-[0.65rem] font-semibold text-ink-soft hover:bg-parchment-300/60"
+                >
+                  ✎ Draw a {drawKind}
+                </button>
+              ) : (
+                <div className="space-y-1">
+                  <p className="text-[0.6rem] text-ink-faint">
+                    Click the map to add points…
+                  </p>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => {
+                        const pts = engineRef.current?.finishDraw();
+                        if (pts)
+                          savePaths([
+                            ...paths,
+                            { id: newId(), kind: drawKind, points: pts },
+                          ]);
+                        setDrawing(false);
+                      }}
+                      className="flex-1 rounded bg-forest px-1 py-1 text-[0.65rem] font-semibold text-parchment-50"
+                    >
+                      Finish
+                    </button>
+                    <button
+                      onClick={() => {
+                        engineRef.current?.cancelDraw();
+                        setDrawing(false);
+                      }}
+                      className="flex-1 rounded bg-parchment-50 px-1 py-1 text-[0.65rem] text-ink-soft hover:bg-parchment-300/60"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+              {paths.map((p, idx) => (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-1 rounded border border-parchment-400/40 p-1 text-[0.65rem] text-ink-soft"
+                >
+                  <span className="capitalize">
+                    {p.kind} {idx + 1}
+                  </span>
+                  <button
+                    onClick={() => savePaths(paths.filter((x) => x.id !== p.id))}
+                    title="Delete path"
+                    className="ml-auto px-1 text-oxblood"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
             </div>
 
             {tool !== "look" && tool !== "paint" && (
