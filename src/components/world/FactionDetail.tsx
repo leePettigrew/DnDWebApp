@@ -8,6 +8,7 @@ import { TextField, TextArea, SelectField } from "@/components/ui/Field";
 import { cn } from "@/components/ui/cn";
 import { ChevronLeftIcon, TrashIcon } from "@/components/ui/icons";
 import { VisibilityControl } from "@/components/dm/VisibilityControl";
+import { FactionReputation } from "./FactionReputation";
 import { usePermissions } from "@/lib/data/hooks";
 import {
   FACTION_STANDINGS,
@@ -221,6 +222,8 @@ export function FactionDetail({
           />
         </div>
       </Panel>
+
+      <FactionReputation faction={f} onUpdate={onUpdate} />
 
       {/* Notes */}
       <Panel title="Notes">
