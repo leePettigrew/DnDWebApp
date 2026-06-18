@@ -9,6 +9,7 @@ import { cn } from "@/components/ui/cn";
 import { ChevronLeftIcon, TrashIcon } from "@/components/ui/icons";
 import { VisibilityControl } from "@/components/dm/VisibilityControl";
 import { FactionReputation } from "./FactionReputation";
+import { FactionRelationships } from "./FactionRelationships";
 import { usePermissions } from "@/lib/data/hooks";
 import {
   FACTION_STANDINGS,
@@ -224,6 +225,8 @@ export function FactionDetail({
       </Panel>
 
       <FactionReputation faction={f} onUpdate={onUpdate} />
+
+      <FactionRelationships faction={f} />
 
       {/* Notes */}
       <Panel title="Notes">
