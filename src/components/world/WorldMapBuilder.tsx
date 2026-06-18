@@ -340,9 +340,60 @@ export function WorldMapBuilder({
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.target.set(0, 0, 0);
-      controls.maxDistance = 160;
-      controls.minDistance = 4;
+      controls.maxDistance = 200;
+      controls.minDistance = 2;
       controls.zoomSpeed = 1.1;
+
+      // RTS keyboard movement (WASD pan, Q/E height) — active while hovered.
+      const keys = new Set<string>();
+      let hovered = false;
+      const worldUp = new THREE.Vector3(0, 1, 0);
+      const fwd = new THREE.Vector3();
+      const rightV = new THREE.Vector3();
+      const onKeyDown = (e: KeyboardEvent) => {
+        const el = document.activeElement;
+        if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+        const k = e.key.toLowerCase();
+        if (k === "shift") {
+          if (hovered) keys.add("shift");
+          return;
+        }
+        if ("wasdqe".includes(k) && hovered) {
+          keys.add(k);
+          e.preventDefault();
+        }
+      };
+      const onKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase());
+      const onEnter = () => (hovered = true);
+      const onLeave = () => {
+        hovered = false;
+        keys.clear();
+      };
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keyup", onKeyUp);
+      renderer.domElement.addEventListener("pointerenter", onEnter);
+      renderer.domElement.addEventListener("pointerleave", onLeave);
+      function moveKeys(dt: number) {
+        if (keys.size === 0) return;
+        const fast = keys.has("shift") ? 2.4 : 1;
+        const dist = camera.position.distanceTo(controls.target);
+        const sp = Math.max(2, dist * 0.55) * fast * dt;
+        camera.getWorldDirection(fwd);
+        fwd.y = 0;
+        fwd.normalize();
+        rightV.crossVectors(fwd, worldUp).normalize();
+        const move = new THREE.Vector3();
+        if (keys.has("w")) move.add(fwd);
+        if (keys.has("s")) move.sub(fwd);
+        if (keys.has("d")) move.add(rightV);
+        if (keys.has("a")) move.sub(rightV);
+        if (keys.has("e")) move.add(worldUp);
+        if (keys.has("q")) move.sub(worldUp);
+        if (move.lengthSq() === 0) return;
+        move.normalize().multiplyScalar(sp);
+        camera.position.add(move);
+        controls.target.add(move);
+      }
 
       const ambient = new THREE.AmbientLight(0xffffff, 0.6);
       scene.add(ambient);
@@ -1111,6 +1162,7 @@ export function WorldMapBuilder({
           !drawKindRef.current &&
           !onPartyRef.current &&
           !measureRef.current;
+        moveKeys(dt);
         controls.update();
 
         // Weather animation.
@@ -1247,6 +1299,10 @@ export function WorldMapBuilder({
         dispose() {
           cancelAnimationFrame(raf);
           ro.disconnect();
+          window.removeEventListener("keydown", onKeyDown);
+          window.removeEventListener("keyup", onKeyUp);
+          dom.removeEventListener("pointerenter", onEnter);
+          dom.removeEventListener("pointerleave", onLeave);
           dom.removeEventListener("pointerdown", onDown);
           dom.removeEventListener("pointermove", onMove);
           dom.removeEventListener("pointerup", onUp);
@@ -1328,6 +1384,11 @@ export function WorldMapBuilder({
       )}
     >
       <div ref={containerRef} className="absolute inset-0" />
+
+      {/* Controls hint */}
+      <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-parchment-400/40 bg-parchment-100/70 px-3 py-1 text-[0.6rem] text-ink-faint shadow-card">
+        WASD pan · Q/E height · drag orbit · wheel zoom
+      </div>
 
       {/* Compass */}
       <div className="pointer-events-none absolute bottom-3 right-3 grid h-12 w-12 place-items-center rounded-full border border-parchment-400/60 bg-parchment-100/80 shadow-card">
