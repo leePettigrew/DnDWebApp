@@ -276,6 +276,7 @@ export async function handleAdminRequest(
       const repo = repos.entities[col];
       if (method === "DELETE") {
         repo.remove(cid, id);
+        rooms.peek(cid)?.broadcastCollection(col, repo.list(cid));
         json(res, 200, { ok: true });
         return true;
       }
@@ -301,6 +302,7 @@ export async function handleAdminRequest(
           updatedAt: nowISO(),
         } as unknown as Entity;
         repo.upsert(cid, entity, ownerId);
+        rooms.peek(cid)?.broadcastCollection(col, repo.list(cid));
         json(res, 200, { ok: true, entity });
         return true;
       }

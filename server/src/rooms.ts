@@ -1,6 +1,13 @@
 import { WebSocket } from "ws";
-import type { PresenceUser, Role, ServerMessage } from "../../shared/protocol";
+import type {
+  AnyScopedEntity,
+  PresenceUser,
+  Role,
+  ScopedCollection,
+  ServerMessage,
+} from "../../shared/protocol";
 import type { Repositories } from "./repositories";
+import { isVisible } from "./visibility";
 
 export interface RoomMember {
   socket: WebSocket;
@@ -50,6 +57,17 @@ export class CampaignRoom {
     }
   }
 
+  /** Push a collection to the room, visibility-filtered per recipient. */
+  broadcastCollection(collection: ScopedCollection, items: unknown[]): void {
+    this.broadcastEach((m) => ({
+      type: "entity:changed",
+      collection,
+      items: items.filter((it) =>
+        isVisible(it, m.role, m.userId),
+      ) as AnyScopedEntity[],
+    }));
+  }
+
   /** Full roster with an online flag, so the UI can show who's here now. */
   presence(): PresenceUser[] {
     const memberships = this.repos.memberships.listForCampaign(this.campaignId);
@@ -88,6 +106,11 @@ export class RoomManager {
       this.rooms.set(campaignId, room);
     }
     return room;
+  }
+
+  /** The room for a campaign IF one exists (no creation). */
+  peek(campaignId: string): CampaignRoom | undefined {
+    return this.rooms.get(campaignId);
   }
 
   drop(campaignId: string): void {

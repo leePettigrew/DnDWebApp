@@ -332,6 +332,7 @@ export class RealtimeDataProvider implements DataProvider {
   private chatListeners = new Set<(m: ChatMessage[]) => void>();
   private pingListeners = new Set<(p: MapPing) => void>();
   private handoutListeners = new Set<(h: Handout) => void>();
+  private contentChangedListeners = new Set<() => void>();
   private statusListeners = new Set<(s: ConnectionStatus) => void>();
   private pendingCampaign = new Map<
     string,
@@ -467,6 +468,10 @@ export class RealtimeDataProvider implements DataProvider {
         this.handoutListeners.add(l);
         return () => this.handoutListeners.delete(l);
       },
+      subscribeContentChanged: (l) => {
+        this.contentChangedListeners.add(l);
+        return () => this.contentChangedListeners.delete(l);
+      },
       getChat: () => this.chat,
       subscribeChat: (l) => {
         this.chatListeners.add(l);
@@ -516,6 +521,9 @@ export class RealtimeDataProvider implements DataProvider {
   }
   private emitHandout(handout: Handout): void {
     this.handoutListeners.forEach((fn) => fn(handout));
+  }
+  private emitContentChanged(): void {
+    this.contentChangedListeners.forEach((fn) => fn());
   }
 
   private setScopedMode(mode: Mode): void {
@@ -758,6 +766,10 @@ export class RealtimeDataProvider implements DataProvider {
       }
       case "dm:handout:shown": {
         this.emitHandout(msg.handout);
+        break;
+      }
+      case "content:changed": {
+        this.emitContentChanged();
         break;
       }
       case "pong":

@@ -329,6 +329,9 @@ class LocalRealtimeController implements RealtimeController {
     this.handoutListeners.add(listener);
     return () => this.handoutListeners.delete(listener);
   }
+  subscribeContentChanged(_listener: () => void): Unsubscribe {
+    return () => {};
+  }
 
   getChat(): ChatMessage[] {
     return [];

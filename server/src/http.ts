@@ -78,7 +78,7 @@ export async function handleHttpRequest(
   }
   // Homebrew content API (read for members, write for DM/admin).
   if ((req.url ?? "").startsWith("/content/")) {
-    return handleContentRequest(req, res, repos);
+    return handleContentRequest(req, res, repos, rooms);
   }
   if (req.method !== "POST") return false;
   if (req.url !== "/auth/register" && req.url !== "/auth/login") return false;

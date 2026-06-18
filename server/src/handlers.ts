@@ -35,30 +35,13 @@ import type { Repositories } from "./repositories";
 import type { RoomMember, RoomManager } from "./rooms";
 import { parseClientMessage } from "./validation";
 import { isAdminUser, verifyToken } from "./auth";
+import { isVisible } from "./visibility";
 import { cryptoRng, emptyCombat, generateJoinCode } from "./util";
 
 /** Collections only the DM may write. characters + rollPresets have own rules. */
 const DM_ONLY: ReadonlySet<ScopedCollection> = new Set<ScopedCollection>(
   DM_ONLY_COLLECTIONS,
 );
-
-/**
- * Whether a non-DM may see an entity. DMs see everything; players see anything
- * not hidden, anything explicitly revealed to them (visibleTo), and their own
- * character (ownerId). Entities without the fields are always visible.
- */
-function isVisible(entity: unknown, role: Role, userId: string | null): boolean {
-  if (role === "dm") return true;
-  const v = entity as {
-    hidden?: boolean;
-    visibleTo?: string[];
-    ownerId?: string;
-  };
-  if (!v.hidden) return true;
-  if (userId && v.visibleTo?.includes(userId)) return true;
-  if (userId && v.ownerId === userId) return true;
-  return false;
-}
 
 /**
  * Per-socket session. Holds who this connection is (after auth) and which
@@ -409,14 +392,7 @@ export class ClientSession {
 
   private broadcastCollection(collection: ScopedCollection): void {
     const items = this.repos.entities[collection].list(this.campaignId!);
-    // Each member gets only the entities they're allowed to see.
-    this.rooms.get(this.campaignId!).broadcastEach((m) => ({
-      type: "entity:changed",
-      collection,
-      items: items.filter((it) =>
-        isVisible(it, m.role, m.userId),
-      ) as AnyScopedEntity[],
-    }));
+    this.rooms.get(this.campaignId!).broadcastCollection(collection, items);
   }
 
   // --- combat (DM only) ----------------------------------------------------

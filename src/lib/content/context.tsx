@@ -15,7 +15,11 @@ import type {
   LootTable,
   SrdOverride,
 } from "@/lib/domain/types";
-import { useActiveCampaign, useCurrentUser } from "@/lib/data/hooks";
+import {
+  useActiveCampaign,
+  useCurrentUser,
+  useDataProvider,
+} from "@/lib/data/hooks";
 import { contentApi, type ContentRecord } from "./api";
 
 export interface CustomContent {
@@ -80,6 +84,13 @@ export function CustomContentProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Live-push: refetch when the server says content changed.
+  const provider = useDataProvider();
+  useEffect(
+    () => provider.realtime.subscribeContentChanged(() => void refresh()),
+    [provider, refresh],
+  );
 
   const value = useMemo<CustomContent>(
     () => ({

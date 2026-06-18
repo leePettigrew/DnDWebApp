@@ -377,6 +377,10 @@ export interface DmHandoutShownMessage {
   type: "dm:handout:shown";
   handout: Handout;
 }
+/** Homebrew / SRD-override / loot-config content changed — clients should refetch. */
+export interface ContentChangedMessage {
+  type: "content:changed";
+}
 export interface PongMessage {
   type: "pong";
 }
@@ -396,6 +400,7 @@ export type ServerMessage =
   | MapTokenMovedMessage
   | MapPingedMessage
   | DmHandoutShownMessage
+  | ContentChangedMessage
   | PongMessage;
 
 export type ServerMessageType = ServerMessage["type"];

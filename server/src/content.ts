@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { newId, nowISO } from "../../shared/ids";
 import { isAdminUser, verifyToken } from "./auth";
 import type { ContentRecord, Repositories, UserRecord } from "./repositories";
+import type { RoomManager } from "./rooms";
 
 /**
  * Homebrew / custom-content API. Anyone signed in can READ the global library
@@ -57,6 +58,7 @@ export async function handleContentRequest(
   req: IncomingMessage,
   res: ServerResponse,
   repos: Repositories,
+  rooms: RoomManager,
 ): Promise<boolean> {
   const url = (req.url ?? "").split("?")[0];
   if (!url.startsWith("/content/")) return false;
@@ -70,6 +72,13 @@ export async function handleContentRequest(
   const seg = url.split("/").filter(Boolean); // ["content", scope, ...]
   const method = req.method ?? "GET";
   const scope = seg[1];
+
+  // Tell connected clients to refetch content after a global/campaign change.
+  const notify = (campaignId?: string) => {
+    const msg = { type: "content:changed" as const };
+    if (campaignId) rooms.peek(campaignId)?.broadcast(msg);
+    else rooms.broadcastAll(msg);
+  };
 
   try {
     if (scope === "global") {
@@ -98,12 +107,14 @@ export async function handleContentRequest(
           updatedAt: nowISO(),
         };
         repos.content.upsert(record);
+        notify();
         json(res, 200, { ok: true, record });
         return true;
       }
       if (method === "DELETE" && seg[2]) {
         const ex = repos.content.get(seg[2]);
         if (ex && ex.scope === "global") repos.content.remove(seg[2]);
+        notify();
         json(res, 200, { ok: true });
         return true;
       }
@@ -151,6 +162,7 @@ export async function handleContentRequest(
           updatedAt: nowISO(),
         };
         repos.content.upsert(record);
+        notify(cid);
         json(res, 200, { ok: true, record });
         return true;
       }
@@ -159,6 +171,7 @@ export async function handleContentRequest(
         if (ex && ex.scope === "campaign" && ex.campaignId === cid) {
           repos.content.remove(seg[3]);
         }
+        notify(cid);
         json(res, 200, { ok: true });
         return true;
       }

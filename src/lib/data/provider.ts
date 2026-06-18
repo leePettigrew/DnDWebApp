@@ -189,6 +189,9 @@ export interface RealtimeController {
   ping(mapId: ID, x: number, y: number): void;
   subscribePings(listener: (ping: MapPing) => void): Unsubscribe;
 
+  /** Fires when homebrew/SRD-override/loot content changed server-side. */
+  subscribeContentChanged(listener: () => void): Unsubscribe;
+
   /**
    * Push a handout (text/image) to the table (DM only). With `targets` (user
    * ids) it goes only to those players; otherwise to everyone.
