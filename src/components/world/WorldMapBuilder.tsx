@@ -79,6 +79,10 @@ interface Engine {
   finishDraw(): number[] | null;
   /** Discard the in-progress path. */
   cancelDraw(): void;
+  /** Place/clear the party banner at a normalized point. */
+  setParty(p: { x: number; y: number } | null): void;
+  /** Clear the measure ruler. */
+  clearMeasure(): void;
   /** Toggle fog-of-exploration masking. */
   setFog(on: boolean): void;
   /** Reveal (1) or shroud (0) the entire map, then persist. */
@@ -181,6 +185,24 @@ export function WorldMapBuilder({
   const drawKindRef = useRef<WorldPath["kind"] | null>(null);
   drawKindRef.current = canEdit && drawing ? drawKind : null;
   const savePaths = (next: WorldPath[]) => saveWorld({ paths: next });
+
+  // --- travel (measure + party) ---
+  const [measuring, setMeasuring] = useState(false);
+  const [placingParty, setPlacingParty] = useState(false);
+  const [speed, setSpeed] = useState(world.travelSpeed ?? 24);
+  const measureRef = useRef(false);
+  measureRef.current = canEdit && measuring;
+  const speedRef = useRef(speed);
+  speedRef.current = speed;
+  const onPartyRef = useRef<((p: { x: number; y: number }) => void) | null>(null);
+  onPartyRef.current =
+    canEdit && placingParty
+      ? (p) => {
+          saveWorld({ party: p });
+          engineRef.current?.setParty(p);
+          setPlacingParty(false);
+        }
+      : null;
 
   // --- fog of exploration ---
   const [fog, setFog] = useState(!!world.fog);
@@ -554,6 +576,118 @@ export function WorldMapBuilder({
         rebuildPreview();
       }
 
+      // --- party banner + measure ruler ---
+      function makeTextLabel(text: string, accent: string) {
+        const font = "600 28px Georgia, serif";
+        const meas = document.createElement("canvas").getContext("2d")!;
+        meas.font = font;
+        const tw = Math.ceil(meas.measureText(text).width);
+        const pad = 16;
+        const dot = 22;
+        const w = pad * 2 + dot + 10 + tw;
+        const h = 50;
+        const c = document.createElement("canvas");
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext("2d")!;
+        ctx.font = font;
+        ctx.fillStyle = "rgba(244,236,216,0.97)";
+        roundRect(ctx, 2, 2, w - 4, h - 4, (h - 4) / 2);
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = accent;
+        ctx.stroke();
+        ctx.fillStyle = accent;
+        ctx.beginPath();
+        ctx.arc(pad + dot / 2, h / 2, dot / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#2b2218";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, pad + dot + 10, h / 2 + 2);
+        const tex = new THREE.CanvasTexture(c);
+        tex.anisotropy = 4;
+        tex.needsUpdate = true;
+        return { tex, aspect: w / h };
+      }
+      function makeTextSprite(text: string, accent: string, scale: number) {
+        const { tex, aspect } = makeTextLabel(text, accent);
+        const sp = new THREE.Sprite(
+          new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }),
+        );
+        sp.scale.set(scale * aspect, scale, 1);
+        return sp;
+      }
+      function disposeSprite(sp: InstanceType<typeof THREE.Sprite>) {
+        scene.remove(sp);
+        (sp.material.map as InstanceType<typeof THREE.CanvasTexture>)?.dispose();
+        sp.material.dispose();
+      }
+
+      let partySprite: InstanceType<typeof THREE.Sprite> | null = null;
+      function setParty(p: { x: number; y: number } | null) {
+        if (partySprite) {
+          disposeSprite(partySprite);
+          partySprite = null;
+        }
+        if (!p) return;
+        partySprite = makeTextSprite("⚑ The Party", "#8a1c1c", 1.7);
+        partySprite.renderOrder = 12;
+        partySprite.position.set(
+          (p.x - 0.5) * W,
+          heightAtNorm(p.x, p.y) * HEIGHT + 1.5,
+          (p.y - 0.5) * W,
+        );
+        scene.add(partySprite);
+      }
+
+      let measureA: { x: number; y: number } | null = null;
+      let measureLine: InstanceType<typeof THREE.Mesh> | null = null;
+      let measureLabel: InstanceType<typeof THREE.Sprite> | null = null;
+      function clearMeasureObjs() {
+        if (measureLine) {
+          disposePathMesh(measureLine);
+          measureLine = null;
+        }
+        if (measureLabel) {
+          disposeSprite(measureLabel);
+          measureLabel = null;
+        }
+      }
+      function clearMeasure() {
+        measureA = null;
+        clearMeasureObjs();
+      }
+      function addMeasurePoint(nx: number, ny: number) {
+        if (!measureA) {
+          measureA = { x: nx, y: ny };
+          clearMeasureObjs();
+          return;
+        }
+        const b = { x: nx, y: ny };
+        clearMeasureObjs();
+        measureLine = buildPath([measureA.x, measureA.y, b.x, b.y], "route", "#d8b24a");
+        if (measureLine) scene.add(measureLine);
+        const dnx = b.x - measureA.x;
+        const dny = b.y - measureA.y;
+        const miles = Math.sqrt(dnx * dnx + dny * dny) * (worldRef.current.milesAcross ?? 600);
+        const days = miles / Math.max(1, speedRef.current);
+        measureLabel = makeTextSprite(
+          `${Math.round(miles)} mi · ${days.toFixed(1)} d`,
+          "#b8860b",
+          1.5,
+        );
+        measureLabel.renderOrder = 13;
+        const mx = (measureA.x + b.x) / 2;
+        const my = (measureA.y + b.y) / 2;
+        measureLabel.position.set(
+          (mx - 0.5) * W,
+          heightAtNorm(mx, my) * HEIGHT + 1.3,
+          (my - 0.5) * W,
+        );
+        scene.add(measureLabel);
+        measureA = null;
+      }
+
       function refreshPositions() {
         for (let i = 0; i < heightArr.length; i++) {
           pos.setZ(i, heightArr[i] * HEIGHT);
@@ -808,6 +942,7 @@ export function WorldMapBuilder({
           : resolvedPoisRef.current.filter((p) => !p.hidden),
       );
       syncPaths(worldRef.current.paths ?? []);
+      if (worldRef.current.party) setParty(worldRef.current.party);
 
       // --- brushing ---
       const ray = new THREE.Raycaster();
@@ -914,6 +1049,16 @@ export function WorldMapBuilder({
           if (c) pushDraft(c.nx, c.ny);
           return;
         }
+        if (onPartyRef.current) {
+          const c = cellFromEvent(e);
+          if (c) onPartyRef.current({ x: c.nx, y: c.ny });
+          return;
+        }
+        if (measureRef.current) {
+          const c = cellFromEvent(e);
+          if (c) addMeasurePoint(c.nx, c.ny);
+          return;
+        }
         if (onPlaceRef.current) {
           const c = cellFromEvent(e);
           if (c) onPlaceRef.current(c.nx, c.ny);
@@ -961,7 +1106,11 @@ export function WorldMapBuilder({
         const dt = Math.min(0.05, (now - lastT) / 1000);
         lastT = now;
         controls.enabled =
-          toolRef.current === "look" && !onPlaceRef.current && !drawKindRef.current;
+          toolRef.current === "look" &&
+          !onPlaceRef.current &&
+          !drawKindRef.current &&
+          !onPartyRef.current &&
+          !measureRef.current;
         controls.update();
 
         // Weather animation.
@@ -1070,6 +1219,8 @@ export function WorldMapBuilder({
           draftPoints = [];
           rebuildPreview();
         },
+        setParty,
+        clearMeasure,
         setFog(on) {
           fogOn = on;
           refreshColors();
@@ -1110,6 +1261,8 @@ export function WorldMapBuilder({
           for (const rec of pathMap.values()) disposePathMesh(rec.mesh);
           pathMap.clear();
           if (previewMesh) disposePathMesh(previewMesh);
+          if (partySprite) disposeSprite(partySprite);
+          clearMeasureObjs();
           if (weatherPoints) {
             weatherPoints.geometry.dispose();
             (weatherPoints.material as InstanceType<typeof THREE.PointsMaterial>).dispose();
@@ -1164,7 +1317,8 @@ export function WorldMapBuilder({
 
   const segBtn = "rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors";
 
-  const placeCursor = placing || drawing ? "cursor-crosshair" : "";
+  const placeCursor =
+    placing || drawing || placingParty || measuring ? "cursor-crosshair" : "";
 
   return (
     <div
@@ -1464,6 +1618,63 @@ export function WorldMapBuilder({
                   </button>
                 </div>
               ))}
+            </div>
+
+            {/* Travel: ruler + party token */}
+            <div className="space-y-1 border-t border-parchment-400/50 pt-2">
+              <span className="text-xs font-semibold text-ink-soft">Travel</span>
+              <label className="flex items-center gap-1.5 text-[0.65rem] text-ink-soft">
+                Speed
+                <input
+                  type="number"
+                  min={1}
+                  value={speed}
+                  onChange={(e) => setSpeed(Number(e.target.value) || 24)}
+                  onBlur={() => saveWorld({ travelSpeed: speed })}
+                  className="h-6 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-[0.65rem] text-ink"
+                />
+                mi/day
+              </label>
+              <button
+                onClick={() => {
+                  if (measuring) engineRef.current?.clearMeasure();
+                  setMeasuring((m) => !m);
+                  setPlacingParty(false);
+                }}
+                className={cn(
+                  "w-full rounded px-2 py-1 text-[0.65rem] font-semibold",
+                  measuring
+                    ? "bg-oxblood text-parchment-50"
+                    : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                )}
+              >
+                {measuring ? "Measuring — click two points" : "📏 Measure distance"}
+              </button>
+              <button
+                onClick={() => {
+                  setPlacingParty((p) => !p);
+                  setMeasuring(false);
+                }}
+                className={cn(
+                  "w-full rounded px-2 py-1 text-[0.65rem] font-semibold",
+                  placingParty
+                    ? "bg-oxblood text-parchment-50"
+                    : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                )}
+              >
+                {placingParty ? "Click to place the party…" : "⚑ Move party here"}
+              </button>
+              {world.party && (
+                <button
+                  onClick={() => {
+                    saveWorld({ party: undefined });
+                    engineRef.current?.setParty(null);
+                  }}
+                  className="w-full rounded bg-parchment-50 px-2 py-1 text-[0.6rem] text-ink-soft hover:bg-parchment-300/60"
+                >
+                  Remove party token
+                </button>
+              )}
             </div>
 
             {tool !== "look" && tool !== "paint" && (
