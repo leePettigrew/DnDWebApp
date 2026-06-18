@@ -119,6 +119,10 @@ export interface AdminRepository {
   deleteCampaign(id: string): void;
   /** Delete a user and their memberships (their campaigns are left intact). */
   deleteUser(id: string): void;
+  /** Set a user's password hash (admin reset). */
+  setUserPassword(id: string, passwordHash: string): void;
+  /** Set a member's role in a campaign (promote/demote DM). No-op if not a member. */
+  setMembershipRole(userId: string, campaignId: string, role: Role): void;
 }
 
 export interface Repositories {

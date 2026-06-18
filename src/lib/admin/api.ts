@@ -129,4 +129,10 @@ export const adminApi = {
       `/admin/entity/${collection}/${campaignId}/${id}`,
     ),
   deleteUser: (id: string) => req<{ ok: true }>("DELETE", `/admin/user/${id}`),
+  setPassword: (id: string, password: string) =>
+    req<{ ok: true }>("PATCH", `/admin/user/${id}/password`, { password }),
+  setRole: (campaignId: string, userId: string, role: "dm" | "player") =>
+    req<{ ok: true }>("PATCH", `/admin/membership/${campaignId}/${userId}`, {
+      role,
+    }),
 };

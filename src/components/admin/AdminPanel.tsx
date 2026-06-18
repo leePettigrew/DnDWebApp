@@ -248,6 +248,22 @@ export function AdminPanel() {
                   joined {u.createdAt.slice(0, 10)} · {u.id}
                 </div>
               </div>
+              <button
+                onClick={async () => {
+                  const pw = prompt(`New password for ${u.username} (min 6 chars):`);
+                  if (!pw) return;
+                  try {
+                    await adminApi.setPassword(u.id, pw);
+                    setError(null);
+                    alert(`Password reset for ${u.username}.`);
+                  } catch (e) {
+                    setError(errMsg(e));
+                  }
+                }}
+                className="rounded-md px-2 py-1 text-xs font-semibold text-brass-dark hover:bg-parchment-300/60"
+              >
+                Reset pw
+              </button>
               {!u.isAdmin && (
                 <button
                   onClick={async () => {
@@ -437,12 +453,40 @@ function CampaignAdmin({
         >
           Save campaign
         </Button>
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {dump.members.map((m) => (
-            <Badge key={m.userId} tone={m.role === "dm" ? "oxblood" : "arcane"}>
-              {m.displayName} · {m.role}
-            </Badge>
-          ))}
+        <div className="mt-3">
+          <p className="mb-1.5 font-display text-xs font-semibold uppercase tracking-[0.12em] text-ink-soft">
+            Members
+          </p>
+          <ul className="space-y-1.5">
+            {dump.members.map((m) => (
+              <li key={m.userId} className="flex items-center gap-2 text-sm">
+                <span className="min-w-0 flex-1 truncate text-ink">
+                  {m.displayName}{" "}
+                  <span className="text-ink-faint">@{m.username}</span>
+                </span>
+                <select
+                  aria-label={`Role for ${m.username}`}
+                  value={m.role}
+                  onChange={async (e) => {
+                    try {
+                      await adminApi.setRole(
+                        campaignId,
+                        m.userId,
+                        e.target.value as "dm" | "player",
+                      );
+                      await load();
+                    } catch (err) {
+                      setError(errMsg(err));
+                    }
+                  }}
+                  className="h-8 rounded-md border border-parchment-400 bg-parchment-50 px-2 text-sm text-ink focus:border-brass focus:outline-none"
+                >
+                  <option value="player">Player</option>
+                  <option value="dm">DM</option>
+                </select>
+              </li>
+            ))}
+          </ul>
         </div>
       </Panel>
 

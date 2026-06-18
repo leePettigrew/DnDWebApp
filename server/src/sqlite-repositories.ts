@@ -367,6 +367,10 @@ function createAdminRepository(db: DatabaseSync): AdminRepository {
     `DELETE FROM memberships WHERE user_id = ?`,
   );
   const delUser = db.prepare(`DELETE FROM users WHERE id = ?`);
+  const setPw = db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`);
+  const setRole = db.prepare(
+    `UPDATE memberships SET role = ? WHERE user_id = ? AND campaign_id = ?`,
+  );
   return {
     listUsers() {
       return (userRows.all() as Row[]).map(mapUser);
@@ -390,6 +394,12 @@ function createAdminRepository(db: DatabaseSync): AdminRepository {
     deleteUser(id) {
       delMembersByUser.run(id);
       delUser.run(id);
+    },
+    setUserPassword(id, passwordHash) {
+      setPw.run(passwordHash, id);
+    },
+    setMembershipRole(userId, campaignId, role) {
+      setRole.run(role, userId, campaignId);
     },
   };
 }

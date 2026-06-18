@@ -3,7 +3,7 @@ import { nowISO } from "../../shared/ids";
 import { SCOPED_COLLECTIONS } from "../../shared/protocol";
 import type { ScopedCollection } from "../../shared/protocol";
 import type { Entity } from "../../shared/domain";
-import { isAdminUser, requireAdmin } from "./auth";
+import { hashPassword, isAdminUser, requireAdmin } from "./auth";
 import type { Repositories } from "./repositories";
 
 /**
@@ -254,6 +254,41 @@ export async function handleAdminRequest(
         json(res, 200, { ok: true, entity });
         return true;
       }
+    }
+
+    // PATCH /admin/user/<id>/password — reset a password.
+    if (method === "PATCH" && seg[1] === "user" && seg[2] && seg[3] === "password") {
+      const body = (await readJson(req)) as { password?: unknown };
+      const password = typeof body.password === "string" ? body.password : "";
+      if (password.length < 6) {
+        json(res, 400, { error: "Password must be at least 6 characters." });
+        return true;
+      }
+      if (!repos.users.findById(seg[2])) {
+        json(res, 404, { error: "User not found." });
+        return true;
+      }
+      repos.admin.setUserPassword(seg[2], await hashPassword(password));
+      json(res, 200, { ok: true });
+      return true;
+    }
+
+    // PATCH /admin/membership/<campaignId>/<userId> — set DM/player role.
+    if (
+      method === "PATCH" &&
+      seg[1] === "membership" &&
+      seg[2] &&
+      seg[3]
+    ) {
+      const body = (await readJson(req)) as { role?: unknown };
+      const role = body.role === "dm" ? "dm" : "player";
+      if (!repos.memberships.find(seg[3], seg[2])) {
+        json(res, 404, { error: "Not a member of that campaign." });
+        return true;
+      }
+      repos.admin.setMembershipRole(seg[3], seg[2], role);
+      json(res, 200, { ok: true });
+      return true;
     }
 
     // DELETE /admin/user/<id>
