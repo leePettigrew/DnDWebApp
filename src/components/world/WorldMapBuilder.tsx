@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { Button } from "@/components/ui/Button";
 import { CloseIcon, TrashIcon } from "@/components/ui/icons";
+import {
+  useCharacters,
+  useFactions,
+  useMaps,
+  useQuests,
+  useStatBlocks,
+} from "@/lib/data/hooks";
 import { newId } from "@/lib/domain/ids";
 import type { BattleMap, WorldMap, WorldPoi, WorldWeather } from "@/lib/domain/types";
 import { BIOME_RGB, PAINT_BIOMES } from "@/lib/world/biomes";
@@ -93,6 +101,14 @@ export function WorldMapBuilder({
   const weatherRef = useRef(weather);
   weatherRef.current = weather;
 
+  // --- linked collections (integration) ---
+  const { items: factions } = useFactions();
+  const { items: quests } = useQuests();
+  const { items: statBlocks } = useStatBlocks();
+  const { items: characters } = useCharacters();
+  const { items: allMaps } = useMaps();
+  const battleMaps = allMaps.filter((m) => !m.world && m.id !== map.id);
+
   // --- POIs ---
   const pois = world.pois ?? [];
   const [placing, setPlacing] = useState(false);
@@ -100,6 +116,26 @@ export function WorldMapBuilder({
   const selPoi = pois.find((p) => p.id === selectedPoi) ?? null;
   const poisRef = useRef(pois);
   poisRef.current = pois;
+
+  // POIs with marker colour resolved from a linked faction (when unset).
+  const factionColor = (id?: string) =>
+    id ? factions.find((f) => f.id === id)?.color : undefined;
+  const resolvedPois = useMemo(
+    () =>
+      pois.map((p) =>
+        p.factionId && !p.color
+          ? { ...p, color: factionColor(p.factionId) ?? p.color }
+          : p,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pois, factions],
+  );
+  const resolvedPoisRef = useRef(resolvedPois);
+  resolvedPoisRef.current = resolvedPois;
+  const visibleResolved = useMemo(
+    () => (canEdit ? resolvedPois : resolvedPois.filter((p) => !p.hidden)),
+    [resolvedPois, canEdit],
+  );
   const worldRef = useRef(world);
   worldRef.current = world;
   const compassRef = useRef<HTMLDivElement | null>(null);
@@ -430,7 +466,11 @@ export function WorldMapBuilder({
       refreshPositions();
       refreshColors();
       setWater();
-      syncPois(canEdit ? poisRef.current : poisRef.current.filter((p) => !p.hidden));
+      syncPois(
+        canEdit
+          ? resolvedPoisRef.current
+          : resolvedPoisRef.current.filter((p) => !p.hidden),
+      );
 
       // Day/night.
       function applyTime(t: number) {
@@ -710,8 +750,8 @@ export function WorldMapBuilder({
 
   // Rebuild in-scene marker sprites when POIs (or visibility) change.
   useEffect(() => {
-    engineRef.current?.syncPois(canEdit ? pois : pois.filter((p) => !p.hidden));
-  }, [pois, canEdit]);
+    engineRef.current?.syncPois(visibleResolved);
+  }, [visibleResolved]);
 
   const segBtn = "rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors";
 
@@ -1003,6 +1043,41 @@ export function WorldMapBuilder({
                 />
                 Hidden from players
               </label>
+              <div className="space-y-1 rounded-md border border-parchment-400/50 bg-parchment-50/60 p-2">
+                <p className="text-[0.6rem] font-semibold uppercase tracking-wide text-brass-dark">
+                  Links
+                </p>
+                <LinkSelect
+                  label="Faction"
+                  value={selPoi.factionId}
+                  onChange={(v) => updatePoi(selPoi.id, { factionId: v })}
+                  options={factions.map((f) => ({ id: f.id, label: f.name }))}
+                />
+                <LinkSelect
+                  label="Quest"
+                  value={selPoi.questId}
+                  onChange={(v) => updatePoi(selPoi.id, { questId: v })}
+                  options={quests.map((q) => ({ id: q.id, label: q.title }))}
+                />
+                <LinkSelect
+                  label="NPC"
+                  value={selPoi.statBlockId}
+                  onChange={(v) => updatePoi(selPoi.id, { statBlockId: v })}
+                  options={statBlocks.map((s) => ({ id: s.id, label: s.name }))}
+                />
+                <LinkSelect
+                  label="Hero"
+                  value={selPoi.characterId}
+                  onChange={(v) => updatePoi(selPoi.id, { characterId: v })}
+                  options={characters.map((c) => ({ id: c.id, label: c.name }))}
+                />
+                <LinkSelect
+                  label="Battle map"
+                  value={selPoi.battleMapId}
+                  onChange={(v) => updatePoi(selPoi.id, { battleMapId: v })}
+                  options={battleMaps.map((m) => ({ id: m.id, label: m.name }))}
+                />
+              </div>
               <button
                 onClick={() => removePoi(selPoi.id)}
                 className="inline-flex items-center gap-1.5 rounded-md border border-oxblood/40 px-3 py-1.5 text-xs font-semibold text-oxblood hover:bg-oxblood hover:text-parchment-50"
@@ -1023,8 +1098,103 @@ export function WorldMapBuilder({
               )}
             </>
           )}
+
+          {/* Linked entities (DM + players) */}
+          {(() => {
+            const f = selPoi.factionId
+              ? factions.find((x) => x.id === selPoi.factionId)
+              : null;
+            const q = selPoi.questId
+              ? quests.find((x) => x.id === selPoi.questId)
+              : null;
+            const npc = selPoi.statBlockId
+              ? statBlocks.find((x) => x.id === selPoi.statBlockId)
+              : null;
+            const hero = selPoi.characterId
+              ? characters.find((x) => x.id === selPoi.characterId)
+              : null;
+            const bm = selPoi.battleMapId
+              ? allMaps.find((x) => x.id === selPoi.battleMapId)
+              : null;
+            if (!f && !q && !npc && !hero && !bm) return null;
+            return (
+              <div className="mt-3 space-y-1.5 border-t border-parchment-400/50 pt-2 text-xs">
+                {f && (
+                  <div className="flex items-center gap-1.5 text-ink-soft">
+                    <span
+                      className="h-3 w-3 rounded-full border border-ink/20"
+                      style={{ background: f.color || "#7a2d2d" }}
+                    />
+                    {f.name}
+                  </div>
+                )}
+                {q && (
+                  <div className="flex items-center gap-1.5 text-ink-soft">
+                    ⚑ {q.title}
+                    <span className="rounded bg-parchment-300 px-1 text-[0.6rem] uppercase tracking-wide">
+                      {q.status}
+                    </span>
+                  </div>
+                )}
+                {npc && (
+                  <Link
+                    href={`/bestiary/${npc.id}`}
+                    className="flex items-center gap-1.5 font-semibold text-brass-dark hover:underline"
+                  >
+                    👤 {npc.name} →
+                  </Link>
+                )}
+                {hero && (
+                  <Link
+                    href={`/characters/${hero.id}`}
+                    className="flex items-center gap-1.5 font-semibold text-brass-dark hover:underline"
+                  >
+                    🛡 {hero.name} →
+                  </Link>
+                )}
+                {bm && (
+                  <Link
+                    href="/combat"
+                    className="flex items-center gap-1.5 font-semibold text-brass-dark hover:underline"
+                  >
+                    ⚔ {bm.name} →
+                  </Link>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
+  );
+}
+
+function LinkSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value?: string;
+  onChange: (v: string | undefined) => void;
+  options: { id: string; label: string }[];
+}) {
+  return (
+    <label className="flex items-center gap-1.5 text-[0.65rem] text-ink-soft">
+      <span className="w-16 shrink-0">{label}</span>
+      <select
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value || undefined)}
+        className="h-7 flex-1 rounded border border-parchment-400 bg-parchment-50 px-1 text-xs text-ink focus:border-brass focus:outline-none"
+      >
+        <option value="">— none —</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
