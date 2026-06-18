@@ -23,6 +23,7 @@ import {
 } from "@/lib/data/hooks";
 import { useCustomContent } from "@/lib/content/context";
 import { contentApi, type ContentKind, type ContentScope } from "@/lib/content/api";
+import { VisibilityControl } from "@/components/dm/VisibilityControl";
 
 type Draft = CustomSpell | CustomItem | LootTable;
 
@@ -213,6 +214,21 @@ export function HomebrewEditor() {
           )}
           {kind === "loot" && (
             <LootForm draft={editing as LootTable} setDraft={setEditing} />
+          )}
+          {scope === "campaign" && (
+            <div className="mt-4">
+              <VisibilityControl
+                hidden={(editing as { hidden?: boolean }).hidden}
+                visibleTo={(editing as { visibleTo?: string[] }).visibleTo}
+                onChange={(p) =>
+                  setEditing((d) =>
+                    d
+                      ? ({ ...d, hidden: p.hidden, visibleTo: p.visibleTo } as Draft)
+                      : d,
+                  )
+                }
+              />
+            </div>
           )}
           <div className="mt-4 flex gap-2">
             <Button onClick={save} disabled={busy}>

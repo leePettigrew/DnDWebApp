@@ -116,7 +116,15 @@ export async function handleContentRequest(
         return true;
       }
       if (method === "GET") {
-        json(res, 200, { records: repos.content.listForCampaign(cid) });
+        let records = repos.content.listForCampaign(cid);
+        // Players only get content that isn't hidden (or is revealed to them).
+        if (membership.role !== "dm") {
+          records = records.filter((r) => {
+            const d = r.data as { hidden?: boolean; visibleTo?: string[] };
+            return !d?.hidden || (d.visibleTo?.includes(user.id) ?? false);
+          });
+        }
+        json(res, 200, { records });
         return true;
       }
       if (membership.role !== "dm") {

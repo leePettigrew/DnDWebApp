@@ -568,6 +568,9 @@ export interface CustomSpell {
   duration?: string;
   concentration?: boolean;
   description?: string;
+  /** DM visibility (campaign scope) — hidden from players unless revealed. */
+  hidden?: boolean;
+  visibleTo?: ID[];
 }
 
 export interface CustomItem {
@@ -580,6 +583,9 @@ export interface CustomItem {
   properties?: string;
   damage?: string;
   description?: string;
+  /** DM visibility (campaign scope) — hidden from players unless revealed. */
+  hidden?: boolean;
+  visibleTo?: ID[];
 }
 
 export type CoinDenomination = keyof Currency; // cp | sp | ep | gp | pp
@@ -615,6 +621,9 @@ export interface LootTable {
   /** Number of weighted picks per roll. */
   picks: number;
   entries: LootTableEntry[];
+  /** DM visibility (campaign scope) — hidden from players unless revealed. */
+  hidden?: boolean;
+  visibleTo?: ID[];
 }
 
 export type CustomContentKind = "spell" | "item" | "loot";
