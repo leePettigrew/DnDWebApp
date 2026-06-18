@@ -28,6 +28,8 @@ export interface CustomContent {
   lootTables: ContentRecord<LootTable>[];
   /** SRD edit/hide overrides (global + campaign). */
   overrides: ContentRecord<SrdOverride>[];
+  /** Loot-config override records (global + campaign). */
+  lootConfigs: ContentRecord[];
   refresh: () => Promise<void>;
 }
 
@@ -39,6 +41,7 @@ const empty: CustomContent = {
   items: [],
   lootTables: [],
   overrides: [],
+  lootConfigs: [],
   refresh: async () => {},
 };
 
@@ -95,6 +98,7 @@ export function CustomContentProvider({ children }: { children: ReactNode }) {
       overrides: records.filter(
         (r) => r.kind === "override",
       ) as ContentRecord<SrdOverride>[],
+      lootConfigs: records.filter((r) => r.kind === "lootconfig"),
       refresh,
     }),
     [records, loading, enabled, campaignId, refresh],

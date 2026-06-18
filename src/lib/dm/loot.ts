@@ -1,6 +1,6 @@
 import { COMPENDIUM_ITEMS } from "@/lib/compendium";
 import type { CompendiumItem } from "@/lib/compendium";
-import type { LootTable } from "@/lib/domain/types";
+import type { LootCoinSpec, LootTable } from "@/lib/domain/types";
 
 /** Treasure & loot generation — rough 5e-flavored tables, client-side only. */
 
@@ -66,49 +66,90 @@ const COMMON_MAGIC = MAGIC_POOL.filter(
   (i) => !i.rarity || i.rarity === "common",
 );
 
-function coinsFor(tier: LootTier): Coins {
-  switch (tier) {
-    case "1-4":
-      return { cp: d(5, 6), sp: d(4, 6), ep: 0, gp: d(3, 6), pp: 0 };
-    case "5-10":
-      return { cp: 0, sp: d(6, 6) * 10, ep: 0, gp: d(2, 6) * 10, pp: d(1, 6) };
-    case "11-16":
-      return { cp: 0, sp: 0, ep: 0, gp: d(4, 6) * 100, pp: d(1, 6) * 10 };
-    case "17-20":
-      return { cp: 0, sp: 0, ep: 0, gp: d(2, 6) * 1000, pp: d(2, 6) * 100 };
-  }
+/** Editable per-tier loot parameters (overridable global + per-campaign). */
+export interface LootTierConfig {
+  coins: LootCoinSpec;
+  /** Chance (percent 0..100) of any gems/art. */
+  valuableChance: number;
+  /** Max gems/art when they drop. */
+  valuableCount: number;
+  /** Chance (percent 0..100) of any magic items. */
+  magicChance: number;
+  magicCount: number;
+  /** Whether rare+ magic items are eligible (else common only). */
+  magicRare: boolean;
+}
+export interface LootConfig {
+  tiers: Record<LootTier, LootTierConfig>;
+  gems: string[];
+  art: string[];
 }
 
-export function generateLoot(tier: LootTier): LootResult {
-  const coins = coinsFor(tier);
-
-  const valuables: string[] = [];
-  const valuableOdds: Record<LootTier, { p: number; n: number }> = {
-    "1-4": { p: 0.25, n: 1 },
-    "5-10": { p: 0.5, n: 2 },
-    "11-16": { p: 0.75, n: 3 },
-    "17-20": { p: 0.9, n: 4 },
+/** The built-in loot config (used when nothing's been customised). */
+export function defaultLootConfig(): LootConfig {
+  const c = (
+    count: number,
+    sides: number,
+    multiplier: number,
+  ): LootCoinSpec => ({ count, sides, multiplier, denomination: "gp" });
+  return {
+    tiers: {
+      "1-4": { coins: c(3, 6, 1), valuableChance: 25, valuableCount: 1, magicChance: 30, magicCount: 1, magicRare: false },
+      "5-10": { coins: c(2, 6, 10), valuableChance: 50, valuableCount: 2, magicChance: 50, magicCount: 1, magicRare: true },
+      "11-16": { coins: c(4, 6, 100), valuableChance: 75, valuableCount: 3, magicChance: 70, magicCount: 2, magicRare: true },
+      "17-20": { coins: c(2, 6, 1000), valuableChance: 90, valuableCount: 4, magicChance: 90, magicCount: 2, magicRare: true },
+    },
+    gems: [...GEMS],
+    art: [...ART],
   };
-  const vo = valuableOdds[tier];
-  if (chance(vo.p)) {
-    const count = 1 + Math.floor(Math.random() * vo.n);
+}
+
+/** Merge stored overrides (global, then campaign) over the defaults. */
+export function effectiveLootConfig(
+  records: { scope: string; data: unknown }[],
+): LootConfig {
+  const base = defaultLootConfig();
+  const apply = (raw: unknown) => {
+    const d2 = raw as Partial<LootConfig> | undefined;
+    if (!d2) return;
+    if (d2.gems?.length) base.gems = d2.gems;
+    if (d2.art?.length) base.art = d2.art;
+    if (d2.tiers) {
+      for (const k of Object.keys(base.tiers) as LootTier[]) {
+        if (d2.tiers[k]) base.tiers[k] = { ...base.tiers[k], ...d2.tiers[k] };
+      }
+    }
+  };
+  for (const r of records.filter((r) => r.scope === "global")) apply(r.data);
+  for (const r of records.filter((r) => r.scope === "campaign")) apply(r.data);
+  return base;
+}
+
+export function generateLoot(tier: LootTier, config?: LootConfig): LootResult {
+  const cfg = config ?? defaultLootConfig();
+  const t = cfg.tiers[tier] ?? defaultLootConfig().tiers[tier];
+
+  const coins: Coins = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
+  if (t.coins.count > 0) {
+    coins[t.coins.denomination] +=
+      d(t.coins.count, Math.max(2, t.coins.sides)) * (t.coins.multiplier || 1);
+  }
+
+  const gems = cfg.gems?.length ? cfg.gems : GEMS;
+  const art = cfg.art?.length ? cfg.art : ART;
+  const valuables: string[] = [];
+  if (chance(t.valuableChance / 100)) {
+    const count = 1 + Math.floor(Math.random() * Math.max(1, t.valuableCount));
     for (let i = 0; i < count; i++) {
-      valuables.push(chance(0.5) ? pick(GEMS) : pick(ART));
+      valuables.push(chance(0.5) ? pick(gems) : pick(art));
     }
   }
 
   const magicItems: CompendiumItem[] = [];
-  const magicOdds: Record<LootTier, { p: number; n: number; rare: boolean }> = {
-    "1-4": { p: 0.3, n: 1, rare: false },
-    "5-10": { p: 0.5, n: 1, rare: true },
-    "11-16": { p: 0.7, n: 2, rare: true },
-    "17-20": { p: 0.9, n: 2, rare: true },
-  };
-  const mo = magicOdds[tier];
-  if (chance(mo.p)) {
-    const pool = mo.rare ? MAGIC_POOL : COMMON_MAGIC;
-    const count = 1 + Math.floor(Math.random() * mo.n);
-    for (let i = 0; i < count; i++) magicItems.push(pick(pool));
+  if (chance(t.magicChance / 100)) {
+    const pool = t.magicRare ? MAGIC_POOL : COMMON_MAGIC;
+    const count = 1 + Math.floor(Math.random() * Math.max(1, t.magicCount));
+    for (let i = 0; i < count && pool.length; i++) magicItems.push(pick(pool));
   }
 
   return { coins, valuables, magicItems };

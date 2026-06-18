@@ -15,6 +15,7 @@ import type { InventoryItem } from "@/lib/domain/types";
 import {
   LOOT_TIERS,
   coinsToString,
+  effectiveLootConfig,
   generateLoot,
   rollCustomTable,
   type LootResult,
@@ -43,7 +44,8 @@ export function TreasureGenerator() {
       const rec = customTables.find((r) => r.id === source.slice(7));
       if (rec) setLoot(rollCustomTable(rec.data));
     } else {
-      setLoot(generateLoot(source.slice(5) as LootTier));
+      const cfg = effectiveLootConfig(content.lootConfigs);
+      setLoot(generateLoot(source.slice(5) as LootTier, cfg));
     }
   }
 

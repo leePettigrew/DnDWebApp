@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/icons";
 import { usePermissions } from "@/lib/data/hooks";
 import { TreasureGenerator } from "@/components/dm/TreasureGenerator";
+import { LootConfigEditor } from "@/components/dm/LootConfigEditor";
 import { NpcGenerator } from "@/components/dm/NpcGenerator";
 import { DmScreen } from "@/components/dm/DmScreen";
 import { HandoutComposer } from "@/components/dm/HandoutComposer";
@@ -81,7 +82,12 @@ export default function DmPage() {
         })}
       </div>
 
-      {tab === "treasure" && <TreasureGenerator />}
+      {tab === "treasure" && (
+        <div className="space-y-6">
+          <TreasureGenerator />
+          <LootConfigEditor />
+        </div>
+      )}
       {tab === "npcs" && <NpcGenerator />}
       {tab === "homebrew" && <HomebrewEditor />}
       {tab === "handouts" && <HandoutComposer />}
