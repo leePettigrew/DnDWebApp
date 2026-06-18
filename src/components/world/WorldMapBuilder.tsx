@@ -997,13 +997,18 @@ export function WorldMapBuilder({
           treeLeaves.geometry.dispose();
           treeLeaves = null;
         }
-        const dens = treeDensityRef.current;
-        const MAX = Math.round(1500 + dens * 9000);
+        const MAX = 9000;
         const cells: { i: number; k: number }[] = [];
         for (let i = 0; i < treeArr.length; i++) {
           const d = treeArr[i];
-          if (d < 40 || heightArr[i] < seaLevel) continue;
-          const cnt = Math.max(1, Math.round((d / 255) * dens * 4));
+          if (d < 8 || heightArr[i] < seaLevel) continue;
+          // cull trees under rivers (carved) and roads (flattened)
+          if (carveArr[i] < -0.002 || roadW[i] > 0.1) continue;
+          // per-cell density: expected count from the painted value, with a
+          // fractional remainder placed probabilistically (so it stays sparse)
+          const f = (d / 255) * 2.6;
+          let cnt = Math.floor(f);
+          if (thash(i, 77) < f - cnt) cnt++;
           for (let k = 0; k < cnt; k++) cells.push({ i, k });
         }
         const n = Math.min(MAX, cells.length);
@@ -1813,7 +1818,10 @@ export function WorldMapBuilder({
             } else if (t === "region") {
               regionArr[i] = activeRegionRef.current;
             } else if (t === "trees") {
-              treeArr[i] = treeModeRef.current === "clear" ? 0 : 230;
+              treeArr[i] =
+                treeModeRef.current === "clear"
+                  ? 0
+                  : Math.round(treeDensityRef.current * 255);
             }
           }
         }
@@ -2660,26 +2668,29 @@ export function WorldMapBuilder({
                   Clear
                 </button>
               </div>
-              <label className="block text-[0.65rem] text-ink-soft">
-                Density {Math.round(treeDensity * 100)}%
-                <input
-                  type="range"
-                  min={0.05}
-                  max={1}
-                  step={0.05}
-                  value={treeDensity}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    setTreeDensity(v);
-                    treeDensityRef.current = v;
-                    engineRef.current?.rebuildTrees();
-                  }}
-                  onPointerUp={() => saveWorld({ treeDensity })}
-                  className="w-full accent-forest"
-                />
-              </label>
+              <div className="flex items-center justify-between text-[0.65rem] text-ink-soft">
+                <span>Brush density</span>
+                <span className="font-semibold text-ink">
+                  {Math.round(treeDensity * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0.05}
+                max={1}
+                step={0.05}
+                value={treeDensity}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setTreeDensity(v);
+                  treeDensityRef.current = v;
+                }}
+                onPointerUp={() => saveWorld({ treeDensity })}
+                className="w-full accent-forest"
+              />
               <p className="text-[0.6rem] text-ink-faint">
-                Forests fill automatically; brush to add or clear.
+                Density sets how thick the brush plants — it only affects what you
+                paint, not existing trees. Roads & rivers clear trees beneath them.
               </p>
             </div>
 
