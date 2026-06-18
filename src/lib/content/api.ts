@@ -44,7 +44,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 }
 
 export type ContentScope = "global" | "campaign";
-export type ContentKind = "spell" | "item" | "loot";
+export type ContentKind = "spell" | "item" | "loot" | "override" | "lootconfig";
 
 export interface ContentRecord<T = unknown> {
   id: string;

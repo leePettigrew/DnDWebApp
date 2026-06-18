@@ -626,7 +626,20 @@ export interface LootTable {
   visibleTo?: ID[];
 }
 
-export type CustomContentKind = "spell" | "item" | "loot";
+export type SrdOverrideTargetKind = "spell" | "item" | "monster";
+
+/** An edit/hide of a built-in SRD entry, keyed by its (stable) name. */
+export interface SrdOverride {
+  id: ID;
+  targetKind: SrdOverrideTargetKind;
+  targetName: string;
+  /** Hide the SRD entry from the compendium (for this scope). */
+  hidden?: boolean;
+  /** Field values merged over the SRD entry. */
+  data?: Record<string, unknown>;
+}
+
+export type CustomContentKind = "spell" | "item" | "loot" | "override";
 export type CustomContentScope = "global" | "campaign";
 
 /** A stored homebrew record wrapping one of the content payloads. */

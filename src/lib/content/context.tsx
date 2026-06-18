@@ -13,6 +13,7 @@ import type {
   CustomItem,
   CustomSpell,
   LootTable,
+  SrdOverride,
 } from "@/lib/domain/types";
 import { useActiveCampaign, useCurrentUser } from "@/lib/data/hooks";
 import { contentApi, type ContentRecord } from "./api";
@@ -25,6 +26,8 @@ export interface CustomContent {
   spells: ContentRecord<CustomSpell>[];
   items: ContentRecord<CustomItem>[];
   lootTables: ContentRecord<LootTable>[];
+  /** SRD edit/hide overrides (global + campaign). */
+  overrides: ContentRecord<SrdOverride>[];
   refresh: () => Promise<void>;
 }
 
@@ -35,6 +38,7 @@ const empty: CustomContent = {
   spells: [],
   items: [],
   lootTables: [],
+  overrides: [],
   refresh: async () => {},
 };
 
@@ -88,6 +92,9 @@ export function CustomContentProvider({ children }: { children: ReactNode }) {
       lootTables: records.filter(
         (r) => r.kind === "loot",
       ) as ContentRecord<LootTable>[],
+      overrides: records.filter(
+        (r) => r.kind === "override",
+      ) as ContentRecord<SrdOverride>[],
       refresh,
     }),
     [records, loading, enabled, campaignId, refresh],

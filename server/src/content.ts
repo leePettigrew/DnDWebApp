@@ -50,7 +50,8 @@ function userFrom(
   return v ? repos.users.findById(v.userId) : null;
 }
 
-const KINDS = new Set(["spell", "item", "loot"]);
+const KINDS = new Set(["spell", "item", "loot", "override", "lootconfig"]);
+const HOMEBREW_KINDS = new Set(["spell", "item", "loot"]);
 
 export async function handleContentRequest(
   req: IncomingMessage,
@@ -117,9 +118,10 @@ export async function handleContentRequest(
       }
       if (method === "GET") {
         let records = repos.content.listForCampaign(cid);
-        // Players only get content that isn't hidden (or is revealed to them).
+        // Players don't get hidden HOMEBREW (overrides/configs always apply).
         if (membership.role !== "dm") {
           records = records.filter((r) => {
+            if (!HOMEBREW_KINDS.has(r.kind)) return true;
             const d = r.data as { hidden?: boolean; visibleTo?: string[] };
             return !d?.hidden || (d.visibleTo?.includes(user.id) ?? false);
           });

@@ -7,6 +7,7 @@ import { cn } from "@/components/ui/cn";
 import {
   ChevronRightIcon,
   ClawIcon,
+  EditIcon,
   HelmIcon,
   PlusIcon,
   SparkIcon,
@@ -15,10 +16,15 @@ import {
 import {
   useCampaigns,
   useCharacters,
+  useCurrentUser,
   usePermissions,
   useStatBlocks,
 } from "@/lib/data/hooks";
-import { ITEM_CATEGORIES } from "@/lib/domain/types";
+import {
+  ITEM_CATEGORIES,
+  type SrdOverrideTargetKind,
+} from "@/lib/domain/types";
+import { SrdOverrideModal } from "./SrdOverrideModal";
 import {
   COMPENDIUM_ITEMS,
   COMPENDIUM_MONSTERS,
@@ -59,8 +65,16 @@ export function CompendiumBrowser() {
   const characters = allCharacters.filter((c) => perms.canEdit("characters", c));
   const canAddMonsters = perms.canCreate("statBlocks");
   const content = useCustomContent();
+  const me = useCurrentUser();
+  // DM (per-campaign) or admin (global) may edit/hide SRD entries.
+  const canOverride = content.enabled && (perms.isDM || !!me?.isAdmin);
 
   const [tab, setTab] = useState<Tab>("spells");
+  const [override, setOverride] = useState<{
+    kind: SrdOverrideTargetKind;
+    name: string;
+    base: Record<string, unknown>;
+  } | null>(null);
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<string>("all");
   const [klass, setKlass] = useState<string>("all");
@@ -74,10 +88,54 @@ export function CompendiumBrowser() {
   const character =
     characters.find((c) => c.id === charId) ?? characters[0] ?? null;
 
-  // SRD + homebrew (campaign + global), tagged so the UI can badge homebrew.
-  const spellSource: (CompendiumSpell & { homebrew: boolean })[] = useMemo(
+  const isDM = perms.isDM;
+
+  // Effective SRD overrides (campaign wins over global), keyed by kind:name.
+  const overrideMaps = useMemo(() => {
+    const g = new Map<string, { hidden?: boolean; data?: Record<string, unknown> }>();
+    const c = new Map<string, { hidden?: boolean; data?: Record<string, unknown> }>();
+    for (const r of content.overrides) {
+      const o = r.data;
+      if (!o?.targetKind || !o?.targetName) continue;
+      const key = `${o.targetKind}:${o.targetName.toLowerCase()}`;
+      (r.scope === "campaign" ? c : g).set(key, { hidden: o.hidden, data: o.data });
+    }
+    return { g, c };
+  }, [content.overrides]);
+
+  type Over = { hidden: boolean; edited: boolean; data: Record<string, unknown> };
+  const applyOverride = useMemo(() => {
+    return (kind: SrdOverrideTargetKind, name: string): Over => {
+      const key = `${kind}:${name.toLowerCase()}`;
+      const g = overrideMaps.g.get(key);
+      const c = overrideMaps.c.get(key);
+      const data = { ...(g?.data ?? {}), ...(c?.data ?? {}) };
+      return {
+        hidden: c?.hidden ?? g?.hidden ?? false,
+        edited: Object.keys(data).length > 0,
+        data,
+      };
+    };
+  }, [overrideMaps]);
+
+  type SpellRow = CompendiumSpell & {
+    homebrew: boolean;
+    hidden?: boolean;
+    edited?: boolean;
+  };
+  type ItemRow = CompendiumItem & {
+    homebrew: boolean;
+    hidden?: boolean;
+    edited?: boolean;
+  };
+
+  // SRD (with overrides applied) + homebrew, tagged for badges.
+  const spellSource: SpellRow[] = useMemo(
     () => [
-      ...COMPENDIUM_SPELLS.map((s) => ({ ...s, homebrew: false })),
+      ...COMPENDIUM_SPELLS.map((s) => {
+        const o = applyOverride("spell", s.name);
+        return { ...s, ...o.data, homebrew: false, hidden: o.hidden, edited: o.edited } as SpellRow;
+      }).filter((s) => isDM || !s.hidden),
       ...content.spells.map((r) => ({
         name: r.data.name,
         level: r.data.level,
@@ -92,14 +150,17 @@ export function CompendiumBrowser() {
         homebrew: true,
       })),
     ],
-    [content.spells],
+    [content.spells, applyOverride, isDM],
   );
-  const itemSource: (CompendiumItem & { homebrew: boolean })[] = useMemo(
+  const itemSource: ItemRow[] = useMemo(
     () => [
-      ...COMPENDIUM_ITEMS.map((i) => ({ ...i, homebrew: false })),
+      ...COMPENDIUM_ITEMS.map((i) => {
+        const o = applyOverride("item", i.name);
+        return { ...i, ...o.data, homebrew: false, hidden: o.hidden, edited: o.edited } as ItemRow;
+      }).filter((i) => isDM || !i.hidden),
       ...content.items.map((r) => ({ ...r.data, homebrew: true })),
     ],
-    [content.items],
+    [content.items, applyOverride, isDM],
   );
 
   const allClasses = useMemo(
@@ -131,8 +192,12 @@ export function CompendiumBrowser() {
           .toLowerCase()
           .includes(q)),
   );
-  const monsters = COMPENDIUM_MONSTERS.filter(
+  const monsters = COMPENDIUM_MONSTERS.map((m) => {
+    const o = applyOverride("monster", m.name);
+    return { ...m, ...o.data, hidden: o.hidden, edited: o.edited };
+  }).filter(
     (m) =>
+      (isDM || !m.hidden) &&
       (cr === "all" || m.challengeRating === cr) &&
       (!q || `${m.name} ${m.type}`.toLowerCase().includes(q)),
   );
@@ -353,7 +418,25 @@ export function CompendiumBrowser() {
                         </span>
                       )}
                       {s.homebrew && <Badge tone="forest">Homebrew</Badge>}
+                      {s.hidden && <Badge tone="oxblood">Hidden</Badge>}
+                      {s.edited && !s.homebrew && <Badge tone="brass">Edited</Badge>}
                     </button>
+                    {canOverride && !s.homebrew && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOverride({
+                            kind: "spell",
+                            name: s.name,
+                            base: s as unknown as Record<string, unknown>,
+                          })
+                        }
+                        aria-label={`Edit ${s.name}`}
+                        className="shrink-0 rounded-md p-1.5 text-ink-faint hover:bg-parchment-300/60 hover:text-ink"
+                      >
+                        <EditIcon className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => addSpell(s.name)}
@@ -407,12 +490,30 @@ export function CompendiumBrowser() {
                       </span>
                       {cat && <Badge>{cat.label}</Badge>}
                       {i.homebrew && <Badge tone="forest">Homebrew</Badge>}
+                      {i.hidden && <Badge tone="oxblood">Hidden</Badge>}
+                      {i.edited && !i.homebrew && <Badge tone="brass">Edited</Badge>}
                       {i.damage && (
                         <span className="numerals hidden text-xs text-ink-faint sm:inline">
                           {i.damage}
                         </span>
                       )}
                     </button>
+                    {canOverride && !i.homebrew && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOverride({
+                            kind: "item",
+                            name: i.name,
+                            base: i as unknown as Record<string, unknown>,
+                          })
+                        }
+                        aria-label={`Edit ${i.name}`}
+                        className="shrink-0 rounded-md p-1.5 text-ink-faint hover:bg-parchment-300/60 hover:text-ink"
+                      >
+                        <EditIcon className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => addItem(i.name)}
@@ -469,10 +570,28 @@ export function CompendiumBrowser() {
                         {m.name}
                       </span>
                       <Badge tone="oxblood">CR {m.challengeRating}</Badge>
+                      {m.hidden && <Badge tone="oxblood">Hidden</Badge>}
+                      {m.edited && <Badge tone="brass">Edited</Badge>}
                       <span className="hidden truncate text-xs text-ink-faint sm:inline">
                         {m.size} {m.type}
                       </span>
                     </button>
+                    {canOverride && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOverride({
+                            kind: "monster",
+                            name: m.name,
+                            base: m as unknown as Record<string, unknown>,
+                          })
+                        }
+                        aria-label={`Edit ${m.name}`}
+                        className="shrink-0 rounded-md p-1.5 text-ink-faint hover:bg-parchment-300/60 hover:text-ink"
+                      >
+                        <EditIcon className="h-4 w-4" />
+                      </button>
+                    )}
                     {canAddMonsters && (
                       <button
                         type="button"
@@ -529,6 +648,15 @@ export function CompendiumBrowser() {
           </ul>
         )}
       </Panel>
+
+      {override && (
+        <SrdOverrideModal
+          kind={override.kind}
+          name={override.name}
+          base={override.base}
+          onClose={() => setOverride(null)}
+        />
+      )}
     </div>
   );
 }
