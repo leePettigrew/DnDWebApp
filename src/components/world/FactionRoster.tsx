@@ -1,29 +1,18 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Panel } from "@/components/ui/Panel";
 import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Portrait } from "@/components/ui/Portrait";
 import { cn } from "@/components/ui/cn";
-import { PlusIcon, TrashIcon, HelmIcon } from "@/components/ui/icons";
+import { PlusIcon, HelmIcon } from "@/components/ui/icons";
 import { useCampaigns, useFactions, useStatBlocks } from "@/lib/data/hooks";
 import { newFactionInput } from "@/lib/domain/factories";
-import {
-  FACTION_STANDINGS,
-  type FactionStanding,
-} from "@/lib/domain/types";
-
-const STANDING_STYLE: Record<FactionStanding, string> = {
-  ally: "border-l-forest",
-  friendly: "border-l-brass",
-  neutral: "border-l-parchment-400",
-  suspicious: "border-l-leather",
-  hostile: "border-l-oxblood",
-};
-
-const inputClass =
-  "w-full rounded-md border border-parchment-400 bg-parchment-50 px-2 py-1 text-sm text-ink focus:border-brass focus:outline-none focus:ring-2 focus:ring-brass/40";
+import { FACTION_STANDINGS, FACTION_TYPES } from "@/lib/domain/types";
+import { FactionDetail, STANDING_TONE } from "./FactionDetail";
 
 export function FactionRoster() {
   const { items: campaigns } = useCampaigns();
@@ -31,115 +20,93 @@ export function FactionRoster() {
   const { items: statBlocks } = useStatBlocks();
   const npcs = statBlocks.filter((s) => s.kind === "npc");
 
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = factions.find((f) => f.id === selectedId) ?? null;
+
+  async function add() {
+    const created = await create(newFactionInput(campaigns[0]?.id));
+    setSelectedId(created.id);
+  }
+
+  if (selected) {
+    return (
+      <FactionDetail
+        faction={selected}
+        onUpdate={(p) => update(selected.id, p)}
+        onDelete={() => {
+          remove(selected.id);
+          setSelectedId(null);
+        }}
+        onBack={() => setSelectedId(null)}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-lg font-semibold text-ink">Factions</h2>
-          <Button
-            size="sm"
-            onClick={() => void create(newFactionInput(campaigns[0]?.id))}
-          >
-            <PlusIcon className="h-4 w-4" /> New faction
-          </Button>
-        </div>
+      <div className="flex items-center justify-between">
+        <h2 className="font-display text-lg font-semibold text-ink">Factions</h2>
+        <Button size="sm" onClick={add}>
+          <PlusIcon className="h-4 w-4" /> New faction
+        </Button>
+      </div>
 
-        {factions.length === 0 ? (
-          <Panel tone="flat">
-            <EmptyState
-              icon={<HelmIcon />}
-              title="No factions yet"
-              description="Track the powers, guilds, and cults your party deals with — and where they stand."
-            />
-          </Panel>
-        ) : (
-          factions.map((f) => (
-            <div
+      {factions.length === 0 ? (
+        <Panel tone="flat">
+          <EmptyState
+            icon={<HelmIcon />}
+            title="No factions yet"
+            description="Track the powers, guilds, and cults your party deals with — their reputation, rivals, members, and schemes."
+          />
+        </Panel>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {factions.map((f) => (
+            <button
               key={f.id}
+              onClick={() => setSelectedId(f.id)}
               className={cn(
-                "surface-raised border-l-4 p-4",
-                STANDING_STYLE[f.standing],
+                "surface-raised border-l-4 p-3 text-left transition-all hover:-translate-y-0.5 hover:shadow-raised",
+                STANDING_TONE[f.standing],
               )}
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  defaultValue={f.name}
-                  onBlur={(e) =>
-                    e.target.value !== f.name &&
-                    update(f.id, { name: e.target.value })
-                  }
-                  className="min-w-48 flex-1 border-b border-transparent bg-transparent font-display text-lg font-bold text-ink hover:border-parchment-400 focus:border-brass focus:outline-none"
-                  aria-label="Faction name"
+              <div className="flex items-center gap-3">
+                <Portrait
+                  src={f.symbolUrl}
+                  name={f.name}
+                  className="h-11 w-11 shrink-0"
                 />
-                <select
-                  aria-label="Standing"
-                  value={f.standing}
-                  onChange={(e) =>
-                    update(f.id, {
-                      standing: e.target.value as FactionStanding,
-                    })
-                  }
-                  className="rounded-md border border-parchment-400 bg-parchment-50 px-2 py-1 text-xs font-semibold text-ink focus:border-brass focus:outline-none"
-                >
-                  {FACTION_STANDINGS.map((s) => (
-                    <option key={s.key} value={s.key}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => remove(f.id)}
-                  aria-label="Delete faction"
-                  className="rounded-md p-1.5 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
-                >
-                  <TrashIcon className="h-4 w-4" />
-                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-display text-base font-bold text-ink">
+                      {f.name}
+                    </span>
+                    {f.hidden && <Badge tone="oxblood">Hidden</Badge>}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-faint">
+                    {f.type && (
+                      <Badge tone="brass">
+                        {FACTION_TYPES.find((t) => t.key === f.type)?.label ??
+                          f.type}
+                      </Badge>
+                    )}
+                    <span className="capitalize">
+                      {FACTION_STANDINGS.find((s) => s.key === f.standing)
+                        ?.label ?? f.standing}
+                    </span>
+                    {f.power ? (
+                      <span className="numerals">· Power {f.power}/5</span>
+                    ) : null}
+                    {f.agendas?.length ? (
+                      <span>· {f.agendas.length} agenda</span>
+                    ) : null}
+                  </div>
+                </div>
               </div>
-
-              <textarea
-                defaultValue={f.description}
-                onBlur={(e) =>
-                  e.target.value !== (f.description ?? "") &&
-                  update(f.id, { description: e.target.value })
-                }
-                rows={2}
-                placeholder="Who are they?"
-                className={cn(inputClass, "mt-3 resize-y")}
-                aria-label="Faction description"
-              />
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                <label className="text-xs">
-                  <span className="mb-0.5 block font-semibold uppercase tracking-wide text-ink-faint">
-                    Goals
-                  </span>
-                  <input
-                    defaultValue={f.goals}
-                    onBlur={(e) =>
-                      e.target.value !== (f.goals ?? "") &&
-                      update(f.id, { goals: e.target.value })
-                    }
-                    className={inputClass}
-                  />
-                </label>
-                <label className="text-xs">
-                  <span className="mb-0.5 block font-semibold uppercase tracking-wide text-ink-faint">
-                    Notes
-                  </span>
-                  <input
-                    defaultValue={f.notes}
-                    onBlur={(e) =>
-                      e.target.value !== (f.notes ?? "") &&
-                      update(f.id, { notes: e.target.value })
-                    }
-                    className={inputClass}
-                  />
-                </label>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* NPCs live in the bestiary; surface them here for the roster. */}
       <Panel

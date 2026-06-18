@@ -455,6 +455,104 @@ export const FACTION_STANDINGS: { key: FactionStanding; label: string }[] = [
   { key: "hostile", label: "Hostile" },
 ];
 
+export type FactionType =
+  | "guild"
+  | "cult"
+  | "noble"
+  | "military"
+  | "criminal"
+  | "religious"
+  | "mercantile"
+  | "arcane"
+  | "other";
+
+export const FACTION_TYPES: { key: FactionType; label: string }[] = [
+  { key: "guild", label: "Guild" },
+  { key: "cult", label: "Cult" },
+  { key: "noble", label: "Noble House" },
+  { key: "military", label: "Military" },
+  { key: "criminal", label: "Criminal" },
+  { key: "religious", label: "Religious Order" },
+  { key: "mercantile", label: "Merchant Company" },
+  { key: "arcane", label: "Arcane Order" },
+  { key: "other", label: "Other" },
+];
+
+/** How one faction relates to another. */
+export type FactionRelationKind =
+  | "allied"
+  | "friendly"
+  | "neutral"
+  | "rival"
+  | "war";
+
+export const FACTION_RELATIONS: { key: FactionRelationKind; label: string }[] = [
+  { key: "allied", label: "Allied" },
+  { key: "friendly", label: "Friendly" },
+  { key: "neutral", label: "Neutral" },
+  { key: "rival", label: "Rivals" },
+  { key: "war", label: "At War" },
+];
+
+/** One character's (or player's) standing with a faction. */
+export interface FactionRep {
+  id: ID;
+  /** Linked PC, if any. */
+  characterId?: ID;
+  /** Display label (PC/player name) when not linked. */
+  name?: string;
+  value: number;
+}
+
+/** A reputation rank earned at a threshold. */
+export interface FactionRank {
+  id: ID;
+  name: string;
+  minRep: number;
+}
+
+/** A benefit unlocked at a reputation threshold. */
+export interface FactionReward {
+  id: ID;
+  minRep: number;
+  title: string;
+}
+
+/** A relationship to another faction. */
+export interface FactionRelationship {
+  id: ID;
+  otherFactionId: ID;
+  kind: FactionRelationKind;
+  note?: string;
+}
+
+/** A member of the faction — a linked NPC/PC or a plain name. */
+export interface FactionMember {
+  id: ID;
+  name: string;
+  statBlockId?: ID;
+  characterId?: ID;
+  role?: string;
+  leader?: boolean;
+}
+
+/** A faction agenda tracked as a progress clock. */
+export interface FactionAgenda {
+  id: ID;
+  title: string;
+  segments: number;
+  filled: number;
+  note?: string;
+  done?: boolean;
+}
+
+/** A dated entry in a faction's history log. */
+export interface FactionLogEntry {
+  id: ID;
+  date?: string;
+  text: string;
+}
+
 export interface Faction extends Entity {
   campaignId?: ID;
   name: string;
@@ -462,6 +560,46 @@ export interface Faction extends Entity {
   standing: FactionStanding;
   goals?: string;
   notes?: string;
+
+  // --- rich profile ---
+  type?: FactionType;
+  /** Symbol/banner image (URL or data URL). */
+  symbolUrl?: string;
+  /** Accent color (hex). */
+  color?: string;
+  /** Headquarters location (free text). */
+  hq?: string;
+  /** Optional atlas pin for the HQ. */
+  hqMapId?: ID;
+  hqX?: number;
+  hqY?: number;
+  /** Power & wealth tiers, 0..5. */
+  power?: number;
+  wealth?: number;
+
+  // --- systems ---
+  /** Per-player/PC reputation tracks. */
+  reputation?: FactionRep[];
+  /** Reputation rank thresholds. */
+  ranks?: FactionRank[];
+  /** Benefits unlocked by reputation. */
+  rewards?: FactionReward[];
+  /** Relationships to other factions. */
+  relationships?: FactionRelationship[];
+  /** Linked members (NPCs/PCs). */
+  members?: FactionMember[];
+  /** Agendas as progress clocks. */
+  agendas?: FactionAgenda[];
+  /** Linked quest ids. */
+  questIds?: ID[];
+  /** Dated history log. */
+  history?: FactionLogEntry[];
+
+  // --- DM-only / visibility ---
+  /** DM-only secret intel. */
+  secrets?: string;
+  hidden?: boolean;
+  visibleTo?: ID[];
 }
 
 /** A dated event on the campaign's in-world timeline. */
