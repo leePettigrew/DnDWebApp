@@ -10,15 +10,15 @@ import { BIOME_RGB, PAINT_BIOMES } from "@/lib/world/biomes";
 import { decodeBytes, encodeBytes } from "@/lib/world/codec";
 import { generateWorld } from "@/lib/world/generate";
 
-const W = 28; // world span (units)
-const HEIGHT = 4.6; // max elevation (units)
+const W = 36; // world span (units)
+const HEIGHT = 6; // max elevation (units)
 
 /** Selectable world resolutions (cells per side). */
 const SIZES: { label: string; size: number }[] = [
-  { label: "Small", size: 96 },
-  { label: "Medium", size: 128 },
-  { label: "Large", size: 192 },
-  { label: "Huge", size: 256 },
+  { label: "Small", size: 128 },
+  { label: "Medium", size: 192 },
+  { label: "Large", size: 256 },
+  { label: "Huge", size: 384 },
 ];
 
 /** Point-of-interest kinds (glyph + label). */
@@ -47,8 +47,8 @@ interface Engine {
   setWeather(w: WorldWeather): void;
   load(world: WorldMap): void;
   exportWorld(): WorldMap;
-  /** Project a normalized grid point to container-relative screen px. */
-  project(nx: number, ny: number): { x: number; y: number; vis: boolean };
+  /** Rebuild in-scene POI marker sprites from the given list. */
+  syncPois(list: WorldPoi[]): void;
   /** Camera azimuth (radians) for the compass. */
   azimuth(): number;
   dispose(): void;
@@ -102,10 +102,11 @@ export function WorldMapBuilder({
   poisRef.current = pois;
   const worldRef = useRef(world);
   worldRef.current = world;
-  const markerEls = useRef(new Map<string, HTMLButtonElement | null>());
   const compassRef = useRef<HTMLDivElement | null>(null);
   const frameCbRef = useRef<(() => void) | null>(null);
   const onPlaceRef = useRef<((nx: number, ny: number) => void) | null>(null);
+  const onSelectRef = useRef<((id: string) => void) | null>(null);
+  onSelectRef.current = (id) => setSelectedPoi(id);
 
   /** Persist world fields, preserving in-memory terrain edits. */
   const saveWorld = (patch: Partial<WorldMap>) => {
@@ -181,8 +182,8 @@ export function WorldMapBuilder({
       container.appendChild(renderer.domElement);
 
       const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(45, width / heightPx, 0.1, 400);
-      camera.position.set(0, 22, 26);
+      const camera = new THREE.PerspectiveCamera(45, width / heightPx, 0.1, 600);
+      camera.position.set(0, 30, 44);
 
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
@@ -231,6 +232,102 @@ export function WorldMapBuilder({
       const pos = geo.getAttribute("position") as InstanceType<
         typeof THREE.Float32BufferAttribute
       >;
+
+      // --- POI marker sprites (live in the scene → no overlay drift) ---
+      const spriteMap = new Map<string, InstanceType<typeof THREE.Sprite>>();
+      function heightAtNorm(nx: number, ny: number) {
+        const col = Math.max(0, Math.min(size - 1, Math.round(nx * N)));
+        const row = Math.max(0, Math.min(size - 1, Math.round(ny * N)));
+        return heightArr[row * size + col];
+      }
+      function roundRect(
+        c: CanvasRenderingContext2D,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        r: number,
+      ) {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.arcTo(x + w, y, x + w, y + h, r);
+        c.arcTo(x + w, y + h, x, y + h, r);
+        c.arcTo(x, y + h, x, y, r);
+        c.arcTo(x, y, x + w, y, r);
+        c.closePath();
+      }
+      function makeLabel(p: WorldPoi) {
+        const name = p.name || "Place";
+        const font = "600 28px Georgia, serif";
+        const meas = document.createElement("canvas").getContext("2d")!;
+        meas.font = font;
+        const tw = Math.ceil(meas.measureText(name).width);
+        const pad = 16;
+        const dot = 22;
+        const w = pad * 2 + dot + 10 + tw;
+        const h = 50;
+        const c = document.createElement("canvas");
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext("2d")!;
+        ctx.font = font;
+        ctx.fillStyle = "rgba(244,236,216,0.97)";
+        roundRect(ctx, 2, 2, w - 4, h - 4, (h - 4) / 2);
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = p.hidden ? "rgba(122,45,45,0.9)" : "rgba(60,50,40,0.55)";
+        ctx.stroke();
+        ctx.fillStyle = p.color || "#7a2d2d";
+        ctx.beginPath();
+        ctx.arc(pad + dot / 2, h / 2, dot / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#2b2218";
+        ctx.textBaseline = "middle";
+        ctx.fillText(name, pad + dot + 10, h / 2 + 2);
+        const tex = new THREE.CanvasTexture(c);
+        tex.anisotropy = 4;
+        tex.needsUpdate = true;
+        return { tex, aspect: w / h };
+      }
+      function placeSprite(sp: InstanceType<typeof THREE.Sprite>, p: WorldPoi) {
+        sp.position.set(
+          (p.x - 0.5) * W,
+          heightAtNorm(p.x, p.y) * HEIGHT + 0.9,
+          (p.y - 0.5) * W,
+        );
+      }
+      function syncPois(list: WorldPoi[]) {
+        const ids = new Set(list.map((p) => p.id));
+        for (const [id, sp] of spriteMap) {
+          if (!ids.has(id)) {
+            scene.remove(sp);
+            (sp.material.map as InstanceType<typeof THREE.CanvasTexture>)?.dispose();
+            sp.material.dispose();
+            spriteMap.delete(id);
+          }
+        }
+        for (const p of list) {
+          const sig = `${p.name}|${p.kind}|${p.color ?? ""}|${p.hidden ? 1 : 0}`;
+          let sp = spriteMap.get(p.id);
+          if (!sp) {
+            const mat = new THREE.SpriteMaterial({ depthTest: false, transparent: true });
+            sp = new THREE.Sprite(mat);
+            sp.renderOrder = 10;
+            sp.userData.id = p.id;
+            scene.add(sp);
+            spriteMap.set(p.id, sp);
+          }
+          if (sp.userData.sig !== sig) {
+            const { tex, aspect } = makeLabel(p);
+            (sp.material.map as InstanceType<typeof THREE.CanvasTexture> | null)?.dispose();
+            sp.material.map = tex;
+            sp.material.needsUpdate = true;
+            sp.scale.set(1.5 * aspect, 1.5, 1);
+            sp.userData.sig = sig;
+          }
+          placeSprite(sp, p);
+        }
+      }
 
       function refreshPositions() {
         for (let i = 0; i < heightArr.length; i++) {
@@ -333,6 +430,7 @@ export function WorldMapBuilder({
       refreshPositions();
       refreshColors();
       setWater();
+      syncPois(canEdit ? poisRef.current : poisRef.current.filter((p) => !p.hidden));
 
       // Day/night.
       function applyTime(t: number) {
@@ -364,7 +462,6 @@ export function WorldMapBuilder({
       // --- brushing ---
       const ray = new THREE.Raycaster();
       const ndc = new THREE.Vector2();
-      const projVec = new THREE.Vector3();
       let painting = false;
       let edited = false;
 
@@ -441,7 +538,21 @@ export function WorldMapBuilder({
       }
 
       const dom = renderer.domElement;
+      let downX = 0;
+      let downY = 0;
+      function pickSprite(e: PointerEvent): string | null {
+        const rect = dom.getBoundingClientRect();
+        ndc.set(
+          ((e.clientX - rect.left) / rect.width) * 2 - 1,
+          -((e.clientY - rect.top) / rect.height) * 2 + 1,
+        );
+        ray.setFromCamera(ndc, camera);
+        const hit = ray.intersectObjects([...spriteMap.values()], false)[0];
+        return hit ? (hit.object.userData.id as string) : null;
+      }
       function onDown(e: PointerEvent) {
+        downX = e.clientX;
+        downY = e.clientY;
         if (onPlaceRef.current) {
           const c = cellFromEvent(e);
           if (c) onPlaceRef.current(c.nx, c.ny);
@@ -459,11 +570,20 @@ export function WorldMapBuilder({
         const c = cellFromEvent(e);
         if (c !== null) applyBrush(c.i);
       }
-      function onUp() {
+      function onUp(e: PointerEvent) {
         if (painting && edited) {
           geo.computeVertexNormals(); // accurate lighting after the stroke
           refreshColors();
           scheduleSave();
+        } else if (
+          !painting &&
+          !onPlaceRef.current &&
+          Math.abs(e.clientX - downX) < 5 &&
+          Math.abs(e.clientY - downY) < 5
+        ) {
+          // A click (not a drag): select a marker under the cursor.
+          const id = pickSprite(e);
+          if (id) onSelectRef.current?.(id);
         }
         painting = false;
         edited = false;
@@ -499,11 +619,11 @@ export function WorldMapBuilder({
           if (v === "top") {
             controls.minPolarAngle = 0;
             controls.maxPolarAngle = 0.0001;
-            camera.position.set(0, 40, 0.01);
+            camera.position.set(0, 64, 0.01);
           } else {
             controls.minPolarAngle = 0;
             controls.maxPolarAngle = 1.35;
-            if (camera.position.y > 35) camera.position.set(0, 22, 26);
+            if (camera.position.y > 56) camera.position.set(0, 30, 44);
           }
           controls.update();
         },
@@ -537,17 +657,7 @@ export function WorldMapBuilder({
             weather: weatherRef.current,
           };
         },
-        project(nx, ny) {
-          const col = Math.max(0, Math.min(size - 1, Math.round(nx * N)));
-          const row = Math.max(0, Math.min(size - 1, Math.round(ny * N)));
-          const wy = heightArr[row * size + col] * HEIGHT + 0.06;
-          projVec.set((nx - 0.5) * W, wy, (ny - 0.5) * W).project(camera);
-          return {
-            x: (projVec.x * 0.5 + 0.5) * dom.clientWidth,
-            y: (-projVec.y * 0.5 + 0.5) * dom.clientHeight,
-            vis: projVec.z < 1,
-          };
-        },
+        syncPois,
         azimuth() {
           return controls.getAzimuthalAngle();
         },
@@ -558,6 +668,11 @@ export function WorldMapBuilder({
           dom.removeEventListener("pointermove", onMove);
           dom.removeEventListener("pointerup", onUp);
           dom.removeEventListener("pointercancel", onUp);
+          for (const sp of spriteMap.values()) {
+            (sp.material.map as InstanceType<typeof THREE.CanvasTexture>)?.dispose();
+            sp.material.dispose();
+          }
+          spriteMap.clear();
           controls.dispose();
           renderer.dispose();
           if (dom.parentNode) dom.parentNode.removeChild(dom);
@@ -580,23 +695,11 @@ export function WorldMapBuilder({
   useEffect(() => engineRef.current?.setView(view), [view]);
   useEffect(() => engineRef.current?.setTime(time), [time]);
 
-  // Project POI markers + rotate the compass every frame.
+  // Rotate the compass every frame.
   useEffect(() => {
     frameCbRef.current = () => {
       const eng = engineRef.current;
-      if (!eng) return;
-      for (const p of poisRef.current) {
-        const el = markerEls.current.get(p.id);
-        if (!el) continue;
-        const pr = eng.project(p.x, p.y);
-        if (!pr.vis) {
-          el.style.display = "none";
-          continue;
-        }
-        el.style.display = "";
-        el.style.transform = `translate(${pr.x}px, ${pr.y}px) translate(-50%, -50%)`;
-      }
-      if (compassRef.current) {
+      if (eng && compassRef.current) {
         compassRef.current.style.transform = `rotate(${-eng.azimuth()}rad)`;
       }
     };
@@ -605,6 +708,11 @@ export function WorldMapBuilder({
     };
   }, []);
 
+  // Rebuild in-scene marker sprites when POIs (or visibility) change.
+  useEffect(() => {
+    engineRef.current?.syncPois(canEdit ? pois : pois.filter((p) => !p.hidden));
+  }, [pois, canEdit]);
+
   const segBtn = "rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors";
 
   const placeCursor = placing ? "cursor-crosshair" : "";
@@ -612,38 +720,11 @@ export function WorldMapBuilder({
   return (
     <div
       className={cn(
-        "relative h-[34rem] w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather",
+        "relative h-[80vh] min-h-[40rem] w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather",
         placeCursor,
       )}
     >
       <div ref={containerRef} className="absolute inset-0" />
-
-      {/* POI markers (projected each frame) */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        {(canEdit ? pois : pois.filter((p) => !p.hidden)).map((p) => (
-          <button
-            key={p.id}
-            ref={(el) => {
-              markerEls.current.set(p.id, el);
-            }}
-            type="button"
-            onClick={() => setSelectedPoi(p.id)}
-            style={{ position: "absolute", left: 0, top: 0, willChange: "transform" }}
-            className={cn(
-              "pointer-events-auto flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-xs font-semibold shadow-card transition-transform hover:scale-110",
-              selectedPoi === p.id
-                ? "border-brass bg-parchment-50 text-ink ring-1 ring-brass"
-                : "border-parchment-400/70 bg-parchment-100/95 text-ink-soft",
-              p.hidden && "opacity-60 ring-1 ring-dashed ring-oxblood",
-            )}
-          >
-            <span aria-hidden style={p.color ? { color: p.color } : undefined}>
-              {POI_GLYPH.get(p.kind) ?? "✦"}
-            </span>
-            <span>{p.name}</span>
-          </button>
-        ))}
-      </div>
 
       {/* Compass */}
       <div className="pointer-events-none absolute bottom-3 right-3 grid h-12 w-12 place-items-center rounded-full border border-parchment-400/60 bg-parchment-100/80 shadow-card">
@@ -862,7 +943,7 @@ export function WorldMapBuilder({
 
       {/* POI editor / info */}
       {selPoi && (
-        <div className="absolute right-3 top-16 max-h-[26rem] w-60 overflow-y-auto rounded-card border border-parchment-400/60 bg-parchment-100/97 p-3 shadow-card">
+        <div className="absolute right-3 top-16 max-h-[70%] w-72 overflow-y-auto rounded-card border-2 border-brass/50 bg-parchment-100 p-3 shadow-raised">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-display text-xs font-semibold uppercase tracking-[0.12em] text-brass-dark">
               {POI_GLYPH.get(selPoi.kind) ?? "✦"} Point of interest

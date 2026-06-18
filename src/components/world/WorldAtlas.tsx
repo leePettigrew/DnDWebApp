@@ -157,13 +157,15 @@ export function WorldAtlas() {
       </div>
 
       {isWorld && map?.world ? (
-        <WorldMapBuilder
-          key={map.id}
-          map={map}
-          world={map.world}
-          onUpdate={(patch) => void update(map.id, patch)}
-          canEdit={isDM}
-        />
+        <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen max-w-[100vw] px-3 sm:px-5 lg:px-8">
+          <WorldMapBuilder
+            key={map.id}
+            map={map}
+            world={map.world}
+            onUpdate={(patch) => void update(map.id, patch)}
+            canEdit={isDM}
+          />
+        </div>
       ) : (
       <div className="grid gap-3 lg:grid-cols-[1fr_18rem]">
         <div
