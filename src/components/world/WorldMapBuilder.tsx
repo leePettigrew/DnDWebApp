@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import { Button } from "@/components/ui/Button";
+import { CloseIcon, TrashIcon } from "@/components/ui/icons";
 import { newId } from "@/lib/domain/ids";
-import type { BattleMap, WorldMap, WorldWeather } from "@/lib/domain/types";
+import type { BattleMap, WorldMap, WorldPoi, WorldWeather } from "@/lib/domain/types";
 import { BIOME_RGB, PAINT_BIOMES } from "@/lib/world/biomes";
 import { decodeBytes, encodeBytes } from "@/lib/world/codec";
 import { generateWorld } from "@/lib/world/generate";
@@ -20,6 +21,23 @@ const SIZES: { label: string; size: number }[] = [
   { label: "Huge", size: 256 },
 ];
 
+/** Point-of-interest kinds (glyph + label). */
+export const POI_KINDS: { id: string; glyph: string; label: string }[] = [
+  { id: "city", glyph: "🏰", label: "City" },
+  { id: "town", glyph: "🏘️", label: "Town" },
+  { id: "village", glyph: "🏠", label: "Village" },
+  { id: "port", glyph: "⚓", label: "Port" },
+  { id: "castle", glyph: "🛡️", label: "Castle" },
+  { id: "temple", glyph: "⛪", label: "Temple" },
+  { id: "ruin", glyph: "🏛️", label: "Ruin" },
+  { id: "dungeon", glyph: "💀", label: "Dungeon" },
+  { id: "cave", glyph: "🕳️", label: "Cave" },
+  { id: "camp", glyph: "⛺", label: "Camp" },
+  { id: "peak", glyph: "⛰️", label: "Peak" },
+  { id: "landmark", glyph: "✦", label: "Landmark" },
+];
+export const POI_GLYPH = new Map(POI_KINDS.map((k) => [k.id, k.glyph]));
+
 type Tool = "look" | "raise" | "lower" | "smooth" | "paint";
 
 interface Engine {
@@ -29,6 +47,10 @@ interface Engine {
   setWeather(w: WorldWeather): void;
   load(world: WorldMap): void;
   exportWorld(): WorldMap;
+  /** Project a normalized grid point to container-relative screen px. */
+  project(nx: number, ny: number): { x: number; y: number; vis: boolean };
+  /** Camera azimuth (radians) for the compass. */
+  azimuth(): number;
   dispose(): void;
 }
 
@@ -70,6 +92,48 @@ export function WorldMapBuilder({
   timeRef.current = time;
   const weatherRef = useRef(weather);
   weatherRef.current = weather;
+
+  // --- POIs ---
+  const pois = world.pois ?? [];
+  const [placing, setPlacing] = useState(false);
+  const [selectedPoi, setSelectedPoi] = useState<string | null>(null);
+  const selPoi = pois.find((p) => p.id === selectedPoi) ?? null;
+  const poisRef = useRef(pois);
+  poisRef.current = pois;
+  const worldRef = useRef(world);
+  worldRef.current = world;
+  const markerEls = useRef(new Map<string, HTMLButtonElement | null>());
+  const compassRef = useRef<HTMLDivElement | null>(null);
+  const frameCbRef = useRef<(() => void) | null>(null);
+  const onPlaceRef = useRef<((nx: number, ny: number) => void) | null>(null);
+
+  /** Persist world fields, preserving in-memory terrain edits. */
+  const saveWorld = (patch: Partial<WorldMap>) => {
+    const base = engineRef.current ? engineRef.current.exportWorld() : world;
+    onUpdate({ world: { ...base, ...patch } });
+  };
+  const savePois = (next: WorldPoi[]) => saveWorld({ pois: next });
+  const updatePoi = (id: string, patch: Partial<WorldPoi>) =>
+    savePois(poisRef.current.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const removePoi = (id: string) => {
+    savePois(poisRef.current.filter((p) => p.id !== id));
+    setSelectedPoi((s) => (s === id ? null : s));
+  };
+  onPlaceRef.current =
+    canEdit && placing
+      ? (nx, ny) => {
+          const poi: WorldPoi = {
+            id: newId(),
+            name: "New place",
+            kind: "town",
+            x: nx,
+            y: ny,
+          };
+          savePois([...poisRef.current, poi]);
+          setSelectedPoi(poi.id);
+          setPlacing(false);
+        }
+      : null;
 
   const scheduleSave = () => {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -300,10 +364,13 @@ export function WorldMapBuilder({
       // --- brushing ---
       const ray = new THREE.Raycaster();
       const ndc = new THREE.Vector2();
+      const projVec = new THREE.Vector3();
       let painting = false;
       let edited = false;
 
-      function cellFromEvent(e: PointerEvent): number | null {
+      function cellFromEvent(
+        e: PointerEvent,
+      ): { i: number; nx: number; ny: number } | null {
         const rect = renderer.domElement.getBoundingClientRect();
         ndc.set(
           ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -312,9 +379,11 @@ export function WorldMapBuilder({
         ray.setFromCamera(ndc, camera);
         const hit = ray.intersectObject(terrain, false)[0];
         if (!hit || !hit.uv) return null;
-        const col = Math.round(hit.uv.x * N);
-        const row = Math.round((1 - hit.uv.y) * N);
-        return Math.max(0, Math.min(size * size - 1, row * size + col));
+        const nx = hit.uv.x;
+        const ny = 1 - hit.uv.y;
+        const col = Math.round(nx * N);
+        const row = Math.round(ny * N);
+        return { i: Math.max(0, Math.min(size * size - 1, row * size + col)), nx, ny };
       }
       function applyBrush(center: number) {
         const t = toolRef.current;
@@ -373,17 +442,22 @@ export function WorldMapBuilder({
 
       const dom = renderer.domElement;
       function onDown(e: PointerEvent) {
+        if (onPlaceRef.current) {
+          const c = cellFromEvent(e);
+          if (c) onPlaceRef.current(c.nx, c.ny);
+          return;
+        }
         if (toolRef.current === "look") return;
         const c = cellFromEvent(e);
         if (c === null) return;
         painting = true;
         dom.setPointerCapture(e.pointerId);
-        applyBrush(c);
+        applyBrush(c.i);
       }
       function onMove(e: PointerEvent) {
         if (!painting) return;
         const c = cellFromEvent(e);
-        if (c !== null) applyBrush(c);
+        if (c !== null) applyBrush(c.i);
       }
       function onUp() {
         if (painting && edited) {
@@ -401,9 +475,10 @@ export function WorldMapBuilder({
 
       let raf = 0;
       const tick = () => {
-        controls.enabled = toolRef.current === "look";
+        controls.enabled = toolRef.current === "look" && !onPlaceRef.current;
         controls.update();
         renderer.render(scene, camera);
+        frameCbRef.current?.();
         raf = requestAnimationFrame(tick);
       };
       raf = requestAnimationFrame(tick);
@@ -453,7 +528,7 @@ export function WorldMapBuilder({
           const h = new Uint8Array(size * size);
           for (let i = 0; i < h.length; i++) h[i] = Math.round(heightArr[i] * 255);
           return {
-            ...world,
+            ...worldRef.current,
             size,
             height: encodeBytes(h),
             biome: encodeBytes(biomeArr),
@@ -461,6 +536,20 @@ export function WorldMapBuilder({
             timeOfDay: timeRef.current,
             weather: weatherRef.current,
           };
+        },
+        project(nx, ny) {
+          const col = Math.max(0, Math.min(size - 1, Math.round(nx * N)));
+          const row = Math.max(0, Math.min(size - 1, Math.round(ny * N)));
+          const wy = heightArr[row * size + col] * HEIGHT + 0.06;
+          projVec.set((nx - 0.5) * W, wy, (ny - 0.5) * W).project(camera);
+          return {
+            x: (projVec.x * 0.5 + 0.5) * dom.clientWidth,
+            y: (-projVec.y * 0.5 + 0.5) * dom.clientHeight,
+            vis: projVec.z < 1,
+          };
+        },
+        azimuth() {
+          return controls.getAzimuthalAngle();
         },
         dispose() {
           cancelAnimationFrame(raf);
@@ -491,11 +580,82 @@ export function WorldMapBuilder({
   useEffect(() => engineRef.current?.setView(view), [view]);
   useEffect(() => engineRef.current?.setTime(time), [time]);
 
+  // Project POI markers + rotate the compass every frame.
+  useEffect(() => {
+    frameCbRef.current = () => {
+      const eng = engineRef.current;
+      if (!eng) return;
+      for (const p of poisRef.current) {
+        const el = markerEls.current.get(p.id);
+        if (!el) continue;
+        const pr = eng.project(p.x, p.y);
+        if (!pr.vis) {
+          el.style.display = "none";
+          continue;
+        }
+        el.style.display = "";
+        el.style.transform = `translate(${pr.x}px, ${pr.y}px) translate(-50%, -50%)`;
+      }
+      if (compassRef.current) {
+        compassRef.current.style.transform = `rotate(${-eng.azimuth()}rad)`;
+      }
+    };
+    return () => {
+      frameCbRef.current = null;
+    };
+  }, []);
+
   const segBtn = "rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors";
 
+  const placeCursor = placing ? "cursor-crosshair" : "";
+
   return (
-    <div className="relative h-[34rem] w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather">
+    <div
+      className={cn(
+        "relative h-[34rem] w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather",
+        placeCursor,
+      )}
+    >
       <div ref={containerRef} className="absolute inset-0" />
+
+      {/* POI markers (projected each frame) */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        {(canEdit ? pois : pois.filter((p) => !p.hidden)).map((p) => (
+          <button
+            key={p.id}
+            ref={(el) => {
+              markerEls.current.set(p.id, el);
+            }}
+            type="button"
+            onClick={() => setSelectedPoi(p.id)}
+            style={{ position: "absolute", left: 0, top: 0, willChange: "transform" }}
+            className={cn(
+              "pointer-events-auto flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-xs font-semibold shadow-card transition-transform hover:scale-110",
+              selectedPoi === p.id
+                ? "border-brass bg-parchment-50 text-ink ring-1 ring-brass"
+                : "border-parchment-400/70 bg-parchment-100/95 text-ink-soft",
+              p.hidden && "opacity-60 ring-1 ring-dashed ring-oxblood",
+            )}
+          >
+            <span aria-hidden style={p.color ? { color: p.color } : undefined}>
+              {POI_GLYPH.get(p.kind) ?? "✦"}
+            </span>
+            <span>{p.name}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Compass */}
+      <div className="pointer-events-none absolute bottom-3 right-3 grid h-12 w-12 place-items-center rounded-full border border-parchment-400/60 bg-parchment-100/80 shadow-card">
+        <div ref={compassRef} className="relative h-full w-full">
+          <span className="absolute left-1/2 top-0.5 -translate-x-1/2 text-[0.6rem] font-bold text-oxblood">
+            N
+          </span>
+          <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 text-[0.55rem] text-ink-faint">
+            S
+          </span>
+        </div>
+      </div>
 
       {/* View toggle (everyone) */}
       <div className="absolute right-3 top-3 inline-flex gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 shadow-card">
@@ -543,6 +703,20 @@ export function WorldMapBuilder({
                 </button>
               ))}
             </div>
+            <button
+              onClick={() => {
+                setPlacing((p) => !p);
+                if (!placing) setTool("look");
+              }}
+              className={cn(
+                "w-full rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors",
+                placing
+                  ? "bg-oxblood text-parchment-50"
+                  : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+              )}
+            >
+              {placing ? "Click the map to place…" : "＋ Place point of interest"}
+            </button>
             {tool !== "look" && tool !== "paint" && (
               <label className="block text-[0.65rem] text-ink-soft">
                 Brush size {brushSize}
@@ -649,6 +823,19 @@ export function WorldMapBuilder({
                 ))}
               </select>
             </label>
+            <label className="flex items-center gap-1.5">
+              Scale
+              <input
+                type="number"
+                min={1}
+                defaultValue={world.milesAcross ?? 600}
+                key={`miles-${world.milesAcross ?? 600}`}
+                onBlur={(e) => saveWorld({ milesAcross: Number(e.target.value) || 600 })}
+                aria-label="Miles across"
+                className="h-8 w-16 rounded-md border border-parchment-400 bg-parchment-50 px-2 text-xs text-ink focus:border-brass focus:outline-none"
+              />
+              mi
+            </label>
             <Button
               size="sm"
               variant="secondary"
@@ -671,6 +858,91 @@ export function WorldMapBuilder({
             </Button>
           </div>
         </>
+      )}
+
+      {/* POI editor / info */}
+      {selPoi && (
+        <div className="absolute right-3 top-16 max-h-[26rem] w-60 overflow-y-auto rounded-card border border-parchment-400/60 bg-parchment-100/97 p-3 shadow-card">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="font-display text-xs font-semibold uppercase tracking-[0.12em] text-brass-dark">
+              {POI_GLYPH.get(selPoi.kind) ?? "✦"} Point of interest
+            </span>
+            <button
+              onClick={() => setSelectedPoi(null)}
+              aria-label="Close"
+              className="rounded p-1 text-ink-faint hover:text-ink"
+            >
+              <CloseIcon className="h-4 w-4" />
+            </button>
+          </div>
+          {canEdit ? (
+            <div className="space-y-2">
+              <input
+                key={`pn-${selPoi.id}`}
+                defaultValue={selPoi.name}
+                onBlur={(e) => updatePoi(selPoi.id, { name: e.target.value })}
+                aria-label="Name"
+                className="w-full rounded-md border border-parchment-400 bg-parchment-50 px-2 py-1 text-sm font-semibold text-ink focus:border-brass focus:outline-none"
+              />
+              <div className="flex gap-2">
+                <select
+                  value={selPoi.kind}
+                  onChange={(e) => updatePoi(selPoi.id, { kind: e.target.value })}
+                  aria-label="Kind"
+                  className="h-8 flex-1 rounded-md border border-parchment-400 bg-parchment-50 px-2 text-xs text-ink focus:border-brass focus:outline-none"
+                >
+                  {POI_KINDS.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.glyph} {k.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="color"
+                  value={selPoi.color ?? "#7a2d2d"}
+                  onChange={(e) => updatePoi(selPoi.id, { color: e.target.value })}
+                  aria-label="Marker color"
+                  className="h-8 w-9 cursor-pointer rounded border border-parchment-400 bg-parchment-50"
+                />
+              </div>
+              <textarea
+                key={`pd-${selPoi.id}`}
+                defaultValue={selPoi.description ?? ""}
+                onBlur={(e) => updatePoi(selPoi.id, { description: e.target.value })}
+                rows={4}
+                placeholder="Describe this place…"
+                className="w-full resize-y rounded-md border border-parchment-400 bg-parchment-50 px-2 py-1 text-sm text-ink focus:border-brass focus:outline-none"
+              />
+              <label className="flex items-center gap-2 text-xs text-ink-soft">
+                <input
+                  type="checkbox"
+                  checked={!!selPoi.hidden}
+                  onChange={(e) => updatePoi(selPoi.id, { hidden: e.target.checked })}
+                  className="accent-oxblood"
+                />
+                Hidden from players
+              </label>
+              <button
+                onClick={() => removePoi(selPoi.id)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-oxblood/40 px-3 py-1.5 text-xs font-semibold text-oxblood hover:bg-oxblood hover:text-parchment-50"
+              >
+                <TrashIcon className="h-4 w-4" /> Remove
+              </button>
+            </div>
+          ) : (
+            <>
+              <h3 className="font-display text-lg font-bold text-ink">{selPoi.name}</h3>
+              <p className="text-[0.7rem] uppercase tracking-wide text-ink-faint">
+                {POI_KINDS.find((k) => k.id === selPoi.kind)?.label ?? selPoi.kind}
+              </p>
+              {selPoi.description && (
+                <p className="mt-1 whitespace-pre-line text-sm text-ink-soft">
+                  {selPoi.description}
+                </p>
+              )}
+            </>
+          )}
+        </div>
       )}
     </div>
   );
