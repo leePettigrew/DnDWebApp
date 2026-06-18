@@ -60,7 +60,8 @@ type Tool =
   | "paint"
   | "reveal"
   | "shroud"
-  | "region";
+  | "region"
+  | "trees";
 
 interface Engine {
   setView(v: "3d" | "top"): void;
@@ -245,6 +246,11 @@ export function WorldMapBuilder({
     setTool("region");
   };
 
+  // --- trees ---
+  const [treeMode, setTreeMode] = useState<"plant" | "clear">("plant");
+  const treeModeRef = useRef(treeMode);
+  treeModeRef.current = treeMode;
+
   /** Persist world fields, preserving in-memory terrain edits. */
   const saveWorld = (patch: Partial<WorldMap>) => {
     const base = engineRef.current ? engineRef.current.exportWorld() : world;
@@ -299,6 +305,7 @@ export function WorldMapBuilder({
       let biomeArr: Uint8Array = new Uint8Array(size * size);
       let exploredArr: Uint8Array = new Uint8Array(size * size);
       let regionArr: Uint8Array = new Uint8Array(size * size);
+      let treeArr: Uint8Array = new Uint8Array(size * size);
       let seaLevel = world.seaLevel;
       let fogOn = !!world.fog;
 
@@ -319,6 +326,15 @@ export function WorldMapBuilder({
         regionArr = fitGrid(
           wm.regionMask ? decodeBytes(wm.regionMask, size * size) : new Uint8Array(0),
         );
+        if (wm.treeMask) {
+          treeArr = fitGrid(decodeBytes(wm.treeMask, size * size));
+        } else {
+          // Auto-fill: forests dense, swamps light.
+          treeArr = new Uint8Array(size * size);
+          for (let i = 0; i < treeArr.length; i++) {
+            treeArr[i] = biomeArr[i] === 3 ? 210 : biomeArr[i] === 8 ? 110 : 0;
+          }
+        }
         seaLevel = wm.seaLevel;
       }
       loadArrays(world);
@@ -808,6 +824,75 @@ export function WorldMapBuilder({
         rebuildPreview();
       }
 
+      // --- instanced trees ---
+      const TREE_TRUNK = new THREE.MeshStandardMaterial({ color: 0x5a3d28, roughness: 0.9 });
+      const TREE_LEAF = new THREE.MeshStandardMaterial({
+        color: 0x335f33,
+        roughness: 0.85,
+        flatShading: true,
+      });
+      let treeTrunks: InstanceType<typeof THREE.InstancedMesh> | null = null;
+      let treeLeaves: InstanceType<typeof THREE.InstancedMesh> | null = null;
+      function thash(i: number, k: number) {
+        let h = Math.imul((i * 2654435761) ^ (k * 40503), 2246822519);
+        h ^= h >>> 13;
+        return ((h >>> 0) / 4294967295);
+      }
+      function buildTrees() {
+        if (treeTrunks) {
+          scene.remove(treeTrunks);
+          treeTrunks.geometry.dispose();
+          treeTrunks = null;
+        }
+        if (treeLeaves) {
+          scene.remove(treeLeaves);
+          treeLeaves.geometry.dispose();
+          treeLeaves = null;
+        }
+        const MAX = 6000;
+        const cells: { i: number; k: number }[] = [];
+        for (let i = 0; i < treeArr.length; i++) {
+          const d = treeArr[i];
+          if (d < 40 || heightArr[i] < seaLevel) continue;
+          const cnt = d > 180 ? 2 : 1;
+          for (let k = 0; k < cnt; k++) cells.push({ i, k });
+        }
+        const n = Math.min(MAX, cells.length);
+        if (n === 0) return;
+        const step = cells.length > MAX ? cells.length / MAX : 1;
+        const trunkGeo = new THREE.CylinderGeometry(0.05, 0.08, 0.55, 5);
+        trunkGeo.translate(0, 0.27, 0);
+        const leafGeo = new THREE.ConeGeometry(0.46, 1.2, 6);
+        leafGeo.translate(0, 1.1, 0);
+        treeTrunks = new THREE.InstancedMesh(trunkGeo, TREE_TRUNK, n);
+        treeLeaves = new THREE.InstancedMesh(leafGeo, TREE_LEAF, n);
+        const m = new THREE.Matrix4();
+        const q = new THREE.Quaternion();
+        const yAxis = new THREE.Vector3(0, 1, 0);
+        const pv = new THREE.Vector3();
+        const sv = new THREE.Vector3();
+        for (let j = 0; j < n; j++) {
+          const { i, k } = cells[Math.floor(j * step)];
+          const x = i % size;
+          const y = (i / size) | 0;
+          const jx = (thash(i, k * 3 + 1) - 0.5) * 0.85;
+          const jy = (thash(i, k * 3 + 2) - 0.5) * 0.85;
+          const nx = (x + 0.5 + jx) / size;
+          const ny = (y + 0.5 + jy) / size;
+          const s = 0.7 + thash(i, k * 3 + 3) * 0.7;
+          pv.set((nx - 0.5) * W, heightAtNorm(nx, ny) * HEIGHT, (ny - 0.5) * W);
+          q.setFromAxisAngle(yAxis, thash(i, k) * Math.PI * 2);
+          sv.set(s, s * (0.9 + thash(i, k + 9) * 0.45), s);
+          m.compose(pv, q, sv);
+          treeTrunks.setMatrixAt(j, m);
+          treeLeaves.setMatrixAt(j, m);
+        }
+        treeTrunks.instanceMatrix.needsUpdate = true;
+        treeLeaves.instanceMatrix.needsUpdate = true;
+        scene.add(treeTrunks);
+        scene.add(treeLeaves);
+      }
+
       // --- party banner + measure ruler ---
       function makeTextLabel(text: string, accent: string) {
         const font = "600 28px Georgia, serif";
@@ -1174,6 +1259,7 @@ export function WorldMapBuilder({
           : resolvedPoisRef.current.filter((p) => !p.hidden),
       );
       syncPaths(worldRef.current.paths ?? []);
+      buildTrees();
       if (worldRef.current.party) setParty(worldRef.current.party);
 
       // --- brushing ---
@@ -1238,6 +1324,8 @@ export function WorldMapBuilder({
               exploredArr[i] = 0;
             } else if (t === "region") {
               regionArr[i] = activeRegionRef.current;
+            } else if (t === "trees") {
+              treeArr[i] = treeModeRef.current === "clear" ? 0 : 230;
             }
           }
         }
@@ -1324,8 +1412,12 @@ export function WorldMapBuilder({
       }
       function onUp(e: PointerEvent) {
         if (painting && edited) {
-          geo.computeVertexNormals(); // accurate lighting after the stroke
-          refreshColors();
+          if (toolRef.current === "trees") {
+            buildTrees();
+          } else {
+            geo.computeVertexNormals(); // accurate lighting after the stroke
+            refreshColors();
+          }
           scheduleSave();
         } else if (
           !painting &&
@@ -1442,6 +1534,7 @@ export function WorldMapBuilder({
           refreshPositions();
           refreshColors();
           setWater();
+          buildTrees();
         },
         exportWorld(): WorldMap {
           const h = new Uint8Array(size * size);
@@ -1457,6 +1550,7 @@ export function WorldMapBuilder({
             fog: fogOn,
             explored: encodeBytes(exploredArr),
             regionMask: encodeBytes(regionArr),
+            treeMask: encodeBytes(treeArr),
           };
         },
         syncPois,
@@ -1524,6 +1618,14 @@ export function WorldMapBuilder({
           for (const rec of pathMap.values()) disposePathMesh(rec.mesh);
           pathMap.clear();
           if (previewMesh) disposePathMesh(previewMesh);
+          if (treeTrunks) {
+            scene.remove(treeTrunks);
+            treeTrunks.geometry.dispose();
+          }
+          if (treeLeaves) {
+            scene.remove(treeLeaves);
+            treeLeaves.geometry.dispose();
+          }
           if (partySprite) disposeSprite(partySprite);
           clearMeasureObjs();
           if (weatherPoints) {
@@ -1886,6 +1988,44 @@ export function WorldMapBuilder({
                   </button>
                 </div>
               ))}
+            </div>
+
+            {/* Trees */}
+            <div className="space-y-1 border-t border-parchment-400/50 pt-2">
+              <span className="text-xs font-semibold text-ink-soft">Trees</span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => {
+                    setTreeMode("plant");
+                    setTool("trees");
+                  }}
+                  className={cn(
+                    "flex-1 rounded px-2 py-1 text-[0.65rem] font-semibold",
+                    tool === "trees" && treeMode === "plant"
+                      ? "bg-forest text-parchment-50"
+                      : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                  )}
+                >
+                  ♣ Plant
+                </button>
+                <button
+                  onClick={() => {
+                    setTreeMode("clear");
+                    setTool("trees");
+                  }}
+                  className={cn(
+                    "flex-1 rounded px-2 py-1 text-[0.65rem] font-semibold",
+                    tool === "trees" && treeMode === "clear"
+                      ? "bg-oxblood text-parchment-50"
+                      : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                  )}
+                >
+                  Clear
+                </button>
+              </div>
+              <p className="text-[0.6rem] text-ink-faint">
+                Forests fill automatically; brush to add or clear.
+              </p>
             </div>
 
             {/* Travel: ruler + party token */}

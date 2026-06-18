@@ -741,6 +741,8 @@ export interface WorldMap {
   explored?: string;
   /** Territory ownership: base64 of size*size bytes (region index, 0 = none). */
   regionMask?: string;
+  /** Tree density: base64 of size*size bytes (0 = none, higher = denser). */
+  treeMask?: string;
   /** Current party position (normalized 0..1), shown as a banner. */
   party?: { x: number; y: number };
   /** Party travel speed in miles/day (for the measure ruler). */
