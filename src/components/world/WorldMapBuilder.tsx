@@ -480,6 +480,12 @@ export function WorldMapBuilder({
         const row = Math.max(0, Math.min(size - 1, Math.round(ny * N)));
         return dispArr[row * size + col];
       }
+      // Pre-carve (bank) height — used to fill river channels with water.
+      function baseHeightAtNorm(nx: number, ny: number) {
+        const col = Math.max(0, Math.min(size - 1, Math.round(nx * N)));
+        const row = Math.max(0, Math.min(size - 1, Math.round(ny * N)));
+        return heightArr[row * size + col];
+      }
       function roundRect(
         c: CanvasRenderingContext2D,
         x: number,
@@ -790,10 +796,10 @@ export function WorldMapBuilder({
         m.dispose();
       }
       const PATH_WIDTH: Record<WorldPath["kind"], number> = {
-        river: 0.9,
-        road: 0.7,
-        route: 0.5,
-        border: 0.42,
+        river: 0.5,
+        road: 0.38,
+        route: 0.4,
+        border: 0.34,
       };
       // A thin draped tube — used only as a live guide while drawing a path.
       function buildPreviewTube(points: number[], kind: WorldPath["kind"]) {
@@ -822,12 +828,124 @@ export function WorldMapBuilder({
         mesh.renderOrder = 3;
         return mesh;
       }
+
+      // --- river water surface (fills the carved channel) ---
+      function makeWaterTexture() {
+        const s = 128;
+        const c = document.createElement("canvas");
+        c.width = c.height = s;
+        const ctx = c.getContext("2d")!;
+        const g = ctx.createLinearGradient(0, 0, s, 0);
+        g.addColorStop(0, "#2b6390");
+        g.addColorStop(0.5, "#3f8fc0");
+        g.addColorStop(1, "#2b6390");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, s, s);
+        ctx.lineWidth = 1.6;
+        for (let yy = -4; yy < s; yy += 6) {
+          ctx.strokeStyle = `rgba(212,235,250,${0.1 + Math.random() * 0.12})`;
+          ctx.beginPath();
+          for (let x = 0; x <= s; x += 4) {
+            const y = yy + Math.sin(x * 0.13 + yy) * 2.2;
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+        // soft alpha at the across-width edges so banks blend in
+        const f = document.createElement("canvas");
+        f.width = f.height = s;
+        const fc = f.getContext("2d")!;
+        const fg = fc.createLinearGradient(0, 0, s, 0);
+        fg.addColorStop(0, "rgba(0,0,0,0.15)");
+        fg.addColorStop(0.22, "rgba(0,0,0,0.85)");
+        fg.addColorStop(0.78, "rgba(0,0,0,0.85)");
+        fg.addColorStop(1, "rgba(0,0,0,0.15)");
+        fc.fillStyle = fg;
+        fc.fillRect(0, 0, s, s);
+        ctx.globalCompositeOperation = "destination-in";
+        ctx.drawImage(f, 0, 0);
+        ctx.globalCompositeOperation = "source-over";
+        const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.anisotropy = 8;
+        return tex;
+      }
+      const waterTex = makeWaterTexture();
+      const riverWaterMat = new THREE.MeshStandardMaterial({
+        map: waterTex,
+        transparent: true,
+        opacity: 0.82,
+        roughness: 0.12,
+        metalness: 0.25,
+        side: THREE.DoubleSide,
+      });
+      const riverMeshes: InstanceType<typeof THREE.Mesh>[] = [];
+      function buildRivers() {
+        for (const m of riverMeshes) {
+          scene.remove(m);
+          m.geometry.dispose();
+        }
+        riverMeshes.length = 0;
+        for (const p of worldRef.current.paths ?? []) {
+          if (p.kind !== "river") continue;
+          const ctrl: InstanceType<typeof THREE.Vector3>[] = [];
+          for (let i = 0; i + 1 < p.points.length; i += 2) {
+            ctrl.push(new THREE.Vector3((p.points[i] - 0.5) * W, 0, (p.points[i + 1] - 0.5) * W));
+          }
+          if (ctrl.length < 2) continue;
+          const curve = new THREE.CatmullRomCurve3(ctrl, false, "catmullrom", 0.5);
+          const segs = Math.max(20, ctrl.length * 16);
+          const sample = curve.getSpacedPoints(segs);
+          const half = (PATH_WIDTH.river / 2) * 0.92;
+          const pos: number[] = [];
+          const uv: number[] = [];
+          const idx: number[] = [];
+          let len = 0;
+          for (let i = 0; i <= segs; i++) {
+            const pt = sample[i];
+            const prev = sample[Math.max(0, i - 1)];
+            const next = sample[Math.min(segs, i + 1)];
+            const tx = next.x - prev.x;
+            const tz = next.z - prev.z;
+            const tl = Math.hypot(tx, tz) || 1;
+            const px = -tz / tl;
+            const pz = tx / tl;
+            if (i > 0) len += pt.distanceTo(sample[i - 1]);
+            const v = len / 2.4;
+            const lx = pt.x + px * half;
+            const lz = pt.z + pz * half;
+            const rx = pt.x - px * half;
+            const rz = pt.z - pz * half;
+            // water surface sits near bank level (fills the carved channel)
+            const ly = baseHeightAtNorm(lx / W + 0.5, lz / W + 0.5) * HEIGHT - 0.04;
+            const ry = baseHeightAtNorm(rx / W + 0.5, rz / W + 0.5) * HEIGHT - 0.04;
+            pos.push(lx, ly, lz, rx, ry, rz);
+            uv.push(0, v, 1, v);
+            if (i < segs) {
+              const b = i * 2;
+              idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+            }
+          }
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
+          geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uv), 2));
+          geo.setIndex(idx);
+          geo.computeVertexNormals();
+          const mesh = new THREE.Mesh(geo, riverWaterMat);
+          mesh.renderOrder = 1;
+          scene.add(mesh);
+          riverMeshes.push(mesh);
+        }
+      }
       // Paths are painted into the terrain by computeMods; this just reflows the
       // surface + objects when the path list changes.
       function syncPaths() {
         computeMods();
         refreshPositions();
         refreshColors();
+        buildRivers();
         buildTrees();
         buildLanterns();
         repositionPois();
@@ -1062,7 +1180,7 @@ export function WorldMapBuilder({
           const paint = PATH_PAINT[p.kind] ?? PATH_PAINT.route;
           const rgb = p.color ? hex01(p.color) : paint.rgb;
           const rad = Math.max(1, Math.round((PATH_WIDTH[p.kind] ?? 0.5) / 2 / cell));
-          const depth = 0.075;
+          const depth = 0.05;
           const pts = p.points;
           let dashCounter = 0;
           for (let s = 0; s + 3 < pts.length; s += 2) {
@@ -1413,31 +1531,82 @@ export function WorldMapBuilder({
         scene.add(lanternGlows);
       }
 
-      // --- region name labels (spread across owned territory) ---
+      // --- region name labels: text laid flat across the land (HOI style) ---
+      function makeRegionText(name: string) {
+        const text = (name || "Region").toUpperCase();
+        const fs = 64;
+        const ls = fs * 0.32; // letter spacing
+        const meas = document.createElement("canvas").getContext("2d")!;
+        meas.font = `600 ${fs}px Georgia, serif`;
+        const widths = [...text].map((ch) => meas.measureText(ch).width);
+        let total = 0;
+        for (const w of widths) total += w + ls;
+        total -= ls;
+        const padX = fs;
+        const padY = fs * 0.6;
+        const cw = Math.ceil(total + padX * 2);
+        const chh = Math.ceil(fs + padY * 2);
+        const c = document.createElement("canvas");
+        c.width = cw;
+        c.height = chh;
+        const ctx = c.getContext("2d")!;
+        ctx.font = `600 ${fs}px Georgia, serif`;
+        ctx.textBaseline = "middle";
+        ctx.lineJoin = "round";
+        let x = padX;
+        const y = chh / 2;
+        for (let i = 0; i < text.length; i++) {
+          ctx.lineWidth = fs * 0.16;
+          ctx.strokeStyle = "rgba(245,238,222,0.9)";
+          ctx.strokeText(text[i], x, y);
+          ctx.fillStyle = "rgba(38,30,22,0.92)";
+          ctx.fillText(text[i], x, y);
+          x += widths[i] + ls;
+        }
+        const tex = new THREE.CanvasTexture(c);
+        tex.anisotropy = 8;
+        tex.needsUpdate = true;
+        return { tex, aspect: cw / chh };
+      }
       const regionLabelMap = new Map<
         number,
-        { sprite: InstanceType<typeof THREE.Sprite>; aspect: number }
+        { mesh: InstanceType<typeof THREE.Mesh>; aspect: number }
       >();
-      function disposeRegionLabel(rec: { sprite: InstanceType<typeof THREE.Sprite> }) {
-        scene.remove(rec.sprite);
-        (rec.sprite.material.map as InstanceType<typeof THREE.CanvasTexture>)?.dispose();
-        rec.sprite.material.dispose();
+      function disposeRegionLabel(rec: { mesh: InstanceType<typeof THREE.Mesh> }) {
+        scene.remove(rec.mesh);
+        rec.mesh.geometry.dispose();
+        const m = rec.mesh.material as InstanceType<typeof THREE.MeshBasicMaterial>;
+        m.map?.dispose();
+        m.dispose();
       }
+      const qFlat = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(1, 0, 0),
+        -Math.PI / 2,
+      );
       function syncRegionLabels() {
         if (!(worldRef.current.regions ?? []).length) {
           for (const rec of regionLabelMap.values()) disposeRegionLabel(rec);
           regionLabelMap.clear();
           return;
         }
-        const sx = new Map<number, number>();
-        const sy = new Map<number, number>();
+        // centroid + covariance per region (for orientation + span)
+        const sxv = new Map<number, number>();
+        const syv = new Map<number, number>();
+        const sxx = new Map<number, number>();
+        const syy = new Map<number, number>();
+        const sxy = new Map<number, number>();
         const cn = new Map<number, number>();
         for (let i = 0; i < regionArr.length; i++) {
-          const nnum = regionArr[i];
-          if (nnum === 0) continue;
-          sx.set(nnum, (sx.get(nnum) ?? 0) + (i % size) / N);
-          sy.set(nnum, (sy.get(nnum) ?? 0) + ((i / size) | 0) / N);
-          cn.set(nnum, (cn.get(nnum) ?? 0) + 1);
+          const num = regionArr[i];
+          if (num === 0) continue;
+          const x = (i % size) / N;
+          const y = ((i / size) | 0) / N;
+          sxv.set(num, (sxv.get(num) ?? 0) + x);
+          syv.set(num, (syv.get(num) ?? 0) + y);
+          sxx.set(num, (sxx.get(num) ?? 0) + x * x);
+          syy.set(num, (syy.get(num) ?? 0) + y * y);
+          sxy.set(num, (sxy.get(num) ?? 0) + x * y);
+          cn.set(num, (cn.get(num) ?? 0) + 1);
         }
         const present = new Set<number>();
         for (const rg of worldRef.current.regions ?? []) {
@@ -1445,30 +1614,49 @@ export function WorldMapBuilder({
           const c = cn.get(num);
           if (!num || !c) continue;
           present.add(num);
-          const cx = sx.get(num)! / c;
-          const cy = sy.get(num)! / c;
+          const cx = sxv.get(num)! / c;
+          const cy = syv.get(num)! / c;
+          const vxx = sxx.get(num)! / c - cx * cx;
+          const vyy = syy.get(num)! / c - cy * cy;
+          const vxy = sxy.get(num)! / c - cx * cy;
+          const theta = 0.5 * Math.atan2(2 * vxy, vxx - vyy);
+          const tr = vxx + vyy;
+          const dd = Math.sqrt(Math.max(0, ((vxx - vyy) / 2) ** 2 + vxy * vxy));
+          const l1 = tr / 2 + dd; // major eigenvalue
           const name = rg.name || "Region";
           let rec = regionLabelMap.get(num);
-          if (!rec || rec.sprite.userData.sig !== name) {
+          if (!rec || rec.mesh.userData.sig !== name) {
             if (rec) disposeRegionLabel(rec);
-            const { tex, aspect } = makeTextLabel(name, "#3a2f22");
-            const sp = new THREE.Sprite(
-              new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }),
-            );
-            sp.renderOrder = 14;
-            sp.userData.sig = name;
-            scene.add(sp);
-            rec = { sprite: sp, aspect };
+            const { tex, aspect } = makeRegionText(name);
+            const mat = new THREE.MeshBasicMaterial({
+              map: tex,
+              transparent: true,
+              depthTest: false,
+              depthWrite: false,
+              side: THREE.DoubleSide,
+            });
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+            mesh.renderOrder = 14;
+            mesh.userData.sig = name;
+            mesh.userData.aspect = aspect;
+            scene.add(mesh);
+            rec = { mesh, aspect };
             regionLabelMap.set(num, rec);
           }
-          const sc = Math.min(7, Math.max(1.8, Math.sqrt(c) / size * W * 0.6));
-          rec.sprite.scale.set(sc * rec.aspect, sc, 1);
-          rec.sprite.position.set(
+          // span the name along the region's major axis
+          const spanWorld = Math.min(W * 0.9, Math.max(2.5, Math.sqrt(l1) * 4 * W * 0.85));
+          const wWorld = spanWorld;
+          const hWorld = wWorld / rec.aspect;
+          rec.mesh.scale.set(wWorld, hWorld, 1);
+          rec.mesh.quaternion.copy(
+            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -theta),
+          ).multiply(qFlat);
+          rec.mesh.position.set(
             (cx - 0.5) * W,
-            heightAtNorm(cx, cy) * HEIGHT + sc * 0.45 + 0.4,
+            heightAtNorm(cx, cy) * HEIGHT + 0.5,
             (cy - 0.5) * W,
           );
-          rec.sprite.visible = showRegionsRef.current;
+          rec.mesh.visible = showRegionsRef.current;
         }
         for (const [num, rec] of regionLabelMap) {
           if (!present.has(num)) {
@@ -1771,8 +1959,11 @@ export function WorldMapBuilder({
         }
         updatePoiLabels();
         for (const rec of regionLabelMap.values()) {
-          rec.sprite.visible = showRegionsRef.current;
+          rec.mesh.visible = showRegionsRef.current;
         }
+
+        // River flow.
+        if (riverMeshes.length) waterTex.offset.y -= dt * 0.1;
 
         // Lantern flame flicker.
         if (lanternBase > 0.3) {
@@ -1946,6 +2137,13 @@ export function WorldMapBuilder({
             treeLeaves.geometry.dispose();
           }
           disposeLanterns();
+          for (const m of riverMeshes) {
+            scene.remove(m);
+            m.geometry.dispose();
+          }
+          riverMeshes.length = 0;
+          waterTex.dispose();
+          riverWaterMat.dispose();
           for (const rec of regionLabelMap.values()) disposeRegionLabel(rec);
           regionLabelMap.clear();
           if (partySprite) disposeSprite(partySprite);
