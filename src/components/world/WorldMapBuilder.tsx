@@ -2202,6 +2202,56 @@ export function WorldMapBuilder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paths]);
 
+  // Fullscreen for the atlas.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [isFs, setIsFs] = useState(false);
+  useEffect(() => {
+    const onFs = () => setIsFs(document.fullscreenElement === rootRef.current);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void rootRef.current?.requestFullscreen?.();
+  };
+
+  // Finish / cancel an in-progress path draw (shared by buttons + keyboard).
+  const finishDrawing = () => {
+    const pts = engineRef.current?.finishDraw();
+    if (pts) savePaths([...paths, { id: newId(), kind: drawKind, points: pts }]);
+    setDrawing(false);
+  };
+  const cancelDrawing = () => {
+    engineRef.current?.cancelDraw();
+    setDrawing(false);
+  };
+
+  // Enter = finish, Escape = cancel — while drawing/placing/measuring.
+  useEffect(() => {
+    if (!canEdit) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      if (e.key === "Enter") {
+        if (drawing) {
+          e.preventDefault();
+          finishDrawing();
+        }
+      } else if (e.key === "Escape") {
+        if (drawing) cancelDrawing();
+        if (placing) setPlacing(false);
+        if (placingParty) setPlacingParty(false);
+        if (measuring) {
+          engineRef.current?.clearMeasure();
+          setMeasuring(false);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEdit, drawing, placing, placingParty, measuring, drawKind, paths]);
+
   const segBtn = "rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors";
 
   const placeCursor =
@@ -2209,6 +2259,7 @@ export function WorldMapBuilder({
 
   return (
     <div
+      ref={rootRef}
       className={cn(
         "relative h-[80vh] min-h-[40rem] w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather",
         placeCursor,
@@ -2261,6 +2312,13 @@ export function WorldMapBuilder({
         >
           Regions
         </button>
+        <button
+          onClick={toggleFullscreen}
+          title={isFs ? "Exit fullscreen" : "Fullscreen atlas"}
+          className={cn(segBtn, "text-ink-soft hover:bg-parchment-300/60")}
+        >
+          {isFs ? "⤡ Exit" : "⤢ Fullscreen"}
+        </button>
       </div>
 
       {canEdit && (
@@ -2297,6 +2355,62 @@ export function WorldMapBuilder({
                 </button>
               ))}
             </div>
+
+            {/* Contextual brush controls for the active tool */}
+            {tool !== "look" && (
+              <div className="space-y-1.5 rounded-md bg-parchment-50/70 p-2">
+                {tool === "paint" && (
+                  <div className="grid grid-cols-5 gap-1">
+                    {PAINT_BIOMES.map((b) => (
+                      <button
+                        key={b.id}
+                        title={b.name}
+                        onClick={() => setPaintBiome(b.id)}
+                        className={cn(
+                          "h-5 rounded border",
+                          paintBiome === b.id
+                            ? "border-ink ring-1 ring-ink"
+                            : "border-parchment-400/60",
+                        )}
+                        style={{ background: b.color }}
+                      />
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-[0.65rem] text-ink-soft">
+                  <span>Brush</span>
+                  <span className="font-semibold text-ink">{brushSize}</span>
+                </div>
+                <input
+                  type="range"
+                  min={2}
+                  max={Math.max(24, Math.round(world.size / 5))}
+                  value={brushSize}
+                  onChange={(e) => setBrushSize(Number(e.target.value))}
+                  className="w-full accent-oxblood"
+                />
+                {(tool === "raise" || tool === "lower" || tool === "smooth") && (
+                  <>
+                    <div className="flex items-center justify-between text-[0.65rem] text-ink-soft">
+                      <span>Strength</span>
+                      <span className="font-semibold text-ink">
+                        {brushStrength.toFixed(2)}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.05}
+                      max={1}
+                      step={0.05}
+                      value={brushStrength}
+                      onChange={(e) => setBrushStrength(Number(e.target.value))}
+                      className="w-full accent-oxblood"
+                    />
+                  </>
+                )}
+              </div>
+            )}
+
             <button
               onClick={() => {
                 setPlacing((p) => !p);
@@ -2476,28 +2590,17 @@ export function WorldMapBuilder({
               ) : (
                 <div className="space-y-1">
                   <p className="text-[0.6rem] text-ink-faint">
-                    Click the map to add points…
+                    Click to add points · <b>Enter</b> to finish · <b>Esc</b> to cancel
                   </p>
                   <div className="flex gap-1">
                     <button
-                      onClick={() => {
-                        const pts = engineRef.current?.finishDraw();
-                        if (pts)
-                          savePaths([
-                            ...paths,
-                            { id: newId(), kind: drawKind, points: pts },
-                          ]);
-                        setDrawing(false);
-                      }}
+                      onClick={finishDrawing}
                       className="flex-1 rounded bg-forest px-1 py-1 text-[0.65rem] font-semibold text-parchment-50"
                     >
                       Finish
                     </button>
                     <button
-                      onClick={() => {
-                        engineRef.current?.cancelDraw();
-                        setDrawing(false);
-                      }}
+                      onClick={cancelDrawing}
                       className="flex-1 rounded bg-parchment-50 px-1 py-1 text-[0.65rem] text-ink-soft hover:bg-parchment-300/60"
                     >
                       Cancel
@@ -2637,47 +2740,6 @@ export function WorldMapBuilder({
               )}
             </div>
 
-            {tool !== "look" && tool !== "paint" && (
-              <label className="block text-[0.65rem] text-ink-soft">
-                Brush size {brushSize}
-                <input
-                  type="range"
-                  min={2}
-                  max={Math.max(24, Math.round(world.size / 5))}
-                  value={brushSize}
-                  onChange={(e) => setBrushSize(Number(e.target.value))}
-                  className="w-full accent-oxblood"
-                />
-                <span className="block">Strength {brushStrength.toFixed(2)}</span>
-                <input
-                  type="range"
-                  min={0.05}
-                  max={1}
-                  step={0.05}
-                  value={brushStrength}
-                  onChange={(e) => setBrushStrength(Number(e.target.value))}
-                  className="w-full accent-oxblood"
-                />
-              </label>
-            )}
-            {tool === "paint" && (
-              <div className="grid grid-cols-4 gap-1">
-                {PAINT_BIOMES.map((b) => (
-                  <button
-                    key={b.id}
-                    title={b.name}
-                    onClick={() => setPaintBiome(b.id)}
-                    className={cn(
-                      "h-6 rounded border",
-                      paintBiome === b.id
-                        ? "border-ink ring-1 ring-ink"
-                        : "border-parchment-400/60",
-                    )}
-                    style={{ background: b.color }}
-                  />
-                ))}
-              </div>
-            )}
           </div>
 
           {/* Bottom bar: sea / time / weather / generate */}
