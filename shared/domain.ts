@@ -663,6 +663,80 @@ export interface MapLocation {
   y: number;
 }
 
+/**
+ * A procedurally/hand-built overworld map (the World Atlas builder). Lives on a
+ * BattleMap's `world` field. Grids are row-major, length size*size; coords on
+ * pois/paths/regions are normalized 0..1.
+ */
+export type WorldWeather = "clear" | "rain" | "snow" | "fog" | "storm";
+
+export interface WorldPoi {
+  id: ID;
+  name: string;
+  kind: string; // city | town | village | castle | ruin | dungeon | port | temple | peak | landmark | cave | camp
+  x: number;
+  y: number;
+  description?: string;
+  color?: string;
+  /** Integration links. */
+  factionId?: ID;
+  questId?: ID;
+  statBlockId?: ID;
+  characterId?: ID;
+  battleMapId?: ID;
+  hidden?: boolean;
+  visibleTo?: ID[];
+}
+
+export interface WorldPath {
+  id: ID;
+  kind: "river" | "road" | "route" | "border";
+  /** Flattened [x1,y1,x2,y2,…] in 0..1. */
+  points: number[];
+  color?: string;
+  width?: number;
+}
+
+export interface WorldRegion {
+  id: ID;
+  name: string;
+  /** Polygon [x1,y1,…] in 0..1. */
+  points: number[];
+  color?: string;
+  factionId?: ID;
+}
+
+export interface WorldLight {
+  id: ID;
+  x: number;
+  y: number;
+  color?: string;
+  intensity?: number;
+  radius?: number;
+}
+
+export interface WorldMap {
+  /** Grid resolution (cells per side). */
+  size: number;
+  /** Heightmap 0..255, base64 of size*size bytes (row-major). */
+  height: string;
+  /** Biome ids, base64 of size*size bytes (row-major). */
+  biome: string;
+  /** Sea level 0..1. */
+  seaLevel: number;
+  /** World width in miles (for the scale bar). */
+  milesAcross?: number;
+  /** Time of day 0..1 (0 = midnight, 0.5 = noon). */
+  timeOfDay?: number;
+  weather?: WorldWeather;
+  pois?: WorldPoi[];
+  paths?: WorldPath[];
+  regions?: WorldRegion[];
+  lights?: WorldLight[];
+  /** Fog-of-exploration: base64 of size*size bytes (1 = revealed). */
+  explored?: string;
+}
+
 export interface BattleMap extends Entity {
   campaignId?: ID;
   name: string;
@@ -671,6 +745,8 @@ export interface BattleMap extends Entity {
   notes?: string;
   /** Overworld points of interest (opaque to the tactical layer). */
   locations?: MapLocation[];
+  /** Built overworld map (World Atlas builder). */
+  world?: WorldMap;
 
   // --- tactical layer (optional; absent on plain Codex maps) ---
   /** Natural image size in px (for fog/vision bounds). */

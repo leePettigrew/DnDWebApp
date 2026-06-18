@@ -12,28 +12,51 @@ import {
   useMaps,
 } from "@/lib/data/hooks";
 import { newId } from "@/lib/domain/ids";
-import type { MapLocation } from "@/lib/domain/types";
+import type { BattleMap, MapLocation } from "@/lib/domain/types";
+import { generateWorld } from "@/lib/world/generate";
+import { WorldMapBuilder } from "./WorldMapBuilder";
 
 const inputClass =
   "w-full rounded-md border border-parchment-400 bg-parchment-50 px-2 py-1 text-sm text-ink focus:border-brass focus:outline-none focus:ring-2 focus:ring-brass/40";
 
 export function WorldAtlas() {
-  const { items: maps, update } = useMaps();
+  const { items: maps, update, create, remove } = useMaps();
   const { capabilities } = useDataProvider();
-  const { role } = useActiveCampaign();
+  const { role, campaign } = useActiveCampaign();
   const isDM = !capabilities.multiUser || role === "dm";
 
   const [mapId, setMapId] = useState("");
   const [adding, setAdding] = useState(false);
+  const [building, setBuilding] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
 
   const map = maps.find((m) => m.id === mapId) ?? maps[0] ?? null;
   const locations = map?.locations ?? [];
   const sel = locations.find((l) => l.id === selected) ?? null;
+  const isWorld = !!map?.world;
 
   function setLocations(next: MapLocation[]) {
     if (map) void update(map.id, { locations: next });
+  }
+
+  async function buildWorld() {
+    if (building) return;
+    setBuilding(true);
+    try {
+      const world = generateWorld({ size: 128 });
+      const created = await create({
+        campaignId: campaign?.id,
+        name: "New World",
+        imageUrl: "",
+        world,
+      } as Omit<BattleMap, "id">);
+      setMapId(created.id);
+      setSelected(null);
+      setAdding(false);
+    } finally {
+      setBuilding(false);
+    }
   }
 
   function onSurfaceClick(e: React.MouseEvent) {
@@ -59,12 +82,19 @@ export function WorldAtlas() {
         <div className="py-8 text-center">
           <MapIcon className="mx-auto h-10 w-10 text-ink-faint" />
           <p className="mt-3 text-sm text-ink-soft">
-            No maps yet. Add a map image in the{" "}
+            No maps yet. Build a living 3D world below, or upload a map image in
+            the{" "}
             <Link href="/codex" className="font-semibold text-brass-dark hover:underline">
               Codex
             </Link>{" "}
-            and it&apos;ll appear here as an overworld you can pin.
+            and pin it.
           </p>
+          {isDM && (
+            <Button className="mt-4" onClick={buildWorld} disabled={building}>
+              <MapIcon className="h-4 w-4" />
+              {building ? "Forging…" : "Build a world"}
+            </Button>
+          )}
         </div>
       </Panel>
     );
@@ -89,7 +119,7 @@ export function WorldAtlas() {
             </option>
           ))}
         </select>
-        {isDM && (
+        {isDM && !isWorld && (
           <Button
             size="sm"
             variant={adding ? "primary" : "secondary"}
@@ -99,11 +129,42 @@ export function WorldAtlas() {
             {adding ? "Click the map…" : "Add pin"}
           </Button>
         )}
-        <span className="text-xs text-ink-faint">
-          {locations.length} location{locations.length === 1 ? "" : "s"}
-        </span>
+        {isDM && (
+          <Button size="sm" variant="secondary" onClick={buildWorld} disabled={building}>
+            <MapIcon className="h-4 w-4" />
+            {building ? "Forging…" : "Build a world"}
+          </Button>
+        )}
+        {isDM && isWorld && map && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              if (confirm(`Delete world map “${map.name}”?`)) {
+                void remove(map.id);
+                setMapId("");
+              }
+            }}
+          >
+            <TrashIcon className="h-4 w-4" /> Delete
+          </Button>
+        )}
+        {!isWorld && (
+          <span className="text-xs text-ink-faint">
+            {locations.length} location{locations.length === 1 ? "" : "s"}
+          </span>
+        )}
       </div>
 
+      {isWorld && map?.world ? (
+        <WorldMapBuilder
+          key={map.id}
+          map={map}
+          world={map.world}
+          onUpdate={(patch) => void update(map.id, patch)}
+          canEdit={isDM}
+        />
+      ) : (
       <div className="grid gap-3 lg:grid-cols-[1fr_18rem]">
         <div
           ref={surfaceRef}
@@ -235,6 +296,7 @@ export function WorldAtlas() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
