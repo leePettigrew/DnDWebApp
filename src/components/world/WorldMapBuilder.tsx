@@ -363,6 +363,7 @@ export function WorldMapBuilder({
           }
           placeSprite(sp, p);
         }
+        syncLights(list);
       }
 
       function refreshPositions() {
@@ -466,38 +467,139 @@ export function WorldMapBuilder({
       refreshPositions();
       refreshColors();
       setWater();
+
+      // Day/night.
+      // --- glowing settlement lights + weather ---
+      const WEATHER_DIM: Record<WorldWeather, number> = {
+        clear: 1,
+        rain: 0.72,
+        snow: 0.85,
+        fog: 0.7,
+        storm: 0.5,
+      };
+      let weatherKind: WorldWeather = world.weather ?? "clear";
+      let nightFactor = 0;
+      let curTime = world.timeOfDay ?? 0.5;
+      let baseAmbient = 0.5;
+      let flash = 0;
+      let boltTimer = 3;
+      let weatherPoints: InstanceType<typeof THREE.Points> | null = null;
+
+      const SETTLEMENT = new Set([
+        "city",
+        "town",
+        "village",
+        "castle",
+        "port",
+        "temple",
+      ]);
+      const lightMap = new Map<string, InstanceType<typeof THREE.PointLight>>();
+      function lightLevel() {
+        return nightFactor * 6 + (1 - WEATHER_DIM[weatherKind]) * 2.2;
+      }
+      function syncLights(list: WorldPoi[]) {
+        const settlements = list.filter((p) => SETTLEMENT.has(p.kind)).slice(0, 12);
+        const keep = new Set(settlements.map((p) => p.id));
+        for (const [id, l] of lightMap) {
+          if (!keep.has(id)) {
+            scene.remove(l);
+            lightMap.delete(id);
+          }
+        }
+        for (const p of settlements) {
+          let l = lightMap.get(p.id);
+          if (!l) {
+            l = new THREE.PointLight(0xffb060, 0, 13, 2);
+            scene.add(l);
+            lightMap.set(p.id, l);
+          }
+          l.position.set(
+            (p.x - 0.5) * W,
+            heightAtNorm(p.x, p.y) * HEIGHT + 0.6,
+            (p.y - 0.5) * W,
+          );
+          l.intensity = lightLevel();
+        }
+      }
+
+      function makeWeather(kind: WorldWeather) {
+        const count = kind === "snow" ? 1400 : kind === "rain" || kind === "storm" ? 2200 : 0;
+        if (count === 0) return null;
+        const g = new THREE.BufferGeometry();
+        const arr = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) {
+          arr[i * 3] = (Math.random() - 0.5) * W * 1.5;
+          arr[i * 3 + 1] = Math.random() * 24;
+          arr[i * 3 + 2] = (Math.random() - 0.5) * W * 1.5;
+        }
+        g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+        const m = new THREE.PointsMaterial({
+          color: kind === "snow" ? 0xffffff : 0xaecbe6,
+          size: kind === "snow" ? 0.22 : 0.14,
+          transparent: true,
+          opacity: kind === "snow" ? 0.9 : 0.55,
+          depthWrite: false,
+        });
+        return new THREE.Points(g, m);
+      }
+      function applyWeather(kind: WorldWeather) {
+        weatherKind = kind;
+        if (weatherPoints) {
+          scene.remove(weatherPoints);
+          weatherPoints.geometry.dispose();
+          (weatherPoints.material as InstanceType<typeof THREE.PointsMaterial>).dispose();
+          weatherPoints = null;
+        }
+        weatherPoints = makeWeather(kind);
+        if (weatherPoints) {
+          weatherPoints.renderOrder = 5;
+          scene.add(weatherPoints);
+        }
+        scene.fog =
+          kind === "fog"
+            ? new THREE.Fog(0xbcc4cc, 24, 120)
+            : kind === "storm"
+              ? new THREE.Fog(0x9aa2ab, 44, 160)
+              : null;
+        applyTime(curTime);
+      }
+
+      function applyTime(t: number) {
+        curTime = t;
+        const ang = (t - 0.25) * Math.PI * 2;
+        const elev = Math.sin(ang);
+        sun.position.set(Math.cos(ang) * 30, elev * 40, 18);
+        const day = Math.max(0, elev);
+        nightFactor = 1 - day;
+        const dim = WEATHER_DIM[weatherKind];
+        sun.intensity = (0.25 + day * 1.5) * dim;
+        sun.color.setRGB(1, 0.85 + day * 0.15, 0.6 + day * 0.4);
+        baseAmbient = (0.28 + day * 0.45) * dim;
+        ambient.intensity = baseAmbient + flash;
+        // sky: night → day, then desaturate toward grey under cloud/fog/storm
+        const nightC = [0.05, 0.07, 0.13];
+        const dayC = [0.53, 0.7, 0.92];
+        const grey = [0.6, 0.63, 0.66];
+        const g = (1 - dim) * 0.7;
+        const r0 = nightC[0] + (dayC[0] - nightC[0]) * day;
+        const g0 = nightC[1] + (dayC[1] - nightC[1]) * day;
+        const b0 = nightC[2] + (dayC[2] - nightC[2]) * day;
+        scene.background = new THREE.Color(
+          r0 + (grey[0] - r0) * g,
+          g0 + (grey[1] - g0) * g,
+          b0 + (grey[2] - b0) * g,
+        );
+        if (scene.fog) (scene.fog as InstanceType<typeof THREE.Fog>).color.copy(scene.background as InstanceType<typeof THREE.Color>);
+        ambient.color.setRGB(0.6 + day * 0.4, 0.65 + day * 0.35, 0.8);
+        const lv = lightLevel();
+        for (const l of lightMap.values()) l.intensity = lv;
+      }
+      applyWeather(weatherKind);
       syncPois(
         canEdit
           ? resolvedPoisRef.current
           : resolvedPoisRef.current.filter((p) => !p.hidden),
       );
-
-      // Day/night.
-      function applyTime(t: number) {
-        const ang = (t - 0.25) * Math.PI * 2;
-        const elev = Math.sin(ang);
-        sun.position.set(Math.cos(ang) * 30, elev * 40, 18);
-        const day = Math.max(0, elev);
-        sun.intensity = 0.25 + day * 1.5;
-        // warm at horizon, white at noon
-        const warm = 1 - Math.min(1, Math.abs(elev) * 1.4);
-        sun.color.setRGB(1, 0.85 + warm * 0.0 + day * 0.15, 0.6 + day * 0.4);
-        ambient.intensity = 0.28 + day * 0.45;
-        const nightR = 0.05,
-          nightG = 0.07,
-          nightB = 0.13;
-        const dayR = 0.53,
-          dayG = 0.7,
-          dayB = 0.92;
-        const k = day;
-        scene.background = new THREE.Color(
-          nightR + (dayR - nightR) * k,
-          nightG + (dayG - nightG) * k,
-          nightB + (dayB - nightB) * k,
-        );
-        ambient.color.setRGB(0.6 + k * 0.4, 0.65 + k * 0.35, 0.8);
-      }
-      applyTime(world.timeOfDay ?? 0.5);
 
       // --- brushing ---
       const ray = new THREE.Raycaster();
@@ -634,9 +736,42 @@ export function WorldMapBuilder({
       dom.addEventListener("pointercancel", onUp);
 
       let raf = 0;
+      let lastT = performance.now();
       const tick = () => {
+        const now = performance.now();
+        const dt = Math.min(0.05, (now - lastT) / 1000);
+        lastT = now;
         controls.enabled = toolRef.current === "look" && !onPlaceRef.current;
         controls.update();
+
+        // Weather animation.
+        if (weatherPoints) {
+          const snow = weatherKind === "snow";
+          const p = weatherPoints.geometry.getAttribute(
+            "position",
+          ) as InstanceType<typeof THREE.BufferAttribute>;
+          const fall = (snow ? 2.5 : 26) * dt;
+          for (let i = 0; i < p.count; i++) {
+            let y = p.getY(i) - fall;
+            if (y < 0) y += 24;
+            p.setY(i, y);
+            if (snow) p.setX(i, p.getX(i) + Math.sin((y + i) * 0.6) * 0.01);
+          }
+          p.needsUpdate = true;
+        }
+        // Storm lightning.
+        if (weatherKind === "storm") {
+          boltTimer -= dt;
+          if (boltTimer <= 0) {
+            flash = 1.6;
+            boltTimer = 2 + Math.random() * 5;
+          }
+        }
+        if (flash > 0) {
+          flash = Math.max(0, flash - dt * 6);
+          ambient.intensity = baseAmbient + flash;
+        }
+
         renderer.render(scene, camera);
         frameCbRef.current?.();
         raf = requestAnimationFrame(tick);
@@ -674,9 +809,7 @@ export function WorldMapBuilder({
           scheduleSave();
         },
         setTime: applyTime,
-        setWeather() {
-          /* weather visuals land in a later phase; stored on export */
-        },
+        setWeather: applyWeather,
         load(wm) {
           if (wm.size !== size) return; // size changes rebuild via the effect
           loadArrays(wm);
@@ -713,6 +846,12 @@ export function WorldMapBuilder({
             sp.material.dispose();
           }
           spriteMap.clear();
+          for (const l of lightMap.values()) scene.remove(l);
+          lightMap.clear();
+          if (weatherPoints) {
+            weatherPoints.geometry.dispose();
+            (weatherPoints.material as InstanceType<typeof THREE.PointsMaterial>).dispose();
+          }
           controls.dispose();
           renderer.dispose();
           if (dom.parentNode) dom.parentNode.removeChild(dom);
