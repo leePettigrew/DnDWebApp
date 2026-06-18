@@ -18,6 +18,91 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong.";
 }
 
+function ServerTools({ onError }: { onError: (e: string | null) => void }) {
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  async function announce() {
+    if (!message.trim()) return;
+    setBusy(true);
+    onError(null);
+    try {
+      await adminApi.announce(message.trim());
+      setMessage("");
+      setFlash("Announcement sent to everyone online.");
+      window.setTimeout(() => setFlash(null), 2600);
+    } catch (e) {
+      onError(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function exportBackup() {
+    setBusy(true);
+    onError(null);
+    try {
+      const data = await adminApi.exportData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `dragons-ledger-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      onError(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel title="Server Tools" eyebrow="Broadcast &amp; backup">
+      <div className="space-y-4">
+        <div>
+          <p className="mb-1.5 font-display text-xs font-semibold uppercase tracking-[0.12em] text-ink-soft">
+            Announcement
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Message to everyone online…"
+              className="h-9 min-w-48 flex-1 rounded-md border border-parchment-400 bg-parchment-50 px-3 text-sm text-ink focus:border-brass focus:outline-none focus:ring-2 focus:ring-brass/40"
+            />
+            <Button onClick={announce} disabled={busy || !message.trim()}>
+              Send to all
+            </Button>
+          </div>
+          <p className="mt-1 text-xs text-ink-faint">
+            Pops up full-screen for every connected player, in any campaign.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="secondary" onClick={exportBackup} disabled={busy}>
+            Download backup (JSON)
+          </Button>
+          <span className="text-xs text-ink-faint">
+            Full export of campaigns, members, entities, rolls, chat &amp;
+            homebrew (no password hashes).
+          </span>
+        </div>
+
+        {flash && (
+          <p className="rounded-md border border-forest/40 bg-forest/10 px-3 py-2 text-sm font-semibold text-forest">
+            {flash}
+          </p>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 function StatTile({
   label,
   value,
@@ -227,6 +312,8 @@ export function AdminPanel() {
       </div>
 
       {error && <p className="text-sm text-oxblood">{error}</p>}
+
+      <ServerTools onError={setError} />
 
       <AnalyticsView a={overview.analytics} />
 

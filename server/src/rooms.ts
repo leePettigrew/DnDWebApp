@@ -94,4 +94,9 @@ export class RoomManager {
     const room = this.rooms.get(campaignId);
     if (room && room.isEmpty()) this.rooms.delete(campaignId);
   }
+
+  /** Send a message to every connected socket across all campaigns. */
+  broadcastAll(message: ServerMessage): void {
+    for (const room of this.rooms.values()) room.broadcast(message);
+  }
 }

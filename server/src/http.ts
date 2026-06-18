@@ -3,6 +3,7 @@ import { AppError, loginUser, registerUser, statusFor } from "./auth";
 import { handleAdminRequest } from "./admin";
 import { handleContentRequest } from "./content";
 import type { Repositories } from "./repositories";
+import type { RoomManager } from "./rooms";
 import { config } from "./config";
 
 function resolveOrigin(req: IncomingMessage): string {
@@ -63,6 +64,7 @@ export async function handleHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
   repos: Repositories,
+  rooms: RoomManager,
 ): Promise<boolean> {
   setCors(req, res);
   if (req.method === "OPTIONS") {
@@ -72,7 +74,7 @@ export async function handleHttpRequest(
   }
   // Admin panel API (any method). Gated server-side to the admin user.
   if ((req.url ?? "").startsWith("/admin/")) {
-    return handleAdminRequest(req, res, repos);
+    return handleAdminRequest(req, res, repos, rooms);
   }
   // Homebrew content API (read for members, write for DM/admin).
   if ((req.url ?? "").startsWith("/content/")) {

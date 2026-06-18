@@ -25,7 +25,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true, service: "dragons-ledger-server" }));
     return;
   }
-  void handleHttpRequest(req, res, repos)
+  void handleHttpRequest(req, res, repos, rooms)
     .then((handled) => {
       if (!handled) {
         res.writeHead(404, { "content-type": "application/json" });

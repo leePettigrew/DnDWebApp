@@ -5,6 +5,7 @@ import type { ScopedCollection } from "../../shared/protocol";
 import type { Entity } from "../../shared/domain";
 import { hashPassword, isAdminUser, requireAdmin } from "./auth";
 import type { Repositories } from "./repositories";
+import type { RoomManager } from "./rooms";
 
 /**
  * Admin panel HTTP API. Every route requires a Bearer token belonging to the
@@ -49,6 +50,7 @@ export async function handleAdminRequest(
   req: IncomingMessage,
   res: ServerResponse,
   repos: Repositories,
+  rooms: RoomManager,
 ): Promise<boolean> {
   const url = (req.url ?? "").split("?")[0];
   if (!url.startsWith("/admin/")) return false;
@@ -63,6 +65,54 @@ export async function handleAdminRequest(
   const method = req.method ?? "GET";
 
   try {
+    // POST /admin/announce — push a message to everyone online.
+    if (method === "POST" && seg[1] === "announce") {
+      const body = (await readJson(req)) as { message?: unknown };
+      const text = typeof body.message === "string" ? body.message.trim() : "";
+      if (!text) {
+        json(res, 400, { error: "Message is required." });
+        return true;
+      }
+      rooms.broadcastAll({
+        type: "dm:handout:shown",
+        handout: { title: "Server Announcement", body: text, fromName: admin.displayName },
+      });
+      json(res, 200, { ok: true });
+      return true;
+    }
+
+    // GET /admin/export — full JSON backup of the database.
+    if (method === "GET" && seg[1] === "export") {
+      const users = repos.admin.listUsers().map((u) => ({
+        id: u.id,
+        username: u.username,
+        displayName: u.displayName,
+        createdAt: u.createdAt,
+      }));
+      const campaigns = repos.admin.listCampaigns().map((c) => {
+        const entities: Record<string, unknown[]> = {};
+        for (const col of SCOPED_COLLECTIONS) {
+          entities[col] = repos.entities[col].list(c.id);
+        }
+        return {
+          ...c,
+          members: repos.memberships.listForCampaign(c.id),
+          entities,
+          combat: repos.combat.get(c.id),
+          rolls: repos.rollLog.list(c.id, { includeHidden: true, limit: 100000 }),
+          chat: repos.chat.list(c.id, 100000),
+          content: repos.content.listForCampaign(c.id),
+        };
+      });
+      json(res, 200, {
+        exportedAt: nowISO(),
+        users,
+        campaigns,
+        globalContent: repos.content.listGlobal(),
+      });
+      return true;
+    }
+
     // GET /admin/overview — users + campaign summaries.
     if (method === "GET" && seg[1] === "overview") {
       const users = repos.admin.listUsers();

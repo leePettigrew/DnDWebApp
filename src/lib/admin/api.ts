@@ -135,4 +135,7 @@ export const adminApi = {
     req<{ ok: true }>("PATCH", `/admin/membership/${campaignId}/${userId}`, {
       role,
     }),
+  announce: (message: string) =>
+    req<{ ok: true }>("POST", "/admin/announce", { message }),
+  exportData: () => req<unknown>("GET", "/admin/export"),
 };
