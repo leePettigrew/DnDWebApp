@@ -157,7 +157,7 @@ export function WorldAtlas() {
       </div>
 
       {isWorld && map?.world ? (
-        <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen max-w-[100vw] px-3 sm:px-5 lg:px-8">
+        <div className="-mx-4 sm:-mx-6 lg:-mx-10">
           <WorldMapBuilder
             key={map.id}
             map={map}
