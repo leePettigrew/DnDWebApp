@@ -15,6 +15,8 @@ import {
 import { newId } from "@/lib/domain/ids";
 import type {
   BattleMap,
+  PoiLink,
+  PoiLinkKind,
   WorldMap,
   WorldPath,
   WorldPoi,
@@ -161,11 +163,12 @@ export function WorldMapBuilder({
     id ? factions.find((f) => f.id === id)?.color : undefined;
   const resolvedPois = useMemo(
     () =>
-      pois.map((p) =>
-        p.factionId && !p.color
-          ? { ...p, color: factionColor(p.factionId) ?? p.color }
-          : p,
-      ),
+      pois.map((p) => {
+        if (p.color) return p;
+        const facRef =
+          p.factionId ?? p.links?.find((l) => l.kind === "faction")?.ref;
+        return facRef ? { ...p, color: factionColor(facRef) ?? p.color } : p;
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [pois, factions],
   );
@@ -275,6 +278,57 @@ export function WorldMapBuilder({
     savePois(poisRef.current.filter((p) => p.id !== id));
     setSelectedPoi((s) => (s === id ? null : s));
   };
+
+  // --- POI links (multiple per POI) ---
+  const LINK_KINDS: { kind: PoiLinkKind; label: string }[] = [
+    { kind: "faction", label: "Faction" },
+    { kind: "quest", label: "Quest" },
+    { kind: "npc", label: "NPC" },
+    { kind: "hero", label: "Hero" },
+    { kind: "map", label: "Battle map" },
+  ];
+  const [addLinkKind, setAddLinkKind] = useState<PoiLinkKind>("faction");
+  const linkOptions = (kind: PoiLinkKind): { id: string; label: string }[] => {
+    if (kind === "faction") return factions.map((f) => ({ id: f.id, label: f.name }));
+    if (kind === "quest") return quests.map((q) => ({ id: q.id, label: q.title }));
+    if (kind === "npc") return statBlocks.map((s) => ({ id: s.id, label: s.name }));
+    if (kind === "hero") return characters.map((c) => ({ id: c.id, label: c.name }));
+    return battleMaps.map((m) => ({ id: m.id, label: m.name }));
+  };
+  const linkName = (l: PoiLink): string =>
+    linkOptions(l.kind).find((o) => o.id === l.ref)?.label ?? "—";
+  const linkHref = (l: PoiLink): string | null =>
+    l.kind === "npc"
+      ? `/bestiary/${l.ref}`
+      : l.kind === "hero"
+        ? `/characters/${l.ref}`
+        : l.kind === "map"
+          ? "/combat"
+          : null;
+  // Normalize legacy single fields → a link array (for display + editing).
+  const normalizedLinks = (p: WorldPoi): PoiLink[] => {
+    if (p.links?.length) return p.links;
+    const out: PoiLink[] = [];
+    if (p.factionId) out.push({ id: "old-faction", kind: "faction", ref: p.factionId });
+    if (p.questId) out.push({ id: "old-quest", kind: "quest", ref: p.questId });
+    if (p.statBlockId) out.push({ id: "old-npc", kind: "npc", ref: p.statBlockId });
+    if (p.characterId) out.push({ id: "old-hero", kind: "hero", ref: p.characterId });
+    if (p.battleMapId) out.push({ id: "old-map", kind: "map", ref: p.battleMapId });
+    return out;
+  };
+  const setLinks = (p: WorldPoi, links: PoiLink[]) =>
+    updatePoi(p.id, {
+      links,
+      factionId: undefined,
+      questId: undefined,
+      statBlockId: undefined,
+      characterId: undefined,
+      battleMapId: undefined,
+    });
+  const addLink = (p: WorldPoi, kind: PoiLinkKind, ref: string) =>
+    setLinks(p, [...normalizedLinks(p), { id: newId(), kind, ref }]);
+  const removeLink = (p: WorldPoi, id: string) =>
+    setLinks(p, normalizedLinks(p).filter((l) => l.id !== id));
   onPlaceRef.current =
     canEdit && placing
       ? (nx, ny) => {
@@ -1872,6 +1926,8 @@ export function WorldMapBuilder({
       function onDown(e: PointerEvent) {
         downX = e.clientX;
         downY = e.clientY;
+        // Right / middle button → let OrbitControls navigate even with a tool on.
+        if (e.button !== 0) return;
         if (drawKindRef.current) {
           const c = cellFromEvent(e);
           if (c) pushDraft(c.nx, c.ny);
@@ -1925,12 +1981,13 @@ export function WorldMapBuilder({
           }
           scheduleSave();
         } else if (
+          e.button === 0 &&
           !painting &&
           !onPlaceRef.current &&
           Math.abs(e.clientX - downX) < 5 &&
           Math.abs(e.clientY - downY) < 5
         ) {
-          // A click (not a drag): select a marker under the cursor.
+          // A left click (not a drag): select a marker under the cursor.
           const id = pickPoi(e);
           if (id) onSelectRef.current?.(id);
         }
@@ -1948,12 +2005,16 @@ export function WorldMapBuilder({
         const now = performance.now();
         const dt = Math.min(0.05, (now - lastT) / 1000);
         lastT = now;
-        controls.enabled =
-          toolRef.current === "look" &&
-          !onPlaceRef.current &&
-          !drawKindRef.current &&
-          !onPartyRef.current &&
-          !measureRef.current;
+        // Best of both worlds: left does the active tool, right always navigates.
+        const interacting =
+          toolRef.current !== "look" ||
+          !!onPlaceRef.current ||
+          !!drawKindRef.current ||
+          !!onPartyRef.current ||
+          !!measureRef.current;
+        controls.enabled = true;
+        controls.mouseButtons.LEFT = interacting ? undefined : THREE.MOUSE.ROTATE;
+        controls.mouseButtons.RIGHT = interacting ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
         moveKeys(dt);
         controls.update();
 
@@ -2261,6 +2322,11 @@ export function WorldMapBuilder({
   }, [canEdit, drawing, placing, placingParty, measuring, drawKind, paths]);
 
   const segBtn = "rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors";
+  // Collapsible tool sections (native <details> accordion).
+  const groupCls = "rounded-md border border-parchment-400/40";
+  const summaryCls =
+    "cursor-pointer select-none rounded-md px-2 py-1.5 text-xs font-semibold text-ink-soft hover:bg-parchment-300/40 marker:text-ink-faint";
+  const groupBody = "space-y-1.5 border-t border-parchment-400/30 p-2";
 
   const placeCursor =
     placing || drawing || placingParty || measuring ? "cursor-crosshair" : "";
@@ -2277,7 +2343,7 @@ export function WorldMapBuilder({
 
       {/* Controls hint */}
       <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-parchment-400/40 bg-parchment-100/70 px-3 py-1 text-[0.6rem] text-ink-faint shadow-card">
-        WASD pan · Q/E height · drag orbit · wheel zoom
+        WASD / right-drag move · Q/E height · wheel zoom
       </div>
 
       {/* Compass */}
@@ -2419,6 +2485,9 @@ export function WorldMapBuilder({
               </div>
             )}
 
+            <details className={groupCls}>
+              <summary className={summaryCls}>Points of interest</summary>
+              <div className={groupBody}>
             <button
               onClick={() => {
                 setPlacing((p) => !p);
@@ -2433,7 +2502,11 @@ export function WorldMapBuilder({
             >
               {placing ? "Click the map to place…" : "＋ Place point of interest"}
             </button>
-            <div className="space-y-1 border-t border-parchment-400/50 pt-2">
+              </div>
+            </details>
+            <details className={groupCls}>
+              <summary className={summaryCls}>Fog of war</summary>
+              <div className={groupBody}>
               <label className="flex items-center justify-between text-xs font-semibold text-ink-soft">
                 Fog of exploration
                 <input
@@ -2476,11 +2549,13 @@ export function WorldMapBuilder({
                 </>
               )}
             </div>
+            </details>
 
             {/* Territory / political regions */}
-            <div className="space-y-1 border-t border-parchment-400/50 pt-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-ink-soft">Territory</span>
+            <details className={groupCls}>
+              <summary className={summaryCls}>Territory</summary>
+              <div className={groupBody}>
+              <div className="flex items-center justify-end">
                 <button
                   onClick={addRegion}
                   className="rounded bg-parchment-50 px-1.5 py-0.5 text-[0.65rem] text-ink-soft hover:bg-parchment-300/60"
@@ -2567,11 +2642,13 @@ export function WorldMapBuilder({
                 </select>
               )}
             </div>
+            </details>
 
             {/* Rivers / roads / paths */}
-            <div className="space-y-1 border-t border-parchment-400/50 pt-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-ink-soft">Paths</span>
+            <details className={groupCls}>
+              <summary className={summaryCls}>Paths</summary>
+              <div className={groupBody}>
+              <div className="flex items-center justify-end">
                 <select
                   value={drawKind}
                   onChange={(e) => setDrawKind(e.target.value as WorldPath["kind"])}
@@ -2634,10 +2711,12 @@ export function WorldMapBuilder({
                 </div>
               ))}
             </div>
+            </details>
 
             {/* Trees */}
-            <div className="space-y-1 border-t border-parchment-400/50 pt-2">
-              <span className="text-xs font-semibold text-ink-soft">Trees</span>
+            <details className={groupCls}>
+              <summary className={summaryCls}>Trees</summary>
+              <div className={groupBody}>
               <div className="flex gap-1">
                 <button
                   onClick={() => {
@@ -2693,10 +2772,12 @@ export function WorldMapBuilder({
                 paint, not existing trees. Roads & rivers clear trees beneath them.
               </p>
             </div>
+            </details>
 
             {/* Travel: ruler + party token */}
-            <div className="space-y-1 border-t border-parchment-400/50 pt-2">
-              <span className="text-xs font-semibold text-ink-soft">Travel</span>
+            <details className={groupCls}>
+              <summary className={summaryCls}>Travel</summary>
+              <div className={groupBody}>
               <label className="flex items-center gap-1.5 text-[0.65rem] text-ink-soft">
                 Speed
                 <input
@@ -2749,8 +2830,8 @@ export function WorldMapBuilder({
                   Remove party token
                 </button>
               )}
-            </div>
-
+              </div>
+            </details>
           </div>
 
           {/* Bottom bar: sea / time / weather / generate */}
@@ -2874,6 +2955,9 @@ export function WorldMapBuilder({
                 key={`pn-${selPoi.id}`}
                 defaultValue={selPoi.name}
                 onBlur={(e) => updatePoi(selPoi.id, { name: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
                 aria-label="Name"
                 className="w-full rounded-md border border-parchment-400 bg-parchment-50 px-2 py-1 text-sm font-semibold text-ink focus:border-brass focus:outline-none"
               />
@@ -2919,36 +3003,53 @@ export function WorldMapBuilder({
                 <p className="text-[0.6rem] font-semibold uppercase tracking-wide text-brass-dark">
                   Links
                 </p>
-                <LinkSelect
-                  label="Faction"
-                  value={selPoi.factionId}
-                  onChange={(v) => updatePoi(selPoi.id, { factionId: v })}
-                  options={factions.map((f) => ({ id: f.id, label: f.name }))}
-                />
-                <LinkSelect
-                  label="Quest"
-                  value={selPoi.questId}
-                  onChange={(v) => updatePoi(selPoi.id, { questId: v })}
-                  options={quests.map((q) => ({ id: q.id, label: q.title }))}
-                />
-                <LinkSelect
-                  label="NPC"
-                  value={selPoi.statBlockId}
-                  onChange={(v) => updatePoi(selPoi.id, { statBlockId: v })}
-                  options={statBlocks.map((s) => ({ id: s.id, label: s.name }))}
-                />
-                <LinkSelect
-                  label="Hero"
-                  value={selPoi.characterId}
-                  onChange={(v) => updatePoi(selPoi.id, { characterId: v })}
-                  options={characters.map((c) => ({ id: c.id, label: c.name }))}
-                />
-                <LinkSelect
-                  label="Battle map"
-                  value={selPoi.battleMapId}
-                  onChange={(v) => updatePoi(selPoi.id, { battleMapId: v })}
-                  options={battleMaps.map((m) => ({ id: m.id, label: m.name }))}
-                />
+                {normalizedLinks(selPoi).map((l) => (
+                  <div
+                    key={l.id}
+                    className="flex items-center gap-1.5 text-[0.7rem] text-ink-soft"
+                  >
+                    <span className="rounded bg-parchment-300/70 px-1 text-[0.6rem] uppercase">
+                      {LINK_KINDS.find((k) => k.kind === l.kind)?.label}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{linkName(l)}</span>
+                    <button
+                      onClick={() => removeLink(selPoi, l.id)}
+                      aria-label="Remove link"
+                      className="px-1 text-oxblood"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <div className="flex gap-1">
+                  <select
+                    value={addLinkKind}
+                    onChange={(e) => setAddLinkKind(e.target.value as PoiLinkKind)}
+                    aria-label="Link kind"
+                    className="h-7 rounded border border-parchment-400 bg-parchment-50 px-1 text-[0.65rem] text-ink"
+                  >
+                    {LINK_KINDS.map((k) => (
+                      <option key={k.kind} value={k.kind}>
+                        {k.label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) addLink(selPoi, addLinkKind, e.target.value);
+                    }}
+                    aria-label="Add link"
+                    className="h-7 min-w-0 flex-1 rounded border border-parchment-400 bg-parchment-50 px-1 text-[0.65rem] text-ink"
+                  >
+                    <option value="">＋ add link…</option>
+                    {linkOptions(addLinkKind).map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <button
                 onClick={() => removePoi(selPoi.id)}
@@ -2973,100 +3074,64 @@ export function WorldMapBuilder({
 
           {/* Linked entities (DM + players) */}
           {(() => {
-            const f = selPoi.factionId
-              ? factions.find((x) => x.id === selPoi.factionId)
-              : null;
-            const q = selPoi.questId
-              ? quests.find((x) => x.id === selPoi.questId)
-              : null;
-            const npc = selPoi.statBlockId
-              ? statBlocks.find((x) => x.id === selPoi.statBlockId)
-              : null;
-            const hero = selPoi.characterId
-              ? characters.find((x) => x.id === selPoi.characterId)
-              : null;
-            const bm = selPoi.battleMapId
-              ? allMaps.find((x) => x.id === selPoi.battleMapId)
-              : null;
-            if (!f && !q && !npc && !hero && !bm) return null;
+            const links = normalizedLinks(selPoi);
+            if (!links.length) return null;
             return (
               <div className="mt-3 space-y-1.5 border-t border-parchment-400/50 pt-2 text-xs">
-                {f && (
-                  <div className="flex items-center gap-1.5 text-ink-soft">
-                    <span
-                      className="h-3 w-3 rounded-full border border-ink/20"
-                      style={{ background: f.color || "#7a2d2d" }}
-                    />
-                    {f.name}
-                  </div>
-                )}
-                {q && (
-                  <div className="flex items-center gap-1.5 text-ink-soft">
-                    ⚑ {q.title}
-                    <span className="rounded bg-parchment-300 px-1 text-[0.6rem] uppercase tracking-wide">
-                      {q.status}
-                    </span>
-                  </div>
-                )}
-                {npc && (
-                  <Link
-                    href={`/bestiary/${npc.id}`}
-                    className="flex items-center gap-1.5 font-semibold text-brass-dark hover:underline"
-                  >
-                    👤 {npc.name} →
-                  </Link>
-                )}
-                {hero && (
-                  <Link
-                    href={`/characters/${hero.id}`}
-                    className="flex items-center gap-1.5 font-semibold text-brass-dark hover:underline"
-                  >
-                    🛡 {hero.name} →
-                  </Link>
-                )}
-                {bm && (
-                  <Link
-                    href="/combat"
-                    className="flex items-center gap-1.5 font-semibold text-brass-dark hover:underline"
-                  >
-                    ⚔ {bm.name} →
-                  </Link>
-                )}
+                {links.map((l) => {
+                  const name = linkName(l);
+                  if (l.kind === "faction") {
+                    const f = factions.find((x) => x.id === l.ref);
+                    return (
+                      <div
+                        key={l.id}
+                        className="flex items-center gap-1.5 text-ink-soft"
+                      >
+                        <span
+                          className="h-3 w-3 rounded-full border border-ink/20"
+                          style={{ background: f?.color || "#7a2d2d" }}
+                        />
+                        {name}
+                      </div>
+                    );
+                  }
+                  if (l.kind === "quest") {
+                    const q = quests.find((x) => x.id === l.ref);
+                    return (
+                      <div
+                        key={l.id}
+                        className="flex items-center gap-1.5 text-ink-soft"
+                      >
+                        ⚑ {name}
+                        {q && (
+                          <span className="rounded bg-parchment-300 px-1 text-[0.6rem] uppercase tracking-wide">
+                            {q.status}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+                  const glyph = l.kind === "npc" ? "👤" : l.kind === "hero" ? "🛡" : "⚔";
+                  const href = linkHref(l);
+                  return href ? (
+                    <Link
+                      key={l.id}
+                      href={href}
+                      className="flex items-center gap-1.5 font-semibold text-brass-dark hover:underline"
+                    >
+                      {glyph} {name} →
+                    </Link>
+                  ) : (
+                    <div key={l.id} className="text-ink-soft">
+                      {glyph} {name}
+                    </div>
+                  );
+                })}
               </div>
             );
           })()}
         </div>
       )}
     </div>
-  );
-}
-
-function LinkSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value?: string;
-  onChange: (v: string | undefined) => void;
-  options: { id: string; label: string }[];
-}) {
-  return (
-    <label className="flex items-center gap-1.5 text-[0.65rem] text-ink-soft">
-      <span className="w-16 shrink-0">{label}</span>
-      <select
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value || undefined)}
-        className="h-7 flex-1 rounded border border-parchment-400 bg-parchment-50 px-1 text-xs text-ink focus:border-brass focus:outline-none"
-      >
-        <option value="">— none —</option>
-        {options.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }

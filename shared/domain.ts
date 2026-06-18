@@ -670,6 +670,14 @@ export interface MapLocation {
  */
 export type WorldWeather = "clear" | "rain" | "snow" | "fog" | "storm";
 
+export type PoiLinkKind = "faction" | "quest" | "npc" | "hero" | "map";
+
+export interface PoiLink {
+  id: ID;
+  kind: PoiLinkKind;
+  ref: ID;
+}
+
 export interface WorldPoi {
   id: ID;
   name: string;
@@ -678,7 +686,9 @@ export interface WorldPoi {
   y: number;
   description?: string;
   color?: string;
-  /** Integration links. */
+  /** Multiple integration links (factions, quests, NPCs, heroes, battle maps). */
+  links?: PoiLink[];
+  /** Legacy single links (migrated into `links` on first edit). */
   factionId?: ID;
   questId?: ID;
   statBlockId?: ID;
