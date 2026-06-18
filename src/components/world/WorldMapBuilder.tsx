@@ -90,6 +90,8 @@ interface Engine {
   revealAll(v: 0 | 1): void;
   /** Clear all cells owned by a region index, then persist. */
   clearRegion(idx: number): void;
+  /** Rebuild the instanced trees (after a density change). */
+  rebuildTrees(): void;
   /** Re-shade (e.g. after toggling DM "view as player" or region colours). */
   reshade(): void;
   /** Camera azimuth (radians) for the compass. */
@@ -250,6 +252,14 @@ export function WorldMapBuilder({
   const [treeMode, setTreeMode] = useState<"plant" | "clear">("plant");
   const treeModeRef = useRef(treeMode);
   treeModeRef.current = treeMode;
+  const [treeDensity, setTreeDensity] = useState(world.treeDensity ?? 0.5);
+  const treeDensityRef = useRef(treeDensity);
+  treeDensityRef.current = treeDensity;
+
+  // --- region visibility (all users) ---
+  const [showRegions, setShowRegions] = useState(false);
+  const showRegionsRef = useRef(showRegions);
+  showRegionsRef.current = showRegions;
 
   /** Persist world fields, preserving in-memory terrain edits. */
   const saveWorld = (patch: Partial<WorldMap>) => {
@@ -760,12 +770,14 @@ export function WorldMapBuilder({
       };
       const pathMap = new Map<
         string,
-        { mesh: InstanceType<typeof THREE.Mesh>; sig: string }
+        { mesh: InstanceType<typeof THREE.Mesh>; sig: string; kind: WorldPath["kind"] }
       >();
       function disposePathMesh(mesh: InstanceType<typeof THREE.Mesh>) {
         scene.remove(mesh);
         mesh.geometry.dispose();
-        (mesh.material as InstanceType<typeof THREE.MeshStandardMaterial>).dispose();
+        const m = mesh.material as InstanceType<typeof THREE.MeshStandardMaterial>;
+        m.map?.dispose();
+        m.dispose();
       }
       const PATH_WIDTH: Record<WorldPath["kind"], number> = {
         river: 0.42,
@@ -773,6 +785,72 @@ export function WorldMapBuilder({
         route: 0.22,
         border: 0.18,
       };
+      // Fade the across-width edges to alpha so a ribbon blends into terrain.
+      function fadeEdges(ctx: CanvasRenderingContext2D, s: number, center: number) {
+        const f = document.createElement("canvas");
+        f.width = f.height = s;
+        const fc = f.getContext("2d")!;
+        const g = fc.createLinearGradient(0, 0, s, 0);
+        g.addColorStop(0, "rgba(0,0,0,0)");
+        g.addColorStop(0.16, `rgba(0,0,0,${center})`);
+        g.addColorStop(0.84, `rgba(0,0,0,${center})`);
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        fc.fillStyle = g;
+        fc.fillRect(0, 0, s, s);
+        ctx.globalCompositeOperation = "destination-in";
+        ctx.drawImage(f, 0, 0);
+        ctx.globalCompositeOperation = "source-over";
+      }
+      function makePathTexture(kind: WorldPath["kind"]) {
+        const s = 128;
+        const c = document.createElement("canvas");
+        c.width = c.height = s;
+        const ctx = c.getContext("2d")!;
+        if (kind === "river") {
+          const g = ctx.createLinearGradient(0, 0, s, 0);
+          g.addColorStop(0, "#27577e");
+          g.addColorStop(0.5, "#3a83b3");
+          g.addColorStop(1, "#27577e");
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, s, s);
+          ctx.lineWidth = 1.6;
+          for (let yy = -4; yy < s; yy += 6) {
+            ctx.strokeStyle = `rgba(205,230,248,${0.1 + Math.random() * 0.12})`;
+            ctx.beginPath();
+            for (let x = 0; x <= s; x += 4) {
+              const y = yy + Math.sin(x * 0.13 + yy) * 2.2;
+              if (x === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+          }
+          fadeEdges(ctx, s, 0.9);
+        } else {
+          // road: packed dirt + stones
+          ctx.fillStyle = "#6b4d37";
+          ctx.fillRect(0, 0, s, s);
+          for (let i = 0; i < 110; i++) {
+            const x = Math.random() * s;
+            const y = Math.random() * s;
+            const r = 1.4 + Math.random() * 4.5;
+            ctx.fillStyle =
+              Math.random() > 0.5
+                ? `rgba(122,99,74,${0.3 + Math.random() * 0.45})`
+                : `rgba(52,38,27,${0.3 + Math.random() * 0.45})`;
+            ctx.beginPath();
+            ctx.ellipse(x, y, r, r * 0.75, Math.random() * 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          fadeEdges(ctx, s, 1);
+        }
+        const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.anisotropy = 8;
+        tex.needsUpdate = true;
+        return tex;
+      }
+      const riverTextures: InstanceType<typeof THREE.CanvasTexture>[] = [];
       // A flat ribbon draped on the terrain (painted on, not a raised tube).
       // Borders and routes render dashed + raised so they read as markings, not
       // as rivers/roads.
@@ -789,12 +867,16 @@ export function WorldMapBuilder({
         const dashed = kind === "border" || kind === "route";
         const yOff =
           kind === "river" ? 0.01 : kind === "border" ? 0.16 : kind === "route" ? 0.09 : 0.04;
+        const isWater = kind === "river";
+        const textured = isWater || kind === "road";
+        const tile = isWater ? 2.6 : 1.6;
         const Lx: number[] = [];
         const Ly: number[] = [];
         const Lz: number[] = [];
         const Rx: number[] = [];
         const Ry: number[] = [];
         const Rz: number[] = [];
+        const cum: number[] = [0];
         for (let i = 0; i <= segs; i++) {
           const p = sample[i];
           const prev = sample[Math.max(0, i - 1)];
@@ -814,12 +896,17 @@ export function WorldMapBuilder({
           Rx.push(rx);
           Ry.push(heightAtNorm(rx / W + 0.5, rz / W + 0.5) * HEIGHT + yOff);
           Rz.push(rz);
+          if (i > 0) cum[i] = cum[i - 1] + p.distanceTo(sample[i - 1]);
         }
         const pos: number[] = [];
         const idx: number[] = [];
+        const uv: number[] = [];
         const pushQuad = (i: number) => {
           const b = pos.length / 3;
+          const vi = cum[i] / tile;
+          const vj = cum[i + 1] / tile;
           pos.push(Lx[i], Ly[i], Lz[i], Rx[i], Ry[i], Rz[i], Lx[i + 1], Ly[i + 1], Lz[i + 1], Rx[i + 1], Ry[i + 1], Rz[i + 1]);
+          uv.push(0, vi, 1, vi, 0, vj, 1, vj);
           idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
         };
         for (let i = 0; i < segs; i++) {
@@ -828,18 +915,30 @@ export function WorldMapBuilder({
         }
         const geo = new THREE.BufferGeometry();
         geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
+        geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uv), 2));
         geo.setIndex(idx);
         geo.computeVertexNormals();
-        const isWater = kind === "river";
         const style = PATH_STYLE[kind] ?? PATH_STYLE.route;
-        const mat = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(colorHex || style.color),
-          roughness: isWater ? 0.15 : 0.9,
-          metalness: isWater ? 0.3 : 0,
-          transparent: isWater || kind === "route",
-          opacity: isWater ? 0.86 : kind === "route" ? 0.85 : 1,
-          side: THREE.DoubleSide,
-        });
+        let mat: InstanceType<typeof THREE.MeshStandardMaterial>;
+        if (textured) {
+          const map = makePathTexture(kind);
+          mat = new THREE.MeshStandardMaterial({
+            map,
+            transparent: true,
+            roughness: isWater ? 0.18 : 0.95,
+            metalness: isWater ? 0.25 : 0,
+            side: THREE.DoubleSide,
+          });
+        } else {
+          mat = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(colorHex || style.color),
+            roughness: 0.9,
+            metalness: 0,
+            transparent: kind === "route",
+            opacity: kind === "route" ? 0.85 : 1,
+            side: THREE.DoubleSide,
+          });
+        }
         const mesh = new THREE.Mesh(geo, mat);
         mesh.renderOrder = isWater ? 1 : kind === "border" ? 4 : 2;
         return mesh;
@@ -849,14 +948,26 @@ export function WorldMapBuilder({
         computeMods();
         refreshPositions();
         refreshColors();
-        // Rebuild every tube (terrain under it may have moved).
+        // Rebuild every ribbon (terrain under it may have moved).
         for (const rec of pathMap.values()) disposePathMesh(rec.mesh);
         pathMap.clear();
         for (const p of list) {
           const mesh = buildPath(p.points, p.kind, p.color);
           if (mesh) {
             scene.add(mesh);
-            pathMap.set(p.id, { mesh, sig: `${p.kind}|${p.color ?? ""}|${p.points.join(",")}` });
+            pathMap.set(p.id, {
+              mesh,
+              kind: p.kind,
+              sig: `${p.kind}|${p.color ?? ""}|${p.points.join(",")}`,
+            });
+          }
+        }
+        // Collect river textures to animate (flow).
+        riverTextures.length = 0;
+        for (const rec of pathMap.values()) {
+          if (rec.kind === "river") {
+            const map = (rec.mesh.material as InstanceType<typeof THREE.MeshStandardMaterial>).map;
+            if (map) riverTextures.push(map as InstanceType<typeof THREE.CanvasTexture>);
           }
         }
         buildTrees();
@@ -915,12 +1026,13 @@ export function WorldMapBuilder({
           treeLeaves.geometry.dispose();
           treeLeaves = null;
         }
-        const MAX = 6000;
+        const dens = treeDensityRef.current;
+        const MAX = Math.round(1500 + dens * 9000);
         const cells: { i: number; k: number }[] = [];
         for (let i = 0; i < treeArr.length; i++) {
           const d = treeArr[i];
           if (d < 40 || heightArr[i] < seaLevel) continue;
-          const cnt = d > 180 ? 2 : 1;
+          const cnt = Math.max(1, Math.round((d / 255) * dens * 4));
           for (let k = 0; k < cnt; k++) cells.push({ i, k });
         }
         const n = Math.min(MAX, cells.length);
@@ -1218,15 +1330,35 @@ export function WorldMapBuilder({
           g *= dk;
           b *= dk;
         }
-        // territory tint (political overlay)
+        // territory tint (political overlay) + auto borders
         const reg = regionArr[i];
         if (reg > 0) {
           const rc = regionColorsRef.current[reg];
           if (rc) {
-            const f = h < seaLevel ? 0.14 : 0.34;
+            const strong = showRegionsRef.current;
+            const f = h < seaLevel ? 0.16 : strong ? 0.62 : 0.32;
             r = r * (1 - f) + rc[0] * f;
             g = g * (1 - f) + rc[1] * f;
             b = b * (1 - f) + rc[2] * f;
+          }
+        }
+        // auto-drawn region borders (cells bordering a different region)
+        {
+          const x = i % size;
+          const y = (i / size) | 0;
+          const me = regionArr[i];
+          const edge =
+            (x > 0 && regionArr[i - 1] !== me) ||
+            (x < size - 1 && regionArr[i + 1] !== me) ||
+            (y > 0 && regionArr[i - size] !== me) ||
+            (y < size - 1 && regionArr[i + size] !== me);
+          if (edge && (me > 0 || showRegionsRef.current)) {
+            // darken toward an ink outline; bolder when regions are highlighted
+            const onlyNone = me === 0; // boundary seen from the unowned side
+            const bf = (showRegionsRef.current ? 0.6 : 0.32) * (onlyNone ? 0.6 : 1);
+            r = r * (1 - bf) + 0.12 * bf;
+            g = g * (1 - bf) + 0.1 * bf;
+            b = b * (1 - bf) + 0.09 * bf;
           }
         }
         // fog of exploration: shroud unrevealed cells
@@ -1684,6 +1816,9 @@ export function WorldMapBuilder({
         }
         updatePoiLabels();
 
+        // River flow.
+        for (const t of riverTextures) t.offset.y -= dt * 0.12;
+
         // Weather animation.
         if (weatherPoints) {
           const snow = weatherKind === "snow";
@@ -1772,6 +1907,7 @@ export function WorldMapBuilder({
             explored: encodeBytes(exploredArr),
             regionMask: encodeBytes(regionArr),
             treeMask: encodeBytes(treeArr),
+            treeDensity: treeDensityRef.current,
           };
         },
         syncPois,
@@ -1809,6 +1945,9 @@ export function WorldMapBuilder({
           }
           refreshColors();
           scheduleSave();
+        },
+        rebuildTrees() {
+          buildTrees();
         },
         reshade() {
           refreshColors();
@@ -1884,6 +2023,7 @@ export function WorldMapBuilder({
   useEffect(() => engineRef.current?.setTime(time), [time]);
   useEffect(() => engineRef.current?.reshade(), [previewPlayer]);
   useEffect(() => engineRef.current?.reshade(), [regionColors]);
+  useEffect(() => engineRef.current?.reshade(), [showRegions]);
 
   // Rotate the compass every frame.
   useEffect(() => {
@@ -1956,6 +2096,18 @@ export function WorldMapBuilder({
             {v === "3d" ? "3D orbit" : "Top-down"}
           </button>
         ))}
+        <button
+          onClick={() => setShowRegions((s) => !s)}
+          title="Highlight political regions & borders"
+          className={cn(
+            segBtn,
+            showRegions
+              ? "bg-arcane text-parchment-50"
+              : "text-ink-soft hover:bg-parchment-300/60",
+          )}
+        >
+          Regions
+        </button>
       </div>
 
       {canEdit && (
@@ -2252,6 +2404,24 @@ export function WorldMapBuilder({
                   Clear
                 </button>
               </div>
+              <label className="block text-[0.65rem] text-ink-soft">
+                Density {Math.round(treeDensity * 100)}%
+                <input
+                  type="range"
+                  min={0.05}
+                  max={1}
+                  step={0.05}
+                  value={treeDensity}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setTreeDensity(v);
+                    treeDensityRef.current = v;
+                    engineRef.current?.rebuildTrees();
+                  }}
+                  onPointerUp={() => saveWorld({ treeDensity })}
+                  className="w-full accent-forest"
+                />
+              </label>
               <p className="text-[0.6rem] text-ink-faint">
                 Forests fill automatically; brush to add or clear.
               </p>

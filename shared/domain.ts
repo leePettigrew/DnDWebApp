@@ -743,6 +743,8 @@ export interface WorldMap {
   regionMask?: string;
   /** Tree density: base64 of size*size bytes (0 = none, higher = denser). */
   treeMask?: string;
+  /** Global tree density multiplier (0..1, default 0.5). */
+  treeDensity?: number;
   /** Current party position (normalized 0..1), shown as a banner. */
   party?: { x: number; y: number };
   /** Party travel speed in miles/day (for the measure ruler). */
