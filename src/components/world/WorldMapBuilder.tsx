@@ -721,6 +721,7 @@ export function WorldMapBuilder({
         poiPick.length = 0;
         for (const rec of poiMap.values()) poiPick.push(rec.group);
         syncLights(list);
+        buildLanterns();
       }
       function updatePoiLabels() {
         for (const [id, rec] of poiMap) {
@@ -812,6 +813,7 @@ export function WorldMapBuilder({
           }
         }
         buildTrees();
+        buildLanterns();
         repositionPois();
         setParty(worldRef.current.party ?? null);
       }
@@ -1257,6 +1259,86 @@ export function WorldMapBuilder({
         }
       }
 
+      // --- lanterns (towns + along roads) ---
+      const lanternPostMat = new THREE.MeshStandardMaterial({ color: 0x3a3027, roughness: 0.85 });
+      const lanternGlowMat = new THREE.MeshStandardMaterial({
+        color: 0xffe2a6,
+        emissive: 0xffb347,
+        emissiveIntensity: 0.4,
+        roughness: 0.4,
+      });
+      let lanternPosts: InstanceType<typeof THREE.InstancedMesh> | null = null;
+      let lanternGlows: InstanceType<typeof THREE.InstancedMesh> | null = null;
+      function lanternPositions() {
+        const out: { x: number; y: number }[] = [];
+        const pois = canEdit
+          ? worldRef.current.pois ?? []
+          : (worldRef.current.pois ?? []).filter((p) => !p.hidden);
+        for (const p of pois) {
+          if (!SETTLEMENT.has(p.kind)) continue;
+          const n = p.kind === "city" ? 5 : p.kind === "town" ? 4 : 3;
+          const rad = 0.013;
+          for (let k = 0; k < n; k++) {
+            const a = (k / n) * Math.PI * 2;
+            out.push({ x: p.x + Math.cos(a) * rad, y: p.y + Math.sin(a) * rad });
+          }
+        }
+        for (const path of worldRef.current.paths ?? []) {
+          if (path.kind !== "road") continue;
+          const pts = path.points;
+          const spacing = 0.035;
+          for (let s = 0; s + 3 < pts.length; s += 2) {
+            const ax = pts[s];
+            const ay = pts[s + 1];
+            const bx = pts[s + 2];
+            const by = pts[s + 3];
+            const segLen = Math.hypot(bx - ax, by - ay);
+            for (let t = 0; t < segLen; t += spacing) {
+              const f = t / segLen;
+              out.push({ x: ax + (bx - ax) * f + 0.006, y: ay + (by - ay) * f });
+            }
+          }
+        }
+        return out.slice(0, 500);
+      }
+      function buildLanterns() {
+        if (lanternPosts) {
+          scene.remove(lanternPosts);
+          lanternPosts.geometry.dispose();
+          lanternPosts = null;
+        }
+        if (lanternGlows) {
+          scene.remove(lanternGlows);
+          lanternGlows.geometry.dispose();
+          lanternGlows = null;
+        }
+        const ps = lanternPositions();
+        const n = ps.length;
+        if (n === 0) return;
+        const postGeo = new THREE.CylinderGeometry(0.03, 0.045, 0.95, 5);
+        postGeo.translate(0, 0.47, 0);
+        const glowGeo = new THREE.SphereGeometry(0.1, 8, 8);
+        glowGeo.translate(0, 1.0, 0);
+        lanternPosts = new THREE.InstancedMesh(postGeo, lanternPostMat, n);
+        lanternGlows = new THREE.InstancedMesh(glowGeo, lanternGlowMat, n);
+        const m = new THREE.Matrix4();
+        const q = new THREE.Quaternion();
+        const sv = new THREE.Vector3(1, 1, 1);
+        const pv = new THREE.Vector3();
+        for (let i = 0; i < n; i++) {
+          const { x, y } = ps[i];
+          pv.set((x - 0.5) * W, heightAtNorm(x, y) * HEIGHT, (y - 0.5) * W);
+          m.compose(pv, q, sv);
+          lanternPosts.setMatrixAt(i, m);
+          lanternGlows.setMatrixAt(i, m);
+        }
+        lanternPosts.instanceMatrix.needsUpdate = true;
+        lanternGlows.instanceMatrix.needsUpdate = true;
+        lanternGlows.renderOrder = 3;
+        scene.add(lanternPosts);
+        scene.add(lanternGlows);
+      }
+
       function makeWeather(kind: WorldWeather) {
         const count = kind === "snow" ? 1400 : kind === "rain" || kind === "storm" ? 2200 : 0;
         if (count === 0) return null;
@@ -1328,6 +1410,7 @@ export function WorldMapBuilder({
         ambient.color.setRGB(0.6 + day * 0.4, 0.65 + day * 0.35, 0.8);
         const lv = lightLevel();
         for (const l of lightMap.values()) l.intensity = lv;
+        lanternGlowMat.emissiveIntensity = 0.2 + nightFactor * 2.6 + (1 - dim) * 0.6;
       }
       applyWeather(weatherKind);
       syncPois(
@@ -1708,6 +1791,14 @@ export function WorldMapBuilder({
           if (treeLeaves) {
             scene.remove(treeLeaves);
             treeLeaves.geometry.dispose();
+          }
+          if (lanternPosts) {
+            scene.remove(lanternPosts);
+            lanternPosts.geometry.dispose();
+          }
+          if (lanternGlows) {
+            scene.remove(lanternGlows);
+            lanternGlows.geometry.dispose();
           }
           if (partySprite) disposeSprite(partySprite);
           clearMeasureObjs();
