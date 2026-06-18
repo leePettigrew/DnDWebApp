@@ -306,6 +306,11 @@ export function WorldMapBuilder({
       let exploredArr: Uint8Array = new Uint8Array(size * size);
       let regionArr: Uint8Array = new Uint8Array(size * size);
       let treeArr: Uint8Array = new Uint8Array(size * size);
+      // Terrain modifiers derived from paths (rivers carve, roads flatten).
+      const carveArr = new Float32Array(size * size);
+      const roadTarget = new Float32Array(size * size);
+      const roadW = new Float32Array(size * size);
+      const dispArr = new Float32Array(size * size); // displayed height = base + mods
       let seaLevel = world.seaLevel;
       let fogOn = !!world.fog;
 
@@ -456,7 +461,7 @@ export function WorldMapBuilder({
       function heightAtNorm(nx: number, ny: number) {
         const col = Math.max(0, Math.min(size - 1, Math.round(nx * N)));
         const row = Math.max(0, Math.min(size - 1, Math.round(ny * N)));
-        return heightArr[row * size + col];
+        return dispArr[row * size + col];
       }
       function roundRect(
         c: CanvasRenderingContext2D,
@@ -656,6 +661,8 @@ export function WorldMapBuilder({
           label: InstanceType<typeof THREE.Sprite>;
           aspect: number;
           sig: string;
+          x: number;
+          y: number;
         }
       >();
       const poiPick: InstanceType<typeof THREE.Object3D>[] = [];
@@ -682,6 +689,8 @@ export function WorldMapBuilder({
           const sig = `${p.name}|${p.kind}|${p.color ?? ""}|${p.hidden ? 1 : 0}`;
           const ex = poiMap.get(p.id);
           if (ex && ex.sig === sig) {
+            ex.x = p.x;
+            ex.y = p.y;
             ex.group.position.set(
               (p.x - 0.5) * W,
               heightAtNorm(p.x, p.y) * HEIGHT,
@@ -707,7 +716,7 @@ export function WorldMapBuilder({
           label.renderOrder = 11;
           label.visible = false;
           scene.add(label);
-          poiMap.set(p.id, { group, label, aspect, sig });
+          poiMap.set(p.id, { group, label, aspect, sig, x: p.x, y: p.y });
         }
         poiPick.length = 0;
         for (const rec of poiMap.values()) poiPick.push(rec.group);
@@ -727,6 +736,11 @@ export function WorldMapBuilder({
             );
             rec.label.scale.set(s * rec.aspect, s, 1);
           }
+        }
+      }
+      function repositionPois() {
+        for (const rec of poiMap.values()) {
+          rec.group.position.y = heightAtNorm(rec.x, rec.y) * HEIGHT;
         }
       }
 
@@ -750,6 +764,10 @@ export function WorldMapBuilder({
         (mesh.material as InstanceType<typeof THREE.MeshStandardMaterial>).dispose();
       }
       function buildPath(points: number[], kind: WorldPath["kind"], colorHex?: string) {
+        // Rivers sit low in the carved channel; roads on the flattened strip;
+        // routes/borders ride on top of the surface.
+        const yOff =
+          kind === "river" ? -0.02 : kind === "road" ? 0.04 : 0.16;
         const v: InstanceType<typeof THREE.Vector3>[] = [];
         for (let i = 0; i + 1 < points.length; i += 2) {
           const nx = points[i];
@@ -757,7 +775,7 @@ export function WorldMapBuilder({
           v.push(
             new THREE.Vector3(
               (nx - 0.5) * W,
-              heightAtNorm(nx, ny) * HEIGHT + 0.16,
+              heightAtNorm(nx, ny) * HEIGHT + yOff,
               (ny - 0.5) * W,
             ),
           );
@@ -765,38 +783,37 @@ export function WorldMapBuilder({
         if (v.length < 2) return null;
         const curve = new THREE.CatmullRomCurve3(v, false, "catmullrom", 0.5);
         const style = PATH_STYLE[kind] ?? PATH_STYLE.route;
-        const geo = new THREE.TubeGeometry(curve, Math.max(8, v.length * 10), style.radius, 6, false);
+        const geo = new THREE.TubeGeometry(curve, Math.max(8, v.length * 10), style.radius, 7, false);
+        const isWater = kind === "river";
         const mat = new THREE.MeshStandardMaterial({
           color: new THREE.Color(colorHex || style.color),
-          roughness: kind === "river" ? 0.3 : 0.85,
-          metalness: kind === "river" ? 0.2 : 0,
+          roughness: isWater ? 0.15 : 0.85,
+          metalness: isWater ? 0.3 : 0,
+          transparent: isWater,
+          opacity: isWater ? 0.85 : 1,
         });
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.renderOrder = 2;
+        mesh.renderOrder = isWater ? 1 : 2;
         return mesh;
       }
       function syncPaths(list: WorldPath[]) {
-        const ids = new Set(list.map((p) => p.id));
-        for (const [id, rec] of pathMap) {
-          if (!ids.has(id)) {
-            disposePathMesh(rec.mesh);
-            pathMap.delete(id);
-          }
-        }
+        // Re-carve rivers / re-flatten roads, then reflow the surface + objects.
+        computeMods();
+        refreshPositions();
+        refreshColors();
+        // Rebuild every tube (terrain under it may have moved).
+        for (const rec of pathMap.values()) disposePathMesh(rec.mesh);
+        pathMap.clear();
         for (const p of list) {
-          const sig = `${p.kind}|${p.color ?? ""}|${p.points.join(",")}`;
-          const ex = pathMap.get(p.id);
-          if (ex && ex.sig === sig) continue;
-          if (ex) {
-            disposePathMesh(ex.mesh);
-            pathMap.delete(p.id);
-          }
           const mesh = buildPath(p.points, p.kind, p.color);
           if (mesh) {
             scene.add(mesh);
-            pathMap.set(p.id, { mesh, sig });
+            pathMap.set(p.id, { mesh, sig: `${p.kind}|${p.color ?? ""}|${p.points.join(",")}` });
           }
         }
+        buildTrees();
+        repositionPois();
+        setParty(worldRef.current.party ?? null);
       }
 
       // In-progress path being drawn.
@@ -1005,9 +1022,68 @@ export function WorldMapBuilder({
         measureA = null;
       }
 
+      function recomputeDispCell(i: number) {
+        let d = heightArr[i] + carveArr[i];
+        const w = roadW[i];
+        if (w > 0) d = d * (1 - w) + roadTarget[i] * w;
+        dispArr[i] = d < 0 ? 0 : d > 1 ? 1 : d;
+      }
+      function recomputeDispAll() {
+        for (let i = 0; i < dispArr.length; i++) recomputeDispCell(i);
+      }
+      // Carve rivers / flatten roads into the surface from the path list.
+      function computeMods() {
+        carveArr.fill(0);
+        roadTarget.fill(0);
+        roadW.fill(0);
+        const cell = W / size;
+        for (const p of worldRef.current.paths ?? []) {
+          const isRiver = p.kind === "river";
+          const isRoad = p.kind === "road";
+          if (!isRiver && !isRoad) continue;
+          const rad = Math.max(1, Math.round((isRiver ? 0.8 : 0.6) / cell));
+          const depth = 0.075;
+          const pts = p.points;
+          for (let s = 0; s + 3 < pts.length; s += 2) {
+            const ax = pts[s];
+            const ay = pts[s + 1];
+            const bx = pts[s + 2];
+            const by = pts[s + 3];
+            const steps = Math.max(1, Math.ceil(Math.hypot((bx - ax) * size, (by - ay) * size) / 0.6));
+            for (let t = 0; t <= steps; t++) {
+              const f = t / steps;
+              const sc = Math.round((ax + (bx - ax) * f) * N);
+              const sr = Math.round((ay + (by - ay) * f) * N);
+              const baseH = heightArr[Math.max(0, Math.min(size * size - 1, sr * size + sc))];
+              for (let dy = -rad; dy <= rad; dy++) {
+                for (let dx = -rad; dx <= rad; dx++) {
+                  const x = sc + dx;
+                  const y = sr + dy;
+                  if (x < 0 || y < 0 || x >= size || y >= size) continue;
+                  const dist = Math.sqrt(dx * dx + dy * dy);
+                  if (dist > rad) continue;
+                  const fall = 1 - dist / rad;
+                  const i = y * size + x;
+                  if (isRiver) {
+                    const c = -depth * fall;
+                    if (c < carveArr[i]) carveArr[i] = c;
+                  } else {
+                    const w = fall * 0.92;
+                    if (w > roadW[i]) {
+                      roadW[i] = w;
+                      roadTarget[i] = baseH;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        recomputeDispAll();
+      }
       function refreshPositions() {
-        for (let i = 0; i < heightArr.length; i++) {
-          pos.setZ(i, heightArr[i] * HEIGHT);
+        for (let i = 0; i < dispArr.length; i++) {
+          pos.setZ(i, dispArr[i] * HEIGHT);
         }
         pos.needsUpdate = true;
         geo.computeVertexNormals();
@@ -1028,10 +1104,10 @@ export function WorldMapBuilder({
       function slopeAt(i: number) {
         const x = i % size;
         const y = (i / size) | 0;
-        const hl = x > 0 ? heightArr[i - 1] : heightArr[i];
-        const hr = x < size - 1 ? heightArr[i + 1] : heightArr[i];
-        const hu = y > 0 ? heightArr[i - size] : heightArr[i];
-        const hd = y < size - 1 ? heightArr[i + size] : heightArr[i];
+        const hl = x > 0 ? dispArr[i - 1] : dispArr[i];
+        const hr = x < size - 1 ? dispArr[i + 1] : dispArr[i];
+        const hu = y > 0 ? dispArr[i - size] : dispArr[i];
+        const hd = y < size - 1 ? dispArr[i + size] : dispArr[i];
         const dx = hr - hl;
         const dy = hd - hu;
         return clamp01(Math.sqrt(dx * dx + dy * dy) * ((HEIGHT * size) / W) * 0.45);
@@ -1044,7 +1120,7 @@ export function WorldMapBuilder({
       const SNOW = [0.95, 0.96, 0.98];
       const BED = [0.3, 0.32, 0.3];
       function setColorAt(i: number) {
-        const h = heightArr[i];
+        const h = dispArr[i];
         const landH = clamp01((h - seaLevel) / Math.max(0.001, 1 - seaLevel));
         const slope = slopeAt(i);
         let r = SAND[0];
@@ -1122,6 +1198,7 @@ export function WorldMapBuilder({
         water.position.y = seaLevel * HEIGHT + 0.02;
       }
 
+      computeMods();
       refreshPositions();
       refreshColors();
       setWater();
@@ -1258,9 +1335,8 @@ export function WorldMapBuilder({
           ? resolvedPoisRef.current
           : resolvedPoisRef.current.filter((p) => !p.hidden),
       );
+      // Rebuilds tubes, carves/flattens terrain, then reseats trees/POIs/party.
       syncPaths(worldRef.current.paths ?? []);
-      buildTrees();
-      if (worldRef.current.party) setParty(worldRef.current.party);
 
       // --- brushing ---
       const ray = new THREE.Raycaster();
@@ -1337,7 +1413,10 @@ export function WorldMapBuilder({
         for (let y = y0; y <= y1; y++) {
           for (let x = x0; x <= x1; x++) {
             const i = y * size + x;
-            if (touchedHeight) pos.setZ(i, heightArr[i] * HEIGHT);
+            if (touchedHeight) {
+              recomputeDispCell(i);
+              pos.setZ(i, dispArr[i] * HEIGHT);
+            }
             setColorAt(i);
           }
         }
@@ -1417,6 +1496,11 @@ export function WorldMapBuilder({
           } else {
             geo.computeVertexNormals(); // accurate lighting after the stroke
             refreshColors();
+            if (toolRef.current === "raise" ||
+              toolRef.current === "lower" ||
+              toolRef.current === "smooth") {
+              repositionPois();
+            }
           }
           scheduleSave();
         } else if (
@@ -1531,10 +1615,9 @@ export function WorldMapBuilder({
         load(wm) {
           if (wm.size !== size) return; // size changes rebuild via the effect
           loadArrays(wm);
-          refreshPositions();
-          refreshColors();
           setWater();
-          buildTrees();
+          // Recomputes terrain mods, repaints, and reseats tubes/trees/POIs.
+          syncPaths(worldRef.current.paths ?? []);
         },
         exportWorld(): WorldMap {
           const h = new Uint8Array(size * size);
