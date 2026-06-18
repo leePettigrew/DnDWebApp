@@ -10,6 +10,8 @@ import { ChevronLeftIcon, TrashIcon } from "@/components/ui/icons";
 import { VisibilityControl } from "@/components/dm/VisibilityControl";
 import { FactionReputation } from "./FactionReputation";
 import { FactionRelationships } from "./FactionRelationships";
+import { FactionMembers } from "./FactionMembers";
+import { FactionAgendas } from "./FactionAgendas";
 import { usePermissions } from "@/lib/data/hooks";
 import {
   FACTION_STANDINGS,
@@ -226,7 +228,11 @@ export function FactionDetail({
 
       <FactionReputation faction={f} onUpdate={onUpdate} />
 
+      <FactionMembers faction={f} onUpdate={onUpdate} />
+
       <FactionRelationships faction={f} />
+
+      <FactionAgendas faction={f} onUpdate={onUpdate} />
 
       {/* Notes */}
       <Panel title="Notes">
