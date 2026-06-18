@@ -319,9 +319,16 @@ export class ClientSession {
       return this.error("forbidden", "You don't have permission to add that.");
     }
     const ts = nowISO();
+    // Reuse the client's optimistic id (tempId) so its local entity and the URL
+    // it just navigated to match the stored record. Fall back only on the (near
+    // impossible) chance that id already exists.
+    const id =
+      msg.tempId && !this.repos.entities[msg.collection].get(this.campaignId!, msg.tempId)
+        ? msg.tempId
+        : newId();
     const entity: Record<string, unknown> = {
       ...msg.input,
-      id: newId(),
+      id,
       campaignId: this.campaignId,
       createdAt: ts,
       updatedAt: ts,

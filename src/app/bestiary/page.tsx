@@ -77,16 +77,29 @@ export default function BestiaryPage() {
       {filtered.length === 0 ? (
         <EmptyState
           icon={<ClawIcon />}
-          title="The bestiary is empty"
+          title={
+            filter === "npc"
+              ? "No NPCs yet"
+              : filter === "monster"
+                ? "No monsters yet"
+                : "The bestiary is empty"
+          }
           description={
             canManage
-              ? "Add a monster or NPC stat block to begin your menagerie."
+              ? filter === "npc"
+                ? "Add an NPC stat block to start your cast."
+                : filter === "monster"
+                  ? "Add a monster stat block to begin your menagerie."
+                  : "Add a monster or NPC stat block to begin your menagerie."
               : "Only the DM can add stat blocks to the bestiary."
           }
           action={
             canManage ? (
-              <Button onClick={() => createBlock("monster")}>
-                <PlusIcon className="h-4 w-4" /> New Monster
+              <Button
+                onClick={() => createBlock(filter === "npc" ? "npc" : "monster")}
+              >
+                <PlusIcon className="h-4 w-4" />{" "}
+                {filter === "npc" ? "New NPC" : "New Monster"}
               </Button>
             ) : undefined
           }
