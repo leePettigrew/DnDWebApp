@@ -481,34 +481,37 @@ export function WorldMapBuilder({
       }
       function makeLabel(p: WorldPoi) {
         const name = p.name || "Place";
-        const font = "600 28px Georgia, serif";
+        const SC = 2; // supersample for crisp text when small
+        const font = `600 ${24 * SC}px Georgia, serif`;
         const meas = document.createElement("canvas").getContext("2d")!;
         meas.font = font;
         const tw = Math.ceil(meas.measureText(name).width);
-        const pad = 16;
-        const dot = 22;
-        const w = pad * 2 + dot + 10 + tw;
-        const h = 50;
+        const dot = 11 * SC;
+        const padL = 11 * SC;
+        const padR = 14 * SC;
+        const gap = 7 * SC;
+        const h = 36 * SC;
+        const w = padL + dot + gap + tw + padR;
         const c = document.createElement("canvas");
         c.width = w;
         c.height = h;
         const ctx = c.getContext("2d")!;
         ctx.font = font;
-        ctx.fillStyle = "rgba(244,236,216,0.97)";
-        roundRect(ctx, 2, 2, w - 4, h - 4, (h - 4) / 2);
+        ctx.fillStyle = "rgba(247,240,224,0.95)";
+        roundRect(ctx, SC, SC, w - 2 * SC, h - 2 * SC, (h - 2 * SC) / 2);
         ctx.fill();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = p.hidden ? "rgba(122,45,45,0.9)" : "rgba(60,50,40,0.55)";
+        ctx.lineWidth = 1.5 * SC;
+        ctx.strokeStyle = p.hidden ? "rgba(122,45,45,0.85)" : "rgba(60,50,40,0.4)";
         ctx.stroke();
         ctx.fillStyle = p.color || "#7a2d2d";
         ctx.beginPath();
-        ctx.arc(pad + dot / 2, h / 2, dot / 2, 0, Math.PI * 2);
+        ctx.arc(padL + dot / 2, h / 2, dot / 2, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = "#2b2218";
         ctx.textBaseline = "middle";
-        ctx.fillText(name, pad + dot + 10, h / 2 + 2);
+        ctx.fillText(name, padL + dot + gap, h / 2 + SC);
         const tex = new THREE.CanvasTexture(c);
-        tex.anisotropy = 4;
+        tex.anisotropy = 8;
         tex.needsUpdate = true;
         return { tex, aspect: w / h };
       }
@@ -524,7 +527,7 @@ export function WorldMapBuilder({
         snow: new THREE.MeshStandardMaterial({ color: 0xeef2f5, roughness: 1 }),
         dark: new THREE.MeshStandardMaterial({ color: 0x35312a, roughness: 0.9 }),
       };
-      const POI_SCALE = 0.34;
+      const POI_SCALE = 0.17;
       type Mat = InstanceType<typeof THREE.MeshStandardMaterial>;
       const pBox = (w: number, h: number, d: number, m: Mat, x = 0, y = 0, z = 0) => {
         const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
@@ -726,13 +729,13 @@ export function WorldMapBuilder({
       function updatePoiLabels() {
         for (const [id, rec] of poiMap) {
           const d = camera.position.distanceTo(rec.group.position);
-          const show = d < 32 || id === hoveredPoiId;
+          const show = d < 30 || id === hoveredPoiId;
           rec.label.visible = show;
           if (show) {
-            const s = Math.min(2.8, Math.max(1.3, d * 0.05));
+            const s = Math.min(1.05, Math.max(0.5, d * 0.022));
             rec.label.position.set(
               rec.group.position.x,
-              rec.group.position.y + 1.1 + s * 0.5,
+              rec.group.position.y + 0.5 + s * 0.4,
               rec.group.position.z,
             );
             rec.label.scale.set(s * rec.aspect, s, 1);
@@ -752,8 +755,8 @@ export function WorldMapBuilder({
       > = {
         river: { color: 0x2f6e9e, radius: 0.2 },
         road: { color: 0x6e503a, radius: 0.17 },
-        route: { color: 0xb89968, radius: 0.13 },
-        border: { color: 0x2c2418, radius: 0.11 },
+        route: { color: 0xd9b066, radius: 0.13 },
+        border: { color: 0x5a4636, radius: 0.11 },
       };
       const pathMap = new Map<
         string,
@@ -765,12 +768,14 @@ export function WorldMapBuilder({
         (mesh.material as InstanceType<typeof THREE.MeshStandardMaterial>).dispose();
       }
       const PATH_WIDTH: Record<WorldPath["kind"], number> = {
-        river: 0.8,
-        road: 0.55,
-        route: 0.4,
-        border: 0.32,
+        river: 0.42,
+        road: 0.3,
+        route: 0.22,
+        border: 0.18,
       };
       // A flat ribbon draped on the terrain (painted on, not a raised tube).
+      // Borders and routes render dashed + raised so they read as markings, not
+      // as rivers/roads.
       function buildPath(points: number[], kind: WorldPath["kind"], colorHex?: string) {
         const ctrl: InstanceType<typeof THREE.Vector3>[] = [];
         for (let i = 0; i + 1 < points.length; i += 2) {
@@ -778,11 +783,18 @@ export function WorldMapBuilder({
         }
         if (ctrl.length < 2) return null;
         const curve = new THREE.CatmullRomCurve3(ctrl, false, "catmullrom", 0.5);
-        const segs = Math.max(16, ctrl.length * 16);
+        const segs = Math.max(20, ctrl.length * 18);
         const sample = curve.getSpacedPoints(segs);
-        const half = (PATH_WIDTH[kind] ?? 0.4) / 2;
-        const yOff = kind === "river" ? 0.01 : 0.04;
-        const positions = new Float32Array((segs + 1) * 2 * 3);
+        const half = (PATH_WIDTH[kind] ?? 0.3) / 2;
+        const dashed = kind === "border" || kind === "route";
+        const yOff =
+          kind === "river" ? 0.01 : kind === "border" ? 0.16 : kind === "route" ? 0.09 : 0.04;
+        const Lx: number[] = [];
+        const Ly: number[] = [];
+        const Lz: number[] = [];
+        const Rx: number[] = [];
+        const Ry: number[] = [];
+        const Rz: number[] = [];
         for (let i = 0; i <= segs; i++) {
           const p = sample[i];
           const prev = sample[Math.max(0, i - 1)];
@@ -796,37 +808,40 @@ export function WorldMapBuilder({
           const lz = p.z + pz * half;
           const rx = p.x - px * half;
           const rz = p.z - pz * half;
-          const ly = heightAtNorm(lx / W + 0.5, lz / W + 0.5) * HEIGHT + yOff;
-          const ry = heightAtNorm(rx / W + 0.5, rz / W + 0.5) * HEIGHT + yOff;
-          positions[i * 6] = lx;
-          positions[i * 6 + 1] = ly;
-          positions[i * 6 + 2] = lz;
-          positions[i * 6 + 3] = rx;
-          positions[i * 6 + 4] = ry;
-          positions[i * 6 + 5] = rz;
+          Lx.push(lx);
+          Ly.push(heightAtNorm(lx / W + 0.5, lz / W + 0.5) * HEIGHT + yOff);
+          Lz.push(lz);
+          Rx.push(rx);
+          Ry.push(heightAtNorm(rx / W + 0.5, rz / W + 0.5) * HEIGHT + yOff);
+          Rz.push(rz);
         }
+        const pos: number[] = [];
         const idx: number[] = [];
+        const pushQuad = (i: number) => {
+          const b = pos.length / 3;
+          pos.push(Lx[i], Ly[i], Lz[i], Rx[i], Ry[i], Rz[i], Lx[i + 1], Ly[i + 1], Lz[i + 1], Rx[i + 1], Ry[i + 1], Rz[i + 1]);
+          idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        };
         for (let i = 0; i < segs; i++) {
-          const a = i * 2;
-          idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+          if (dashed && i % 4 >= 2) continue; // 2 on, 2 off
+          pushQuad(i);
         }
         const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
         geo.setIndex(idx);
         geo.computeVertexNormals();
         const isWater = kind === "river";
         const style = PATH_STYLE[kind] ?? PATH_STYLE.route;
-        const translucent = isWater || kind === "route";
         const mat = new THREE.MeshStandardMaterial({
           color: new THREE.Color(colorHex || style.color),
           roughness: isWater ? 0.15 : 0.9,
           metalness: isWater ? 0.3 : 0,
-          transparent: translucent,
-          opacity: isWater ? 0.86 : kind === "route" ? 0.8 : 1,
+          transparent: isWater || kind === "route",
+          opacity: isWater ? 0.86 : kind === "route" ? 0.85 : 1,
           side: THREE.DoubleSide,
         });
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.renderOrder = isWater ? 1 : 2;
+        mesh.renderOrder = isWater ? 1 : kind === "border" ? 4 : 2;
         return mesh;
       }
       function syncPaths(list: WorldPath[]) {
@@ -930,7 +945,7 @@ export function WorldMapBuilder({
           const jy = (thash(i, k * 3 + 2) - 0.5) * 0.85;
           const nx = (x + 0.5 + jx) / size;
           const ny = (y + 0.5 + jy) / size;
-          const s = (0.7 + thash(i, k * 3 + 3) * 0.7) * 0.2;
+          const s = (0.7 + thash(i, k * 3 + 3) * 0.7) * 0.1;
           pv.set((nx - 0.5) * W, heightAtNorm(nx, ny) * HEIGHT, (ny - 0.5) * W);
           q.setFromAxisAngle(yAxis, thash(i, k) * Math.PI * 2);
           sv.set(s, s * (0.9 + thash(i, k + 9) * 0.45), s);
@@ -1309,7 +1324,7 @@ export function WorldMapBuilder({
         for (const p of pois) {
           if (!SETTLEMENT.has(p.kind)) continue;
           const n = p.kind === "city" ? 5 : p.kind === "town" ? 4 : 3;
-          const rad = 0.013;
+          const rad = 0.007;
           for (let k = 0; k < n; k++) {
             const a = (k / n) * Math.PI * 2;
             out.push({ x: p.x + Math.cos(a) * rad, y: p.y + Math.sin(a) * rad });
@@ -1319,8 +1334,8 @@ export function WorldMapBuilder({
         for (const path of worldRef.current.paths ?? []) {
           if (path.kind !== "road") continue;
           const pts = path.points;
-          const spacing = 0.03;
-          const off = 0.012; // lanterns line the road edges
+          const spacing = 0.028;
+          const off = 0.008; // lanterns line the road edges
           for (let s = 0; s + 3 < pts.length; s += 2) {
             const ax = pts[s];
             const ay = pts[s + 1];
@@ -1363,7 +1378,7 @@ export function WorldMapBuilder({
         lanternGlows = new THREE.InstancedMesh(glowGeo, lanternGlowMat, n);
         const m = new THREE.Matrix4();
         const q = new THREE.Quaternion();
-        const sv = new THREE.Vector3(0.32, 0.32, 0.32);
+        const sv = new THREE.Vector3(0.16, 0.16, 0.16);
         const pv = new THREE.Vector3();
         for (let i = 0; i < n; i++) {
           const { x, y } = ps[i];
