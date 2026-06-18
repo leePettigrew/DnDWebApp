@@ -524,7 +524,7 @@ export function WorldMapBuilder({
         snow: new THREE.MeshStandardMaterial({ color: 0xeef2f5, roughness: 1 }),
         dark: new THREE.MeshStandardMaterial({ color: 0x35312a, roughness: 0.9 }),
       };
-      const POI_SCALE = 1.6;
+      const POI_SCALE = 0.34;
       type Mat = InstanceType<typeof THREE.MeshStandardMaterial>;
       const pBox = (w: number, h: number, d: number, m: Mat, x = 0, y = 0, z = 0) => {
         const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
@@ -732,7 +732,7 @@ export function WorldMapBuilder({
             const s = Math.min(2.8, Math.max(1.3, d * 0.05));
             rec.label.position.set(
               rec.group.position.x,
-              rec.group.position.y + 3.4 + s * 0.6,
+              rec.group.position.y + 1.1 + s * 0.5,
               rec.group.position.z,
             );
             rec.label.scale.set(s * rec.aspect, s, 1);
@@ -764,34 +764,66 @@ export function WorldMapBuilder({
         mesh.geometry.dispose();
         (mesh.material as InstanceType<typeof THREE.MeshStandardMaterial>).dispose();
       }
+      const PATH_WIDTH: Record<WorldPath["kind"], number> = {
+        river: 0.8,
+        road: 0.55,
+        route: 0.4,
+        border: 0.32,
+      };
+      // A flat ribbon draped on the terrain (painted on, not a raised tube).
       function buildPath(points: number[], kind: WorldPath["kind"], colorHex?: string) {
-        // Rivers sit low in the carved channel; roads on the flattened strip;
-        // routes/borders ride on top of the surface.
-        const yOff =
-          kind === "river" ? -0.02 : kind === "road" ? 0.04 : 0.16;
-        const v: InstanceType<typeof THREE.Vector3>[] = [];
+        const ctrl: InstanceType<typeof THREE.Vector3>[] = [];
         for (let i = 0; i + 1 < points.length; i += 2) {
-          const nx = points[i];
-          const ny = points[i + 1];
-          v.push(
-            new THREE.Vector3(
-              (nx - 0.5) * W,
-              heightAtNorm(nx, ny) * HEIGHT + yOff,
-              (ny - 0.5) * W,
-            ),
-          );
+          ctrl.push(new THREE.Vector3((points[i] - 0.5) * W, 0, (points[i + 1] - 0.5) * W));
         }
-        if (v.length < 2) return null;
-        const curve = new THREE.CatmullRomCurve3(v, false, "catmullrom", 0.5);
-        const style = PATH_STYLE[kind] ?? PATH_STYLE.route;
-        const geo = new THREE.TubeGeometry(curve, Math.max(8, v.length * 10), style.radius, 7, false);
+        if (ctrl.length < 2) return null;
+        const curve = new THREE.CatmullRomCurve3(ctrl, false, "catmullrom", 0.5);
+        const segs = Math.max(16, ctrl.length * 16);
+        const sample = curve.getSpacedPoints(segs);
+        const half = (PATH_WIDTH[kind] ?? 0.4) / 2;
+        const yOff = kind === "river" ? 0.01 : 0.04;
+        const positions = new Float32Array((segs + 1) * 2 * 3);
+        for (let i = 0; i <= segs; i++) {
+          const p = sample[i];
+          const prev = sample[Math.max(0, i - 1)];
+          const next = sample[Math.min(segs, i + 1)];
+          const tx = next.x - prev.x;
+          const tz = next.z - prev.z;
+          const tl = Math.hypot(tx, tz) || 1;
+          const px = -tz / tl;
+          const pz = tx / tl;
+          const lx = p.x + px * half;
+          const lz = p.z + pz * half;
+          const rx = p.x - px * half;
+          const rz = p.z - pz * half;
+          const ly = heightAtNorm(lx / W + 0.5, lz / W + 0.5) * HEIGHT + yOff;
+          const ry = heightAtNorm(rx / W + 0.5, rz / W + 0.5) * HEIGHT + yOff;
+          positions[i * 6] = lx;
+          positions[i * 6 + 1] = ly;
+          positions[i * 6 + 2] = lz;
+          positions[i * 6 + 3] = rx;
+          positions[i * 6 + 4] = ry;
+          positions[i * 6 + 5] = rz;
+        }
+        const idx: number[] = [];
+        for (let i = 0; i < segs; i++) {
+          const a = i * 2;
+          idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geo.setIndex(idx);
+        geo.computeVertexNormals();
         const isWater = kind === "river";
+        const style = PATH_STYLE[kind] ?? PATH_STYLE.route;
+        const translucent = isWater || kind === "route";
         const mat = new THREE.MeshStandardMaterial({
           color: new THREE.Color(colorHex || style.color),
-          roughness: isWater ? 0.15 : 0.85,
+          roughness: isWater ? 0.15 : 0.9,
           metalness: isWater ? 0.3 : 0,
-          transparent: isWater,
-          opacity: isWater ? 0.85 : 1,
+          transparent: translucent,
+          opacity: isWater ? 0.86 : kind === "route" ? 0.8 : 1,
+          side: THREE.DoubleSide,
         });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.renderOrder = isWater ? 1 : 2;
@@ -898,7 +930,7 @@ export function WorldMapBuilder({
           const jy = (thash(i, k * 3 + 2) - 0.5) * 0.85;
           const nx = (x + 0.5 + jx) / size;
           const ny = (y + 0.5 + jy) / size;
-          const s = 0.7 + thash(i, k * 3 + 3) * 0.7;
+          const s = (0.7 + thash(i, k * 3 + 3) * 0.7) * 0.2;
           pv.set((nx - 0.5) * W, heightAtNorm(nx, ny) * HEIGHT, (ny - 0.5) * W);
           q.setFromAxisAngle(yAxis, thash(i, k) * Math.PI * 2);
           sv.set(s, s * (0.9 + thash(i, k + 9) * 0.45), s);
@@ -1283,19 +1315,27 @@ export function WorldMapBuilder({
             out.push({ x: p.x + Math.cos(a) * rad, y: p.y + Math.sin(a) * rad });
           }
         }
+        let side = 0;
         for (const path of worldRef.current.paths ?? []) {
           if (path.kind !== "road") continue;
           const pts = path.points;
-          const spacing = 0.035;
+          const spacing = 0.03;
+          const off = 0.012; // lanterns line the road edges
           for (let s = 0; s + 3 < pts.length; s += 2) {
             const ax = pts[s];
             const ay = pts[s + 1];
             const bx = pts[s + 2];
             const by = pts[s + 3];
-            const segLen = Math.hypot(bx - ax, by - ay);
+            const segLen = Math.hypot(bx - ax, by - ay) || 1;
+            const px = -(by - ay) / segLen; // perpendicular
+            const py = (bx - ax) / segLen;
             for (let t = 0; t < segLen; t += spacing) {
               const f = t / segLen;
-              out.push({ x: ax + (bx - ax) * f + 0.006, y: ay + (by - ay) * f });
+              const sgn = side++ % 2 === 0 ? 1 : -1;
+              out.push({
+                x: ax + (bx - ax) * f + px * off * sgn,
+                y: ay + (by - ay) * f + py * off * sgn,
+              });
             }
           }
         }
@@ -1323,7 +1363,7 @@ export function WorldMapBuilder({
         lanternGlows = new THREE.InstancedMesh(glowGeo, lanternGlowMat, n);
         const m = new THREE.Matrix4();
         const q = new THREE.Quaternion();
-        const sv = new THREE.Vector3(1, 1, 1);
+        const sv = new THREE.Vector3(0.32, 0.32, 0.32);
         const pv = new THREE.Vector3();
         for (let i = 0; i < n; i++) {
           const { x, y } = ps[i];
