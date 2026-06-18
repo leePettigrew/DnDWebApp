@@ -13,6 +13,7 @@ import { FactionRelationships } from "./FactionRelationships";
 import { FactionMembers } from "./FactionMembers";
 import { FactionAgendas } from "./FactionAgendas";
 import { FactionQuestsHistory } from "./FactionQuestsHistory";
+import { FactionReadView } from "./FactionReadView";
 import { usePermissions } from "@/lib/data/hooks";
 import {
   FACTION_STANDINGS,
@@ -76,6 +77,9 @@ export function FactionDetail({
   onBack: () => void;
 }) {
   const isDM = usePermissions().isDM;
+
+  // Players get a clean read-only dossier; the DM gets the full editor.
+  if (!isDM) return <FactionReadView faction={f} onBack={onBack} />;
 
   return (
     <div className="space-y-6">

@@ -79,10 +79,14 @@ export function FactionReputation({
         <ul className="space-y-2">
           {reputation.map((r) => {
             const rank = rankFor(r.value, ranks);
-            const pct = Math.max(
-              0,
-              Math.min(100, (r.value / Math.max(1, maxRank)) * 100),
-            );
+            // Diverging bar: negative reputation fills left (oxblood), positive
+            // fills right (brass) from a centre line.
+            const range = Math.max(1, maxRank);
+            const frac = Math.max(-1, Math.min(1, r.value / range));
+            const widthPct = Math.abs(frac) * 50;
+            const leftPct = frac >= 0 ? 50 : 50 - widthPct;
+            const unlocked = rewards.filter((rw) => r.value >= rw.minRep);
+            const next = rewards.find((rw) => r.value < rw.minRep);
             return (
               <li
                 key={r.id}
@@ -120,12 +124,31 @@ export function FactionReputation({
                     <TrashIcon className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full border border-parchment-400/60 bg-parchment-300/60">
+                <div className="relative mt-2 h-2.5 rounded-full border border-parchment-400/60 bg-parchment-300/40">
                   <div
-                    className="h-full rounded-full bg-brass transition-all"
-                    style={{ width: `${pct}%` }}
+                    className={cn(
+                      "absolute inset-y-0 rounded-full transition-all",
+                      frac >= 0 ? "bg-brass" : "bg-oxblood",
+                    )}
+                    style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
                   />
+                  <div className="absolute -inset-y-0.5 left-1/2 w-px bg-ink/30" />
                 </div>
+                {(unlocked.length > 0 || next) && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    {unlocked.map((rw) => (
+                      <Badge key={rw.id} tone="forest">
+                        {rw.title}
+                      </Badge>
+                    ))}
+                    {next && (
+                      <span className="text-[0.65rem] text-ink-faint">
+                        next: {next.title}{" "}
+                        <span className="numerals">(at {next.minRep})</span>
+                      </span>
+                    )}
+                  </div>
+                )}
               </li>
             );
           })}

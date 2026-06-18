@@ -13,6 +13,7 @@ import { useCampaigns, useFactions, useStatBlocks } from "@/lib/data/hooks";
 import { newFactionInput } from "@/lib/domain/factories";
 import { FACTION_STANDINGS, FACTION_TYPES } from "@/lib/domain/types";
 import { FactionDetail, STANDING_TONE } from "./FactionDetail";
+import { FactionRelationMap } from "./FactionRelationMap";
 
 export function FactionRoster() {
   const { items: campaigns } = useCampaigns();
@@ -50,6 +51,8 @@ export function FactionRoster() {
           <PlusIcon className="h-4 w-4" /> New faction
         </Button>
       </div>
+
+      <FactionRelationMap />
 
       {factions.length === 0 ? (
         <Panel tone="flat">
