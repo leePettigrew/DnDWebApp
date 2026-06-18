@@ -436,8 +436,7 @@ export function WorldMapBuilder({
         typeof THREE.Float32BufferAttribute
       >;
 
-      // --- POI marker sprites (live in the scene → no overlay drift) ---
-      const spriteMap = new Map<string, InstanceType<typeof THREE.Sprite>>();
+      // --- POI 3D models + hover/zoom labels ---
       function heightAtNorm(nx: number, ny: number) {
         const col = Math.max(0, Math.min(size - 1, Math.round(nx * N)));
         const row = Math.max(0, Math.min(size - 1, Math.round(ny * N)));
@@ -492,45 +491,227 @@ export function WorldMapBuilder({
         tex.needsUpdate = true;
         return { tex, aspect: w / h };
       }
-      function placeSprite(sp: InstanceType<typeof THREE.Sprite>, p: WorldPoi) {
-        sp.position.set(
-          (p.x - 0.5) * W,
-          heightAtNorm(p.x, p.y) * HEIGHT + 0.9,
-          (p.y - 0.5) * W,
+      // shared low-poly materials
+      const MAT = {
+        stone: new THREE.MeshStandardMaterial({ color: 0x9a9182, roughness: 0.9 }),
+        darkStone: new THREE.MeshStandardMaterial({ color: 0x5f584d, roughness: 0.95 }),
+        wood: new THREE.MeshStandardMaterial({ color: 0x6e4a30, roughness: 0.85 }),
+        roof: new THREE.MeshStandardMaterial({ color: 0x7a4226, roughness: 0.8 }),
+        tent: new THREE.MeshStandardMaterial({ color: 0xb9a06a, roughness: 0.85 }),
+        gold: new THREE.MeshStandardMaterial({ color: 0xcaa53a, roughness: 0.45, metalness: 0.35 }),
+        rock: new THREE.MeshStandardMaterial({ color: 0x867d70, roughness: 1, flatShading: true }),
+        snow: new THREE.MeshStandardMaterial({ color: 0xeef2f5, roughness: 1 }),
+        dark: new THREE.MeshStandardMaterial({ color: 0x35312a, roughness: 0.9 }),
+      };
+      const POI_SCALE = 1.6;
+      type Mat = InstanceType<typeof THREE.MeshStandardMaterial>;
+      const pBox = (w: number, h: number, d: number, m: Mat, x = 0, y = 0, z = 0) => {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+        mesh.position.set(x, y + h / 2, z);
+        return mesh;
+      };
+      const pCyl = (r: number, h: number, m: Mat, x = 0, y = 0, z = 0, seg = 8) => {
+        const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), m);
+        mesh.position.set(x, y + h / 2, z);
+        return mesh;
+      };
+      const pCone = (r: number, h: number, m: Mat, x = 0, y = 0, z = 0, seg = 4) => {
+        const mesh = new THREE.Mesh(new THREE.ConeGeometry(r, h, seg), m);
+        mesh.position.set(x, y + h / 2, z);
+        return mesh;
+      };
+      function pHouse(w: number, h: number, d: number, x: number, z: number) {
+        const g = new THREE.Group();
+        g.add(pBox(w, h, d, MAT.wood));
+        const roof = new THREE.Mesh(
+          new THREE.ConeGeometry(Math.max(w, d) * 0.82, h * 0.8, 4),
+          MAT.roof,
         );
+        roof.rotation.y = Math.PI / 4;
+        roof.position.y = h + h * 0.4;
+        g.add(roof);
+        g.position.set(x, 0, z);
+        return g;
+      }
+      function pFlag(accent: Mat, x = 0, y = 0, z = 0) {
+        const g = new THREE.Group();
+        g.add(pCyl(0.03, 0.7, MAT.dark, 0, y, 0, 5));
+        g.add(pBox(0.32, 0.2, 0.02, accent, 0.18, y + 0.5, 0));
+        g.position.set(x, 0, z);
+        return g;
+      }
+      function buildPoiModel(kind: string, accentHex?: string) {
+        const accent = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(accentHex || "#7a2d2d"),
+          roughness: 0.7,
+        });
+        const g = new THREE.Group();
+        switch (kind) {
+          case "city":
+          case "castle": {
+            g.add(pCyl(0.5, 1.3, MAT.stone, 0, 0, 0, 8));
+            for (let a = 0; a < 8; a++) {
+              const an = (a / 8) * Math.PI * 2;
+              g.add(pBox(0.14, 0.22, 0.14, MAT.stone, Math.cos(an) * 0.46, 1.3, Math.sin(an) * 0.46));
+            }
+            g.add(pFlag(accent, 0, 1.55, 0));
+            if (kind === "city") {
+              g.add(pHouse(0.42, 0.3, 0.42, 0.8, 0.3));
+              g.add(pHouse(0.36, 0.28, 0.36, -0.7, -0.4));
+            }
+            break;
+          }
+          case "town":
+            g.add(pHouse(0.5, 0.4, 0.5, 0, 0));
+            g.add(pHouse(0.4, 0.32, 0.4, 0.62, 0.32));
+            g.add(pHouse(0.4, 0.3, 0.4, -0.55, 0.4));
+            break;
+          case "village":
+            g.add(pHouse(0.55, 0.42, 0.55, 0, 0));
+            break;
+          case "port": {
+            g.add(pBox(1.0, 0.1, 0.5, MAT.wood, 0, 0, 0));
+            g.add(pCyl(0.08, 0.7, MAT.wood, -0.35, 0.1, 0, 6));
+            const anchor = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.05, 6, 12), MAT.gold);
+            anchor.position.set(0.35, 0.5, 0);
+            g.add(anchor);
+            g.add(pFlag(accent, -0.35, 0.8, 0));
+            break;
+          }
+          case "temple": {
+            g.add(pBox(1.1, 0.16, 0.8, MAT.stone));
+            for (const x of [-0.4, -0.13, 0.13, 0.4]) {
+              g.add(pCyl(0.07, 0.7, MAT.stone, x, 0.16, 0.28, 8));
+              g.add(pCyl(0.07, 0.7, MAT.stone, x, 0.16, -0.28, 8));
+            }
+            g.add(pCone(0.78, 0.42, accent, 0, 0.86, 0, 4));
+            break;
+          }
+          case "ruin":
+            g.add(pCyl(0.09, 0.9, MAT.stone, -0.3, 0, 0.1, 8));
+            g.add(pCyl(0.09, 0.55, MAT.stone, 0.2, 0, -0.2, 8));
+            g.add(pCyl(0.09, 0.72, MAT.stone, 0.26, 0, 0.26, 8));
+            g.add(pBox(0.3, 0.12, 0.3, MAT.stone, -0.1, 0, -0.32));
+            break;
+          case "dungeon": {
+            g.add(pBox(0.18, 1.0, 0.18, MAT.darkStone, -0.35, 0, 0));
+            g.add(pBox(0.18, 1.0, 0.18, MAT.darkStone, 0.35, 0, 0));
+            g.add(pBox(0.95, 0.2, 0.22, MAT.darkStone, 0, 1.0, 0));
+            g.add(pBox(0.18, 0.18, 0.05, accent, 0, 0.55, 0.12));
+            break;
+          }
+          case "cave": {
+            const mound = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 0), MAT.rock);
+            mound.position.y = 0.45;
+            mound.scale.set(1, 0.7, 1);
+            g.add(mound);
+            g.add(pBox(0.4, 0.45, 0.2, MAT.dark, 0, 0, 0.5));
+            break;
+          }
+          case "camp": {
+            const tent = new THREE.Mesh(new THREE.ConeGeometry(0.55, 0.8, 4), MAT.tent);
+            tent.position.y = 0.4;
+            tent.rotation.y = Math.PI / 4;
+            g.add(tent);
+            g.add(pCone(0.12, 0.2, accent, 0.6, 0, 0.3, 5));
+            break;
+          }
+          case "peak":
+            g.add(pCone(0.8, 1.5, MAT.rock, 0, 0, 0, 5));
+            g.add(pCone(0.34, 0.5, MAT.snow, 0, 1.0, 0, 5));
+            break;
+          case "landmark":
+          default: {
+            const ob = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.22, 1.5, 4), MAT.stone);
+            ob.position.y = 0.75;
+            g.add(ob);
+            g.add(pCone(0.12, 0.25, accent, 0, 1.5, 0, 4));
+            break;
+          }
+        }
+        g.scale.setScalar(POI_SCALE);
+        return g;
+      }
+
+      const poiMap = new Map<
+        string,
+        {
+          group: InstanceType<typeof THREE.Group>;
+          label: InstanceType<typeof THREE.Sprite>;
+          aspect: number;
+          sig: string;
+        }
+      >();
+      const poiPick: InstanceType<typeof THREE.Object3D>[] = [];
+      let hoveredPoiId: string | null = null;
+      function disposeGroup(group: InstanceType<typeof THREE.Group>) {
+        scene.remove(group);
+        group.traverse((o) => {
+          const m = o as InstanceType<typeof THREE.Mesh>;
+          if (m.geometry) m.geometry.dispose();
+        });
       }
       function syncPois(list: WorldPoi[]) {
         const ids = new Set(list.map((p) => p.id));
-        for (const [id, sp] of spriteMap) {
+        for (const [id, rec] of poiMap) {
           if (!ids.has(id)) {
-            scene.remove(sp);
-            (sp.material.map as InstanceType<typeof THREE.CanvasTexture>)?.dispose();
-            sp.material.dispose();
-            spriteMap.delete(id);
+            disposeGroup(rec.group);
+            scene.remove(rec.label);
+            (rec.label.material.map as InstanceType<typeof THREE.CanvasTexture>)?.dispose();
+            rec.label.material.dispose();
+            poiMap.delete(id);
           }
         }
         for (const p of list) {
           const sig = `${p.name}|${p.kind}|${p.color ?? ""}|${p.hidden ? 1 : 0}`;
-          let sp = spriteMap.get(p.id);
-          if (!sp) {
-            const mat = new THREE.SpriteMaterial({ depthTest: false, transparent: true });
-            sp = new THREE.Sprite(mat);
-            sp.renderOrder = 10;
-            sp.userData.id = p.id;
-            scene.add(sp);
-            spriteMap.set(p.id, sp);
+          const ex = poiMap.get(p.id);
+          if (ex && ex.sig === sig) {
+            ex.group.position.set(
+              (p.x - 0.5) * W,
+              heightAtNorm(p.x, p.y) * HEIGHT,
+              (p.y - 0.5) * W,
+            );
+            continue;
           }
-          if (sp.userData.sig !== sig) {
-            const { tex, aspect } = makeLabel(p);
-            (sp.material.map as InstanceType<typeof THREE.CanvasTexture> | null)?.dispose();
-            sp.material.map = tex;
-            sp.material.needsUpdate = true;
-            sp.scale.set(1.5 * aspect, 1.5, 1);
-            sp.userData.sig = sig;
+          if (ex) {
+            disposeGroup(ex.group);
+            scene.remove(ex.label);
+            (ex.label.material.map as InstanceType<typeof THREE.CanvasTexture>)?.dispose();
+            ex.label.material.dispose();
+            poiMap.delete(p.id);
           }
-          placeSprite(sp, p);
+          const group = buildPoiModel(p.kind, p.color);
+          group.position.set((p.x - 0.5) * W, heightAtNorm(p.x, p.y) * HEIGHT, (p.y - 0.5) * W);
+          group.traverse((o) => (o.userData.id = p.id));
+          scene.add(group);
+          const { tex, aspect } = makeLabel(p);
+          const label = new THREE.Sprite(
+            new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }),
+          );
+          label.renderOrder = 11;
+          label.visible = false;
+          scene.add(label);
+          poiMap.set(p.id, { group, label, aspect, sig });
         }
+        poiPick.length = 0;
+        for (const rec of poiMap.values()) poiPick.push(rec.group);
         syncLights(list);
+      }
+      function updatePoiLabels() {
+        for (const [id, rec] of poiMap) {
+          const d = camera.position.distanceTo(rec.group.position);
+          const show = d < 32 || id === hoveredPoiId;
+          rec.label.visible = show;
+          if (show) {
+            const s = Math.min(2.8, Math.max(1.3, d * 0.05));
+            rec.label.position.set(
+              rec.group.position.x,
+              rec.group.position.y + 3.4 + s * 0.6,
+              rec.group.position.z,
+            );
+            rec.label.scale.set(s * rec.aspect, s, 1);
+          }
+        }
       }
 
       // --- path tubes (rivers / roads / routes / borders) ---
@@ -998,6 +1179,7 @@ export function WorldMapBuilder({
       // --- brushing ---
       const ray = new THREE.Raycaster();
       const ndc = new THREE.Vector2();
+      const lastNdc = new THREE.Vector2();
       let painting = false;
       let edited = false;
 
@@ -1082,15 +1264,23 @@ export function WorldMapBuilder({
       const dom = renderer.domElement;
       let downX = 0;
       let downY = 0;
-      function pickSprite(e: PointerEvent): string | null {
+      function findPoiId(o: InstanceType<typeof THREE.Object3D> | null): string | null {
+        let cur = o;
+        while (cur) {
+          if (cur.userData?.id) return cur.userData.id as string;
+          cur = cur.parent;
+        }
+        return null;
+      }
+      function pickPoi(e: PointerEvent): string | null {
         const rect = dom.getBoundingClientRect();
         ndc.set(
           ((e.clientX - rect.left) / rect.width) * 2 - 1,
           -((e.clientY - rect.top) / rect.height) * 2 + 1,
         );
         ray.setFromCamera(ndc, camera);
-        const hit = ray.intersectObjects([...spriteMap.values()], false)[0];
-        return hit ? (hit.object.userData.id as string) : null;
+        const hit = ray.intersectObjects(poiPick, true)[0];
+        return hit ? findPoiId(hit.object) : null;
       }
       function onDown(e: PointerEvent) {
         downX = e.clientX;
@@ -1123,6 +1313,11 @@ export function WorldMapBuilder({
         applyBrush(c.i);
       }
       function onMove(e: PointerEvent) {
+        const rect = dom.getBoundingClientRect();
+        lastNdc.set(
+          ((e.clientX - rect.left) / rect.width) * 2 - 1,
+          -((e.clientY - rect.top) / rect.height) * 2 + 1,
+        );
         if (!painting) return;
         const c = cellFromEvent(e);
         if (c !== null) applyBrush(c.i);
@@ -1139,7 +1334,7 @@ export function WorldMapBuilder({
           Math.abs(e.clientY - downY) < 5
         ) {
           // A click (not a drag): select a marker under the cursor.
-          const id = pickSprite(e);
+          const id = pickPoi(e);
           if (id) onSelectRef.current?.(id);
         }
         painting = false;
@@ -1164,6 +1359,16 @@ export function WorldMapBuilder({
           !measureRef.current;
         moveKeys(dt);
         controls.update();
+
+        // POI hover + label scaling.
+        if (hovered) {
+          ray.setFromCamera(lastNdc, camera);
+          const hit = ray.intersectObjects(poiPick, true)[0];
+          hoveredPoiId = hit ? findPoiId(hit.object) : null;
+        } else {
+          hoveredPoiId = null;
+        }
+        updatePoiLabels();
 
         // Weather animation.
         if (weatherPoints) {
@@ -1307,11 +1512,13 @@ export function WorldMapBuilder({
           dom.removeEventListener("pointermove", onMove);
           dom.removeEventListener("pointerup", onUp);
           dom.removeEventListener("pointercancel", onUp);
-          for (const sp of spriteMap.values()) {
-            (sp.material.map as InstanceType<typeof THREE.CanvasTexture>)?.dispose();
-            sp.material.dispose();
+          for (const rec of poiMap.values()) {
+            disposeGroup(rec.group);
+            scene.remove(rec.label);
+            (rec.label.material.map as InstanceType<typeof THREE.CanvasTexture>)?.dispose();
+            rec.label.material.dispose();
           }
-          spriteMap.clear();
+          poiMap.clear();
           for (const l of lightMap.values()) scene.remove(l);
           lightMap.clear();
           for (const rec of pathMap.values()) disposePathMesh(rec.mesh);
