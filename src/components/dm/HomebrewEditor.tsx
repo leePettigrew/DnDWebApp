@@ -280,16 +280,17 @@ export function HomebrewEditor() {
       </ul>
     </Panel>
   );
+}
 
-  // --- forms (closures over update/setEditing) ---
+// --- forms (hoisted to module scope so inputs keep focus while typing) ---
 
-  function SpellForm({
-    draft,
-    update,
-  }: {
-    draft: CustomSpell;
-    update: <K extends keyof Draft>(k: K, v: Draft[K]) => void;
-  }) {
+function SpellForm({
+  draft,
+  update,
+}: {
+  draft: CustomSpell;
+  update: <K extends keyof Draft>(k: K, v: Draft[K]) => void;
+}) {
     return (
       <div className="grid gap-3 sm:grid-cols-2">
         <TextField
@@ -630,4 +631,3 @@ export function HomebrewEditor() {
       </div>
     );
   }
-}
