@@ -210,6 +210,10 @@ export interface Character extends Entity {
   campaignId?: ID;
   /** Owner user id (Phase 2). Set server-side; the owner + DM may edit. */
   ownerId?: ID;
+  /** DM visibility — hidden from players unless revealed (see visibleTo). */
+  hidden?: boolean;
+  /** Player user ids allowed to see this while hidden. */
+  visibleTo?: ID[];
   name: string;
   /** Art slot: a portrait URL or data: URL. Empty → themed placeholder. */
   portraitUrl?: string;
@@ -264,6 +268,10 @@ export interface Character extends Entity {
 export interface StatBlock extends Entity {
   campaignId?: ID;
   kind: "monster" | "npc";
+  /** DM visibility — hidden from players unless revealed (see visibleTo). */
+  hidden?: boolean;
+  /** Player user ids allowed to see this while hidden. */
+  visibleTo?: ID[];
   name: string;
   /** Art slot: monster/NPC art URL or data: URL. Empty → themed placeholder. */
   portraitUrl?: string;

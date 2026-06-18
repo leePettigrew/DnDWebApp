@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ChevronLeftIcon, ClawIcon, EditIcon, TrashIcon } from "@/components/ui/icons";
 import { StatBlockView } from "@/components/bestiary/StatBlockView";
 import { StatBlockEditor } from "@/components/bestiary/StatBlockEditor";
+import { VisibilityControl } from "@/components/dm/VisibilityControl";
 import { usePermissions, useStatBlocks } from "@/lib/data/hooks";
 import type { StatBlock } from "@/lib/domain/types";
 
@@ -87,6 +88,16 @@ export default function StatBlockDetailPage() {
           </div>
         )}
       </div>
+
+      {!editing && canManage && (
+        <div className="mb-4">
+          <VisibilityControl
+            hidden={statBlock.hidden}
+            visibleTo={statBlock.visibleTo}
+            onChange={(p) => update(statBlock.id, p)}
+          />
+        </div>
+      )}
 
       {editing && canManage ? (
         <StatBlockEditor

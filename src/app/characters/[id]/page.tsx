@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/icons";
 import { CharacterSheet } from "@/components/characters/CharacterSheet";
 import { CharacterEditor } from "@/components/characters/CharacterEditor";
+import { VisibilityControl } from "@/components/dm/VisibilityControl";
 import { useCharacters, usePermissions } from "@/lib/data/hooks";
 import type { Character } from "@/lib/domain/types";
 
@@ -24,7 +25,8 @@ export default function CharacterDetailPage() {
 
   const { items, loading, update, remove } = useCharacters();
   const character = items.find((c) => c.id === id);
-  const canEdit = usePermissions().canEdit("characters", character);
+  const perms = usePermissions();
+  const canEdit = perms.canEdit("characters", character);
 
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -98,6 +100,16 @@ export default function CharacterDetailPage() {
           </div>
         )}
       </div>
+
+      {!editing && perms.isDM && (
+        <div className="mb-4">
+          <VisibilityControl
+            hidden={character.hidden}
+            visibleTo={character.visibleTo}
+            onChange={(p) => update(character.id, p)}
+          />
+        </div>
+      )}
 
       {editing && canEdit ? (
         <CharacterEditor

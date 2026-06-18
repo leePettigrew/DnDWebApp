@@ -109,6 +109,7 @@ export default function BestiaryPage() {
                     <Badge tone={s.kind === "npc" ? "arcane" : "oxblood"}>
                       {s.kind === "npc" ? "NPC" : "Monster"}
                     </Badge>
+                    {s.hidden && <Badge tone="oxblood">Hidden</Badge>}
                     <span className="numerals">CR {s.challengeRating ?? "—"}</span>
                     <span className="numerals inline-flex items-center gap-1">
                       <ShieldIcon className="h-3.5 w-3.5 text-ink-faint" /> {s.armorClass}

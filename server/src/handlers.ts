@@ -43,6 +43,24 @@ const DM_ONLY: ReadonlySet<ScopedCollection> = new Set<ScopedCollection>(
 );
 
 /**
+ * Whether a non-DM may see an entity. DMs see everything; players see anything
+ * not hidden, anything explicitly revealed to them (visibleTo), and their own
+ * character (ownerId). Entities without the fields are always visible.
+ */
+function isVisible(entity: unknown, role: Role, userId: string | null): boolean {
+  if (role === "dm") return true;
+  const v = entity as {
+    hidden?: boolean;
+    visibleTo?: string[];
+    ownerId?: string;
+  };
+  if (!v.hidden) return true;
+  if (userId && v.visibleTo?.includes(userId)) return true;
+  if (userId && v.ownerId === userId) return true;
+  return false;
+}
+
+/**
  * Per-socket session. Holds who this connection is (after auth) and which
  * campaign it's in. EVERY privileged action is checked here, server-side —
  * the client's claimed role is never trusted.
@@ -275,17 +293,21 @@ export class ClientSession {
   private buildSnapshot(role: Role): CampaignSnapshot {
     const cid = this.campaignId!;
     const e = this.repos.entities;
+    const uid = this.userId;
+    // Strip entities this recipient isn't allowed to see (DM-hidden / not revealed).
+    const vis = <T,>(items: T[]): T[] =>
+      items.filter((it) => isVisible(it, role, uid));
     return {
-      characters: e.characters.list(cid) as CampaignSnapshot["characters"],
-      statBlocks: e.statBlocks.list(cid) as CampaignSnapshot["statBlocks"],
-      encounters: e.encounters.list(cid) as CampaignSnapshot["encounters"],
-      notes: e.notes.list(cid) as CampaignSnapshot["notes"],
-      sessionLogs: e.sessionLogs.list(cid) as CampaignSnapshot["sessionLogs"],
-      maps: e.maps.list(cid) as CampaignSnapshot["maps"],
-      rollPresets: e.rollPresets.list(cid) as CampaignSnapshot["rollPresets"],
-      quests: e.quests.list(cid) as CampaignSnapshot["quests"],
-      factions: e.factions.list(cid) as CampaignSnapshot["factions"],
-      timeline: e.timeline.list(cid) as CampaignSnapshot["timeline"],
+      characters: vis(e.characters.list(cid)) as CampaignSnapshot["characters"],
+      statBlocks: vis(e.statBlocks.list(cid)) as CampaignSnapshot["statBlocks"],
+      encounters: vis(e.encounters.list(cid)) as CampaignSnapshot["encounters"],
+      notes: vis(e.notes.list(cid)) as CampaignSnapshot["notes"],
+      sessionLogs: vis(e.sessionLogs.list(cid)) as CampaignSnapshot["sessionLogs"],
+      maps: vis(e.maps.list(cid)) as CampaignSnapshot["maps"],
+      rollPresets: vis(e.rollPresets.list(cid)) as CampaignSnapshot["rollPresets"],
+      quests: vis(e.quests.list(cid)) as CampaignSnapshot["quests"],
+      factions: vis(e.factions.list(cid)) as CampaignSnapshot["factions"],
+      timeline: vis(e.timeline.list(cid)) as CampaignSnapshot["timeline"],
       combat: this.repos.combat.get(cid) ?? emptyCombat(),
       rollLog: this.repos.rollLog.list(cid, { includeHidden: role === "dm" }),
       presence: this.rooms.get(cid).presence(),
@@ -387,11 +409,14 @@ export class ClientSession {
 
   private broadcastCollection(collection: ScopedCollection): void {
     const items = this.repos.entities[collection].list(this.campaignId!);
-    this.rooms.get(this.campaignId!).broadcast({
+    // Each member gets only the entities they're allowed to see.
+    this.rooms.get(this.campaignId!).broadcastEach((m) => ({
       type: "entity:changed",
       collection,
-      items: items as AnyScopedEntity[],
-    });
+      items: items.filter((it) =>
+        isVisible(it, m.role, m.userId),
+      ) as AnyScopedEntity[],
+    }));
   }
 
   // --- combat (DM only) ----------------------------------------------------

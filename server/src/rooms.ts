@@ -41,6 +41,15 @@ export class CampaignRoom {
     }
   }
 
+  /** Send each member a message tailored to them (e.g. visibility-filtered). */
+  broadcastEach(build: (m: RoomMember) => ServerMessage | null): void {
+    for (const member of this.members) {
+      if (member.socket.readyState !== WebSocket.OPEN) continue;
+      const message = build(member);
+      if (message) member.socket.send(JSON.stringify(message));
+    }
+  }
+
   /** Full roster with an online flag, so the UI can show who's here now. */
   presence(): PresenceUser[] {
     const memberships = this.repos.memberships.listForCampaign(this.campaignId);

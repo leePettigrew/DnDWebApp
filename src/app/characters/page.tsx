@@ -73,6 +73,7 @@ export default function CharactersPage() {
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-soft">
                     <Badge tone="brass">Lvl {c.level}</Badge>
+                    {c.hidden && <Badge tone="oxblood">Hidden</Badge>}
                     <span className="numerals inline-flex items-center gap-1">
                       <ShieldIcon className="h-3.5 w-3.5 text-ink-faint" /> {c.armorClass}
                     </span>
