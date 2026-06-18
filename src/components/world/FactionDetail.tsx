@@ -12,6 +12,7 @@ import { FactionReputation } from "./FactionReputation";
 import { FactionRelationships } from "./FactionRelationships";
 import { FactionMembers } from "./FactionMembers";
 import { FactionAgendas } from "./FactionAgendas";
+import { FactionQuestsHistory } from "./FactionQuestsHistory";
 import { usePermissions } from "@/lib/data/hooks";
 import {
   FACTION_STANDINGS,
@@ -233,6 +234,8 @@ export function FactionDetail({
       <FactionRelationships faction={f} />
 
       <FactionAgendas faction={f} onUpdate={onUpdate} />
+
+      <FactionQuestsHistory faction={f} onUpdate={onUpdate} />
 
       {/* Notes */}
       <Panel title="Notes">
