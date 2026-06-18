@@ -733,6 +733,8 @@ export interface WorldMap {
   paths?: WorldPath[];
   regions?: WorldRegion[];
   lights?: WorldLight[];
+  /** Whether fog-of-exploration is active (players see only revealed land). */
+  fog?: boolean;
   /** Fog-of-exploration: base64 of size*size bytes (1 = revealed). */
   explored?: string;
 }

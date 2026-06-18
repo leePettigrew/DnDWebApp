@@ -46,7 +46,7 @@ export const POI_KINDS: { id: string; glyph: string; label: string }[] = [
 ];
 export const POI_GLYPH = new Map(POI_KINDS.map((k) => [k.id, k.glyph]));
 
-type Tool = "look" | "raise" | "lower" | "smooth" | "paint";
+type Tool = "look" | "raise" | "lower" | "smooth" | "paint" | "reveal" | "shroud";
 
 interface Engine {
   setView(v: "3d" | "top"): void;
@@ -57,6 +57,12 @@ interface Engine {
   exportWorld(): WorldMap;
   /** Rebuild in-scene POI marker sprites from the given list. */
   syncPois(list: WorldPoi[]): void;
+  /** Toggle fog-of-exploration masking. */
+  setFog(on: boolean): void;
+  /** Reveal (1) or shroud (0) the entire map, then persist. */
+  revealAll(v: 0 | 1): void;
+  /** Re-shade (e.g. after toggling DM "view as player"). */
+  reshade(): void;
   /** Camera azimuth (radians) for the compass. */
   azimuth(): number;
   dispose(): void;
@@ -144,6 +150,12 @@ export function WorldMapBuilder({
   const onSelectRef = useRef<((id: string) => void) | null>(null);
   onSelectRef.current = (id) => setSelectedPoi(id);
 
+  // --- fog of exploration ---
+  const [fog, setFog] = useState(!!world.fog);
+  const [previewPlayer, setPreviewPlayer] = useState(false);
+  const previewPlayerRef = useRef(previewPlayer);
+  previewPlayerRef.current = previewPlayer;
+
   /** Persist world fields, preserving in-memory terrain edits. */
   const saveWorld = (patch: Partial<WorldMap>) => {
     const base = engineRef.current ? engineRef.current.exportWorld() : world;
@@ -196,13 +208,23 @@ export function WorldMapBuilder({
       const N = size - 1;
       let heightArr: Float32Array = new Float32Array(size * size);
       let biomeArr: Uint8Array = new Uint8Array(size * size);
+      let exploredArr: Uint8Array = new Uint8Array(size * size);
       let seaLevel = world.seaLevel;
+      let fogOn = !!world.fog;
 
       function loadArrays(wm: WorldMap) {
         const h = decodeBytes(wm.height, size * size);
         biomeArr = decodeBytes(wm.biome, size * size);
         heightArr = new Float32Array(size * size);
         for (let i = 0; i < heightArr.length; i++) heightArr[i] = (h[i] ?? 0) / 255;
+        exploredArr = wm.explored
+          ? decodeBytes(wm.explored, size * size)
+          : new Uint8Array(size * size);
+        if (exploredArr.length < size * size) {
+          const e = new Uint8Array(size * size);
+          e.set(exploredArr);
+          exploredArr = e;
+        }
         seaLevel = wm.seaLevel;
       }
       loadArrays(world);
@@ -454,6 +476,14 @@ export function WorldMapBuilder({
           g *= dk;
           b *= dk;
         }
+        // fog of exploration: shroud unrevealed cells
+        if (fogOn && exploredArr[i] === 0) {
+          const asPlayer = !canEdit || previewPlayerRef.current;
+          const f = asPlayer ? 0.94 : 0.5; // players: near-black; DM: a haze
+          r = r * (1 - f) + 0.05 * f;
+          g = g * (1 - f) + 0.055 * f;
+          b = b * (1 - f) + 0.07 * f;
+        }
         colorAttr.setXYZ(i, clamp01(r), clamp01(g), clamp01(b));
       }
       function refreshColors() {
@@ -656,6 +686,10 @@ export function WorldMapBuilder({
               const avg = (l + r + u + d) / 4;
               heightArr[i] += (avg - heightArr[i]) * strength * fall;
               touchedHeight = true;
+            } else if (t === "reveal") {
+              exploredArr[i] = 1;
+            } else if (t === "shroud") {
+              exploredArr[i] = 0;
             }
           }
         }
@@ -828,9 +862,24 @@ export function WorldMapBuilder({
             seaLevel,
             timeOfDay: timeRef.current,
             weather: weatherRef.current,
+            fog: fogOn,
+            explored: encodeBytes(exploredArr),
           };
         },
         syncPois,
+        setFog(on) {
+          fogOn = on;
+          refreshColors();
+          scheduleSave();
+        },
+        revealAll(v) {
+          exploredArr.fill(v);
+          refreshColors();
+          scheduleSave();
+        },
+        reshade() {
+          refreshColors();
+        },
         azimuth() {
           return controls.getAzimuthalAngle();
         },
@@ -873,6 +922,7 @@ export function WorldMapBuilder({
   // Push UI changes to the engine.
   useEffect(() => engineRef.current?.setView(view), [view]);
   useEffect(() => engineRef.current?.setTime(time), [time]);
+  useEffect(() => engineRef.current?.reshade(), [previewPlayer]);
 
   // Rotate the compass every frame.
   useEffect(() => {
@@ -947,6 +997,12 @@ export function WorldMapBuilder({
                   ["lower", "Lower"],
                   ["smooth", "Smooth"],
                   ["paint", "Paint"],
+                  ...(fog
+                    ? ([
+                        ["reveal", "Reveal"],
+                        ["shroud", "Shroud"],
+                      ] as [Tool, string][])
+                    : []),
                 ] as [Tool, string][]
               ).map(([t, label]) => (
                 <button
@@ -977,6 +1033,49 @@ export function WorldMapBuilder({
             >
               {placing ? "Click the map to place…" : "＋ Place point of interest"}
             </button>
+            <div className="space-y-1 border-t border-parchment-400/50 pt-2">
+              <label className="flex items-center justify-between text-xs font-semibold text-ink-soft">
+                Fog of exploration
+                <input
+                  type="checkbox"
+                  checked={fog}
+                  onChange={(e) => {
+                    setFog(e.target.checked);
+                    engineRef.current?.setFog(e.target.checked);
+                    if (e.target.checked) setTool("reveal");
+                    else if (tool === "reveal" || tool === "shroud") setTool("look");
+                  }}
+                  className="accent-oxblood"
+                />
+              </label>
+              {fog && (
+                <>
+                  <label className="flex items-center justify-between text-[0.65rem] text-ink-soft">
+                    View as player
+                    <input
+                      type="checkbox"
+                      checked={previewPlayer}
+                      onChange={(e) => setPreviewPlayer(e.target.checked)}
+                      className="accent-arcane"
+                    />
+                  </label>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => engineRef.current?.revealAll(1)}
+                      className="flex-1 rounded bg-parchment-50 px-1 py-1 text-[0.65rem] text-ink-soft hover:bg-parchment-300/60"
+                    >
+                      Reveal all
+                    </button>
+                    <button
+                      onClick={() => engineRef.current?.revealAll(0)}
+                      className="flex-1 rounded bg-parchment-50 px-1 py-1 text-[0.65rem] text-ink-soft hover:bg-parchment-300/60"
+                    >
+                      Hide all
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
             {tool !== "look" && tool !== "paint" && (
               <label className="block text-[0.65rem] text-ink-soft">
                 Brush size {brushSize}
