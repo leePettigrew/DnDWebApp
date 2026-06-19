@@ -884,7 +884,7 @@ export function WorldMapBuilder({
       > = {
         river: { rgb: [0.17, 0.41, 0.58], w: 0.85 },
         road: { rgb: [0.42, 0.3, 0.21], w: 0.88 },
-        cobble: { rgb: [0.5, 0.49, 0.46], w: 0.9 },
+        cobble: { rgb: [0.22, 0.16, 0.14], w: 0.92 },
         route: { rgb: [0.46, 0.32, 0.12], w: 0.82 },
         border: { rgb: [0.28, 0.22, 0.16], w: 0.8 },
       };
@@ -1762,10 +1762,10 @@ export function WorldMapBuilder({
           let pr2 = pathR[i];
           let pg2 = pathG[i];
           let pb2 = pathB[i];
-          // cobblestone: strong per-cell light/dark variation = stones
+          // dark brick: per-brick light/dark variation around a dark base
           if (cobbleArr[i]) {
-            const cob = (vnoise(i * 3 + 7) - 0.45) * 0.42;
-            pr2 = clamp01(pr2 + cob);
+            const cob = (vnoise(i * 3 + 7) - 0.5) * 0.16;
+            pr2 = clamp01(pr2 + cob * 1.1);
             pg2 = clamp01(pg2 + cob);
             pb2 = clamp01(pb2 + cob * 0.9);
           }
@@ -1824,7 +1824,8 @@ export function WorldMapBuilder({
       ]);
       const lightMap = new Map<string, InstanceType<typeof THREE.PointLight>>();
       function lightLevel() {
-        return nightFactor * 6 + (1 - WEATHER_DIM[weatherKind]) * 2.2;
+        // very soft glow
+        return nightFactor * 1.8 + (1 - WEATHER_DIM[weatherKind]) * 0.5;
       }
       function syncLights(list: WorldPoi[]) {
         const settlements = list.filter((p) => SETTLEMENT.has(p.kind)).slice(0, 12);
@@ -1955,7 +1956,7 @@ export function WorldMapBuilder({
         const stride = roadPs.length > CAP ? roadPs.length / CAP : 1;
         for (let j = 0; j < Math.min(CAP, roadPs.length); j++) {
           const { x, y } = roadPs[Math.floor(j * stride)];
-          const l = new THREE.PointLight(0xffb060, lightLevel() * 0.5, 8, 2);
+          const l = new THREE.PointLight(0xffb060, lightLevel() * 0.45, 7, 2);
           l.position.set((x - 0.5) * W, heightAtNorm(x, y) * HEIGHT + 0.35, (y - 0.5) * W);
           scene.add(l);
           roadLights.push(l);
@@ -2168,8 +2169,8 @@ export function WorldMapBuilder({
         ambient.color.setRGB(0.6 + day * 0.4, 0.65 + day * 0.35, 0.8);
         const lv = lightLevel();
         for (const l of lightMap.values()) l.intensity = lv;
-        for (const l of roadLights) l.intensity = lv * 0.5; // softer than towns
-        lanternBase = 0.2 + nightFactor * 2.6 + (1 - dim) * 0.6;
+        for (const l of roadLights) l.intensity = lv * 0.45; // softer than towns
+        lanternBase = 0.1 + nightFactor * 1.0 + (1 - dim) * 0.3;
         lanternGlowMat.emissiveIntensity = lanternBase;
       }
       applyWeather(weatherKind);
