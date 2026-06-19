@@ -756,6 +756,8 @@ export interface WorldMap {
   treeMask?: string;
   /** Global tree density multiplier (0..1, default 0.5). */
   treeDensity?: number;
+  /** Lake mask: base64 of size*size bytes (1 = still water surface). */
+  lakeMask?: string;
   /** Current party position (normalized 0..1), shown as a banner. */
   party?: { x: number; y: number };
   /** Party travel speed in miles/day (for the measure ruler). */
