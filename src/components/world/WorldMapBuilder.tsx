@@ -1049,10 +1049,11 @@ export function WorldMapBuilder({
       const lakeTex = makeWaterTexture();
       const lakeWaterMat = new THREE.MeshStandardMaterial({
         map: lakeTex,
+        color: 0x2f74b0, // bluer tint
         transparent: true,
-        opacity: 0.84,
-        roughness: 0.12,
-        metalness: 0.2,
+        opacity: 0.9,
+        roughness: 0.1,
+        metalness: 0.25,
         side: THREE.DoubleSide,
       });
       let lakeMesh: InstanceType<typeof THREE.Mesh> | null = null;
@@ -1070,7 +1071,8 @@ export function WorldMapBuilder({
         for (let start = 0; start < total; start++) {
           if (!lakeArr[start] || visited[start]) continue;
           const comp: number[] = [];
-          let rimMin = Infinity;
+          let rimSum = 0;
+          let rimCount = 0;
           stack.length = 0;
           stack.push(start);
           visited[start] = 1;
@@ -1092,12 +1094,14 @@ export function WorldMapBuilder({
                   visited[j] = 1;
                   stack.push(j);
                 }
-              } else if (dispArr[j] < rimMin) {
-                rimMin = dispArr[j];
+              } else {
+                rimSum += dispArr[j];
+                rimCount++;
               }
             }
           }
-          const wl = (rimMin === Infinity ? seaLevel : rimMin) - 0.012;
+          // fill to the average bank so the water floats at the basin top
+          const wl = rimCount ? rimSum / rimCount - 0.004 : seaLevel;
           for (const i of comp) level[i] = wl;
         }
         // build a quad per lake cell at its water level
@@ -1188,13 +1192,13 @@ export function WorldMapBuilder({
         ny: number,
         ang: number,
         roadW: number,
-        riverW: number,
+        spanLen: number,
       ) {
         const g = new THREE.Group();
-        const L = Math.max(1.0, riverW * 2.3 + 0.45); // span across the river
+        const L = Math.max(0.8, spanLen + 0.3); // bank-to-bank crossing span
         const halfL = L / 2;
         const wHalf = Math.max(0.13, roadW / 2);
-        const arch = Math.min(0.32, L * 0.13);
+        const arch = Math.min(0.09, L * 0.05); // low profile
         const segs = 12;
         const archAt = (tx: number) => arch * (1 - (tx / halfL) ** 2);
         // arched deck
@@ -1225,7 +1229,7 @@ export function WorldMapBuilder({
           for (let s = 0; s <= segs; s++) {
             const tx = -halfL + (s / segs) * L;
             const yy = archAt(tx);
-            rPos.push(tx, yy + 0.02, zs, tx, yy + 0.2, zs);
+            rPos.push(tx, yy + 0.01, zs, tx, yy + 0.11, zs);
             if (s < segs) {
               const b = s * 2;
               rIdx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
@@ -1240,18 +1244,18 @@ export function WorldMapBuilder({
             THREE.DoubleSide;
           g.add(rail);
         }
-        // support posts down into the banks
-        for (const tx of [-halfL * 0.82, halfL * 0.82]) {
+        // short support posts at the ends
+        for (const tx of [-halfL * 0.85, halfL * 0.85]) {
           for (const zs of [-wHalf * 0.8, wHalf * 0.8]) {
             const post = new THREE.Mesh(
-              new THREE.CylinderGeometry(0.04, 0.05, 0.7, 5),
+              new THREE.CylinderGeometry(0.035, 0.045, 0.4, 5),
               BRIDGE_WOOD,
             );
-            post.position.set(tx, -0.3, zs);
+            post.position.set(tx, -0.18, zs);
             g.add(post);
           }
         }
-        g.position.set((nx - 0.5) * W, baseHeightAtNorm(nx, ny) * HEIGHT + 0.12, (ny - 0.5) * W);
+        g.position.set((nx - 0.5) * W, baseHeightAtNorm(nx, ny) * HEIGHT + 0.05, (ny - 0.5) * W);
         g.rotation.y = -ang;
         return g;
       }
@@ -1271,10 +1275,39 @@ export function WorldMapBuilder({
         const roads = paths.filter((p) => p.kind === "road" || p.kind === "cobble");
         if (!rivers.length || !roads.length) return;
         const placed: { x: number; y: number }[] = [];
-        const thr = 0.013;
         for (const road of roads) {
           const roadW = road.width ?? PATH_WIDTH[road.kind];
           const rs = samplePath(road.points);
+          // Find contiguous spans where the road is over a river, then place ONE
+          // bridge per span — snapped to the river centre, sized to the river.
+          let spanStart = -1;
+          let spanRiverW = PATH_WIDTH.river;
+          const finishSpan = (endIdx: number) => {
+            const midIdx = (spanStart + endIdx) >> 1;
+            const mp = rs[midIdx];
+            // snap the bridge to the nearest river centreline point
+            let cx = mp.x;
+            let cy = mp.y;
+            let bc = Infinity;
+            for (const rv of rivers) {
+              for (const rp of rv.pts) {
+                const d = (rp.x - mp.x) ** 2 + (rp.y - mp.y) ** 2;
+                if (d < bc) {
+                  bc = d;
+                  cx = rp.x;
+                  cy = rp.y;
+                }
+              }
+            }
+            if (placed.some((p) => (p.x - cx) ** 2 + (p.y - cy) ** 2 < 0.04 * 0.04)) return;
+            placed.push({ x: cx, y: cy });
+            const prev = rs[Math.max(0, midIdx - 2)];
+            const next = rs[Math.min(rs.length - 1, midIdx + 2)];
+            const ang = Math.atan2(next.y - prev.y, next.x - prev.x);
+            const br = makeBridge(cx, cy, ang, roadW, spanRiverW);
+            scene.add(br);
+            bridgeMeshes.push(br);
+          };
           for (let i = 0; i < rs.length; i++) {
             const a = rs[i];
             let best = Infinity;
@@ -1288,16 +1321,17 @@ export function WorldMapBuilder({
                 }
               }
             }
-            if (best > thr * thr) continue;
-            if (placed.some((p) => (p.x - a.x) ** 2 + (p.y - a.y) ** 2 < 0.025 * 0.025)) continue;
-            placed.push(a);
-            const prev = rs[Math.max(0, i - 1)];
-            const next = rs[Math.min(rs.length - 1, i + 1)];
-            const ang = Math.atan2(next.y - prev.y, next.x - prev.x);
-            const br = makeBridge(a.x, a.y, ang, roadW, riverW);
-            scene.add(br);
-            bridgeMeshes.push(br);
+            const edge = (riverW / W) * 0.95; // over the river channel
+            const over = best < edge * edge;
+            if (over && spanStart < 0) {
+              spanStart = i;
+              spanRiverW = riverW;
+            } else if (!over && spanStart >= 0) {
+              finishSpan(i - 1);
+              spanStart = -1;
+            }
           }
+          if (spanStart >= 0) finishSpan(rs.length - 1);
         }
       }
       // Paths are painted into the terrain by computeMods; this just reflows the
