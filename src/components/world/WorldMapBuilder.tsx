@@ -875,7 +875,7 @@ export function WorldMapBuilder({
         river: { rgb: [0.17, 0.41, 0.58], w: 0.85 },
         road: { rgb: [0.42, 0.3, 0.21], w: 0.88 },
         cobble: { rgb: [0.5, 0.49, 0.46], w: 0.9 },
-        route: { rgb: [0.78, 0.62, 0.34], w: 0.7 },
+        route: { rgb: [0.46, 0.32, 0.12], w: 0.82 },
         border: { rgb: [0.28, 0.22, 0.16], w: 0.8 },
       };
       const hex01 = (hex: string): [number, number, number] => {
@@ -1169,7 +1169,7 @@ export function WorldMapBuilder({
           treeLeaves.geometry.dispose();
           treeLeaves = null;
         }
-        const MAX = 9000;
+        const MAX = 24000;
         const cells: { i: number; k: number }[] = [];
         for (let i = 0; i < treeArr.length; i++) {
           const d = treeArr[i];
@@ -1183,9 +1183,16 @@ export function WorldMapBuilder({
           if (thash(i, 77) < f - cnt) cnt++;
           for (let k = 0; k < cnt; k++) cells.push({ i, k });
         }
-        const n = Math.min(MAX, cells.length);
+        if (cells.length === 0) return;
+        // Cap by a stable per-tree hash threshold (NOT a stride) so editing one
+        // patch doesn't reshuffle every other tree on the map.
+        const keepFrac = cells.length > MAX ? MAX / cells.length : 1;
+        const kept =
+          keepFrac >= 1
+            ? cells
+            : cells.filter((c) => thash(c.i, c.k * 7 + 3) < keepFrac);
+        const n = kept.length;
         if (n === 0) return;
-        const step = cells.length > MAX ? cells.length / MAX : 1;
         const trunkGeo = new THREE.CylinderGeometry(0.05, 0.08, 0.55, 5);
         trunkGeo.translate(0, 0.27, 0);
         const leafGeo = new THREE.ConeGeometry(0.46, 1.2, 6);
@@ -1198,7 +1205,7 @@ export function WorldMapBuilder({
         const pv = new THREE.Vector3();
         const sv = new THREE.Vector3();
         for (let j = 0; j < n; j++) {
-          const { i, k } = cells[Math.floor(j * step)];
+          const { i, k } = kept[j];
           const x = i % size;
           const y = (i / size) | 0;
           const jx = (thash(i, k * 3 + 1) - 0.5) * 0.85;
