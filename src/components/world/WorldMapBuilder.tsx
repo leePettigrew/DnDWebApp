@@ -398,6 +398,7 @@ export function WorldMapBuilder({
       const pathWt = new Float32Array(size * size);
       const cullArr = new Uint8Array(size * size); // 1 = clear trees (under paths)
       const cobbleArr = new Uint8Array(size * size); // 1 = cobblestone (extra texture)
+      const poiClearArr = new Uint8Array(size * size); // 1 = clear trees (around POIs)
       let seaLevel = world.seaLevel;
       let fogOn = !!world.fog;
 
@@ -849,6 +850,7 @@ export function WorldMapBuilder({
         for (const rec of poiMap.values()) poiPick.push(rec.group);
         syncLights(list);
         buildLanterns();
+        buildTrees(); // re-clear trees around the (possibly moved/added) POIs
       }
       function updatePoiLabels() {
         for (const [id, rec] of poiMap) {
@@ -1358,13 +1360,29 @@ export function WorldMapBuilder({
           treeLeaves.geometry.dispose();
           treeLeaves = null;
         }
+        // Clear a small radius around every POI so trees don't swallow them.
+        poiClearArr.fill(0);
+        const clearRad = Math.max(2, Math.round(0.7 / (W / size)));
+        for (const p of worldRef.current.pois ?? []) {
+          const cx = Math.round(p.x * N);
+          const cy = Math.round(p.y * N);
+          for (let dy = -clearRad; dy <= clearRad; dy++) {
+            for (let dx = -clearRad; dx <= clearRad; dx++) {
+              if (dx * dx + dy * dy > clearRad * clearRad) continue;
+              const x = cx + dx;
+              const y = cy + dy;
+              if (x < 0 || y < 0 || x >= size || y >= size) continue;
+              poiClearArr[y * size + x] = 1;
+            }
+          }
+        }
         const MAX = 24000;
         const cells: { i: number; k: number }[] = [];
         for (let i = 0; i < treeArr.length; i++) {
           const d = treeArr[i];
           if (d < 8 || heightArr[i] < seaLevel) continue;
-          // cull trees under any path that culls (rivers, roads, cobble, routes)
-          if (cullArr[i]) continue;
+          // cull trees under paths (rivers/roads/cobble/routes) and around POIs
+          if (cullArr[i] || poiClearArr[i]) continue;
           // per-cell density: expected count from the painted value, with a
           // fractional remainder placed probabilistically (so it stays sparse)
           const f = (d / 255) * 2.6;
