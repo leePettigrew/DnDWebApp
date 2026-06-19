@@ -399,6 +399,17 @@ export function WorldMapBuilder({
       const cullArr = new Uint8Array(size * size); // 1 = clear trees (under paths)
       const cobbleArr = new Uint8Array(size * size); // 1 = cobblestone (extra texture)
       const poiClearArr = new Uint8Array(size * size); // 1 = clear trees (around POIs)
+      // Cache the base64-encoded grids so metadata saves (region colours, names,
+      // POI links…) don't re-encode the whole terrain every time.
+      let gridDirty = true;
+      let gridCache: {
+        height: string;
+        biome: string;
+        explored: string;
+        regionMask: string;
+        treeMask: string;
+        lakeMask: string;
+      } | null = null;
       let seaLevel = world.seaLevel;
       let fogOn = !!world.fog;
 
@@ -432,6 +443,7 @@ export function WorldMapBuilder({
           wm.lakeMask ? decodeBytes(wm.lakeMask, size * size) : new Uint8Array(0),
         );
         seaLevel = wm.seaLevel;
+        gridDirty = true; // fresh grids → re-encode on next export
       }
       loadArrays(world);
 
@@ -2313,6 +2325,7 @@ export function WorldMapBuilder({
         }
         colorAttr.needsUpdate = true;
         edited = true;
+        gridDirty = true; // a grid changed → re-encode on next export
       }
 
       const dom = renderer.domElement;
@@ -2547,22 +2560,28 @@ export function WorldMapBuilder({
           syncPaths();
         },
         exportWorld(): WorldMap {
-          const h = new Uint8Array(size * size);
-          for (let i = 0; i < h.length; i++) h[i] = Math.round(heightArr[i] * 255);
+          if (gridDirty || !gridCache) {
+            const h = new Uint8Array(size * size);
+            for (let i = 0; i < h.length; i++) h[i] = Math.round(heightArr[i] * 255);
+            gridCache = {
+              height: encodeBytes(h),
+              biome: encodeBytes(biomeArr),
+              explored: encodeBytes(exploredArr),
+              regionMask: encodeBytes(regionArr),
+              treeMask: encodeBytes(treeArr),
+              lakeMask: encodeBytes(lakeArr),
+            };
+            gridDirty = false;
+          }
           return {
             ...worldRef.current,
             size,
-            height: encodeBytes(h),
-            biome: encodeBytes(biomeArr),
+            ...gridCache,
             seaLevel,
             timeOfDay: timeRef.current,
             weather: weatherRef.current,
             fog: fogOn,
-            explored: encodeBytes(exploredArr),
-            regionMask: encodeBytes(regionArr),
-            treeMask: encodeBytes(treeArr),
             treeDensity: treeDensityRef.current,
-            lakeMask: encodeBytes(lakeArr),
           };
         },
         syncPois,
@@ -2591,6 +2610,7 @@ export function WorldMapBuilder({
         },
         revealAll(v) {
           exploredArr.fill(v);
+          gridDirty = true;
           refreshColors();
           scheduleSave();
         },
@@ -2598,6 +2618,7 @@ export function WorldMapBuilder({
           for (let i = 0; i < regionArr.length; i++) {
             if (regionArr[i] === idx) regionArr[i] = 0;
           }
+          gridDirty = true;
           refreshColors();
           scheduleSave();
         },
