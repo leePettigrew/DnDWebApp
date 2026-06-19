@@ -1076,47 +1076,8 @@ export function WorldMapBuilder({
           lakeMesh = null;
         }
         const total = size * size;
-        // flood-fill connected lakes → water level = lowest surrounding rim
-        const level = new Float32Array(total);
-        const visited = new Uint8Array(total);
-        const stack: number[] = [];
-        for (let start = 0; start < total; start++) {
-          if (!lakeArr[start] || visited[start]) continue;
-          const comp: number[] = [];
-          let rimSum = 0;
-          let rimCount = 0;
-          stack.length = 0;
-          stack.push(start);
-          visited[start] = 1;
-          while (stack.length) {
-            const i = stack.pop()!;
-            comp.push(i);
-            const x = i % size;
-            const y = (i / size) | 0;
-            const nbs = [
-              x > 0 ? i - 1 : -1,
-              x < size - 1 ? i + 1 : -1,
-              y > 0 ? i - size : -1,
-              y < size - 1 ? i + size : -1,
-            ];
-            for (const j of nbs) {
-              if (j < 0) continue;
-              if (lakeArr[j]) {
-                if (!visited[j]) {
-                  visited[j] = 1;
-                  stack.push(j);
-                }
-              } else {
-                rimSum += dispArr[j];
-                rimCount++;
-              }
-            }
-          }
-          // fill to the average bank so the water floats at the basin top
-          const wl = rimCount ? rimSum / rimCount - 0.004 : seaLevel;
-          for (const i of comp) level[i] = wl;
-        }
-        // build a quad per lake cell at its water level
+        // A thin water layer sits at bank level over each lake cell (like a
+        // river's water in its channel) — no rim/flood-fill needed.
         const pos: number[] = [];
         const uv: number[] = [];
         const idx: number[] = [];
@@ -1126,7 +1087,7 @@ export function WorldMapBuilder({
           const x = i % size;
           const y = (i / size) | 0;
           if (x >= size - 1 || y >= size - 1) continue;
-          const wl = level[i] * HEIGHT + 0.02;
+          const wl = heightArr[i] * HEIGHT - 0.02; // just below the bank
           const wx0 = (x / N - 0.5) * W;
           const wx1 = ((x + 1) / N - 0.5) * W;
           const wz0 = (y / N - 0.5) * W;
@@ -1145,6 +1106,101 @@ export function WorldMapBuilder({
         lakeMesh = new THREE.Mesh(geo, lakeWaterMat);
         lakeMesh.renderOrder = 1;
         scene.add(lakeMesh);
+      }
+
+      // --- cobblestone: a real dark-brick surface on the flattened road ---
+      function makeBrickTexture() {
+        const s = 128;
+        const c = document.createElement("canvas");
+        c.width = c.height = s;
+        const ctx = c.getContext("2d")!;
+        ctx.fillStyle = "#1c1310"; // dark mortar
+        ctx.fillRect(0, 0, s, s);
+        const bw = 22;
+        const bh = 11;
+        const gap = 2;
+        for (let row = 0; row * bh < s + bh; row++) {
+          const yy = row * bh;
+          const off = row % 2 ? bw / 2 : 0;
+          for (let col = -1; col * bw < s + bw; col++) {
+            const xx = col * bw + off;
+            const v = (Math.random() - 0.5) * 0.1;
+            const r = Math.round(Math.max(0, Math.min(1, 0.3 + v)) * 255);
+            const g = Math.round(Math.max(0, Math.min(1, 0.2 + v)) * 255);
+            const b = Math.round(Math.max(0, Math.min(1, 0.17 + v)) * 255);
+            ctx.fillStyle = `rgb(${r},${g},${b})`;
+            ctx.fillRect(xx + gap, yy + gap, bw - gap * 2, bh - gap * 2);
+          }
+        }
+        const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.anisotropy = 8;
+        return tex;
+      }
+      const brickTex = makeBrickTexture();
+      const cobbleMat = new THREE.MeshStandardMaterial({
+        map: brickTex,
+        roughness: 0.95,
+        side: THREE.DoubleSide,
+      });
+      const cobbleMeshes: InstanceType<typeof THREE.Mesh>[] = [];
+      function buildCobbles() {
+        for (const m of cobbleMeshes) {
+          scene.remove(m);
+          m.geometry.dispose();
+        }
+        cobbleMeshes.length = 0;
+        const tile = 0.6; // world units per brick-texture tile
+        for (const p of worldRef.current.paths ?? []) {
+          if (p.kind !== "cobble") continue;
+          const ctrl: InstanceType<typeof THREE.Vector3>[] = [];
+          for (let i = 0; i + 1 < p.points.length; i += 2) {
+            ctrl.push(new THREE.Vector3((p.points[i] - 0.5) * W, 0, (p.points[i + 1] - 0.5) * W));
+          }
+          if (ctrl.length < 2) continue;
+          const curve = new THREE.CatmullRomCurve3(ctrl, false, "catmullrom", 0.5);
+          const segs = Math.max(16, ctrl.length * 16);
+          const sample = curve.getSpacedPoints(segs);
+          const half = ((p.width ?? PATH_WIDTH.cobble) / 2) * 0.95;
+          const uAcross = (half * 2) / tile;
+          const pos: number[] = [];
+          const uv: number[] = [];
+          const idx: number[] = [];
+          let len = 0;
+          for (let i = 0; i <= segs; i++) {
+            const pt = sample[i];
+            const prev = sample[Math.max(0, i - 1)];
+            const next = sample[Math.min(segs, i + 1)];
+            const tx = next.x - prev.x;
+            const tz = next.z - prev.z;
+            const tl = Math.hypot(tx, tz) || 1;
+            const px = -tz / tl;
+            const pz = tx / tl;
+            if (i > 0) len += pt.distanceTo(sample[i - 1]);
+            const v = len / tile;
+            const lx = pt.x + px * half;
+            const lz = pt.z + pz * half;
+            const rx = pt.x - px * half;
+            const rz = pt.z - pz * half;
+            const ly = heightAtNorm(lx / W + 0.5, lz / W + 0.5) * HEIGHT + 0.03;
+            const ry = heightAtNorm(rx / W + 0.5, rz / W + 0.5) * HEIGHT + 0.03;
+            pos.push(lx, ly, lz, rx, ry, rz);
+            uv.push(0, v, uAcross, v);
+            if (i < segs) {
+              const b = i * 2;
+              idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+            }
+          }
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
+          geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uv), 2));
+          geo.setIndex(idx);
+          geo.computeVertexNormals();
+          const mesh = new THREE.Mesh(geo, cobbleMat);
+          mesh.renderOrder = 2;
+          scene.add(mesh);
+          cobbleMeshes.push(mesh);
+        }
       }
 
       // --- bridges where a road crosses/meets a river ---
@@ -1354,6 +1410,7 @@ export function WorldMapBuilder({
         refreshColors();
         buildRivers();
         buildLakes();
+        buildCobbles();
         buildBridges();
         buildTrees();
         buildLanterns();
@@ -1591,8 +1648,10 @@ export function WorldMapBuilder({
         measureA = null;
       }
 
+      const LAKE_DEPTH = 0.06; // shallow lake basin (display only)
       function recomputeDispCell(i: number) {
         let d = heightArr[i] + carveArr[i];
+        if (lakeArr[i]) d -= LAKE_DEPTH; // carve a shallow lake bed
         const w = roadW[i];
         if (w > 0) d = d * (1 - w) + roadTarget[i] * w;
         dispArr[i] = d < 0 ? 0 : d > 1 ? 1 : d;
@@ -2286,10 +2345,10 @@ export function WorldMapBuilder({
               heightArr[i] += (avg - heightArr[i]) * strength * fall;
               touchedHeight = true;
             } else if (t === "lake") {
-              // mark a lake + gently dig a basin under the still water
+              // mark a lake — a shallow basin is carved in the display layer,
+              // and a thin water layer is laid at bank level (like rivers)
               lakeArr[i] = 1;
-              heightArr[i] = Math.max(0, heightArr[i] - strength * fall * 0.03);
-              touchedHeight = true;
+              touchedHeight = true; // dispArr changes via the lake carve
             } else if (t === "reveal") {
               exploredArr[i] = 1;
             } else if (t === "shroud") {
@@ -2687,6 +2746,13 @@ export function WorldMapBuilder({
           }
           lakeWaterMat.dispose();
           lakeTex.dispose();
+          for (const m of cobbleMeshes) {
+            scene.remove(m);
+            m.geometry.dispose();
+          }
+          cobbleMeshes.length = 0;
+          cobbleMat.dispose();
+          brickTex.dispose();
           waterTex.dispose();
           riverWaterMat.dispose();
           for (const rec of regionLabelMap.values()) disposeRegionLabel(rec);
