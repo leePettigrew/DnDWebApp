@@ -249,6 +249,9 @@ export function WorldMapBuilder({
   }, [regions, factions]);
   const regionColorsRef = useRef(regionColors);
   regionColorsRef.current = regionColors;
+  const [regionMode, setRegionMode] = useState<"paint" | "erase">("paint");
+  const regionModeRef = useRef(regionMode);
+  regionModeRef.current = regionMode;
 
   const saveRegions = (next: typeof regions) => saveWorld({ regions: next });
   const updateRegion = (id: string, patch: Partial<(typeof regions)[number]>) =>
@@ -2027,7 +2030,7 @@ export function WorldMapBuilder({
             } else if (t === "shroud") {
               exploredArr[i] = 0;
             } else if (t === "region") {
-              regionArr[i] = activeRegionRef.current;
+              regionArr[i] = regionModeRef.current === "erase" ? 0 : activeRegionRef.current;
             } else if (t === "trees") {
               treeArr[i] =
                 treeModeRef.current === "clear"
@@ -2761,17 +2764,36 @@ export function WorldMapBuilder({
                 </button>
               </div>
               {regions.length > 0 && (
-                <button
-                  onClick={() => setTool("region")}
-                  className={cn(
-                    "w-full rounded px-2 py-1 text-[0.65rem] font-semibold",
-                    tool === "region"
-                      ? "bg-oxblood text-parchment-50"
-                      : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
-                  )}
-                >
-                  {tool === "region" ? "Painting territory…" : "Paint territory"}
-                </button>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => {
+                      setRegionMode("paint");
+                      setTool("region");
+                    }}
+                    className={cn(
+                      "flex-1 rounded px-2 py-1 text-[0.65rem] font-semibold",
+                      tool === "region" && regionMode === "paint"
+                        ? "bg-arcane text-parchment-50"
+                        : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                    )}
+                  >
+                    Paint
+                  </button>
+                  <button
+                    onClick={() => {
+                      setRegionMode("erase");
+                      setTool("region");
+                    }}
+                    className={cn(
+                      "flex-1 rounded px-2 py-1 text-[0.65rem] font-semibold",
+                      tool === "region" && regionMode === "erase"
+                        ? "bg-oxblood text-parchment-50"
+                        : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                    )}
+                  >
+                    Erase
+                  </button>
+                </div>
               )}
               {regions.map((rg) => {
                 const num = rg.num ?? 0;
