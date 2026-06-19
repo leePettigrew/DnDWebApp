@@ -700,10 +700,11 @@ export interface WorldPoi {
 
 export interface WorldPath {
   id: ID;
-  kind: "river" | "road" | "route" | "border";
+  kind: "river" | "road" | "cobble" | "route" | "border";
   /** Flattened [x1,y1,x2,y2,…] in 0..1. */
   points: number[];
   color?: string;
+  /** Optional override width in world units (river/road brush size). */
   width?: number;
 }
 

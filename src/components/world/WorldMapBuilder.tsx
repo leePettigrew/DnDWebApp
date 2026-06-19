@@ -60,6 +60,7 @@ type Tool =
   | "lower"
   | "smooth"
   | "paint"
+  | "lake"
   | "reveal"
   | "shroud"
   | "region"
@@ -190,6 +191,15 @@ export function WorldMapBuilder({
   const paths = world.paths ?? [];
   const [drawKind, setDrawKind] = useState<WorldPath["kind"]>("river");
   const [drawing, setDrawing] = useState(false);
+  // Width (world units) for the next river/road drawn; null = kind default.
+  const PATH_W_DEFAULT: Record<WorldPath["kind"], number> = {
+    river: 0.5,
+    road: 0.38,
+    cobble: 0.38,
+    route: 0.4,
+    border: 0.34,
+  };
+  const [drawWidth, setDrawWidth] = useState(0.5);
   const drawKindRef = useRef<WorldPath["kind"] | null>(null);
   drawKindRef.current = canEdit && drawing ? drawKind : null;
   const savePaths = (next: WorldPath[]) => saveWorld({ paths: next });
@@ -382,6 +392,7 @@ export function WorldMapBuilder({
       const pathG = new Float32Array(size * size);
       const pathB = new Float32Array(size * size);
       const pathWt = new Float32Array(size * size);
+      const cullArr = new Uint8Array(size * size); // 1 = clear trees (under paths)
       let seaLevel = world.seaLevel;
       let fogOn = !!world.fog;
 
@@ -460,6 +471,7 @@ export function WorldMapBuilder({
       const onLeave = () => {
         hovered = false;
         keys.clear();
+        brushRing.visible = false;
       };
       window.addEventListener("keydown", onKeyDown);
       window.addEventListener("keyup", onKeyUp);
@@ -523,6 +535,33 @@ export function WorldMapBuilder({
       water.rotation.x = -Math.PI / 2;
       water.renderOrder = 1;
       scene.add(water);
+
+      // Brush preview ring (shows the brush footprint on the terrain).
+      const BRUSH_TOOLS = new Set([
+        "raise",
+        "lower",
+        "smooth",
+        "paint",
+        "lake",
+        "reveal",
+        "shroud",
+        "region",
+        "trees",
+      ]);
+      const brushRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.86, 1, 48),
+        new THREE.MeshBasicMaterial({
+          color: 0xf2e8d0,
+          transparent: true,
+          opacity: 0.7,
+          side: THREE.DoubleSide,
+          depthTest: false,
+        }),
+      );
+      brushRing.rotation.x = -Math.PI / 2;
+      brushRing.renderOrder = 20;
+      brushRing.visible = false;
+      scene.add(brushRing);
 
       const pos = geo.getAttribute("position") as InstanceType<
         typeof THREE.Float32BufferAttribute
@@ -835,6 +874,7 @@ export function WorldMapBuilder({
       > = {
         river: { rgb: [0.17, 0.41, 0.58], w: 0.85 },
         road: { rgb: [0.42, 0.3, 0.21], w: 0.88 },
+        cobble: { rgb: [0.5, 0.49, 0.46], w: 0.9 },
         route: { rgb: [0.78, 0.62, 0.34], w: 0.7 },
         border: { rgb: [0.28, 0.22, 0.16], w: 0.8 },
       };
@@ -852,6 +892,7 @@ export function WorldMapBuilder({
       const PATH_WIDTH: Record<WorldPath["kind"], number> = {
         river: 0.5,
         road: 0.38,
+        cobble: 0.38,
         route: 0.4,
         border: 0.34,
       };
@@ -952,7 +993,7 @@ export function WorldMapBuilder({
           const curve = new THREE.CatmullRomCurve3(ctrl, false, "catmullrom", 0.5);
           const segs = Math.max(20, ctrl.length * 16);
           const sample = curve.getSpacedPoints(segs);
-          const half = (PATH_WIDTH.river / 2) * 0.92;
+          const half = ((p.width ?? PATH_WIDTH.river) / 2) * 0.92;
           const pos: number[] = [];
           const uv: number[] = [];
           const idx: number[] = [];
@@ -993,6 +1034,82 @@ export function WorldMapBuilder({
           riverMeshes.push(mesh);
         }
       }
+
+      // --- bridges where a road crosses/meets a river ---
+      const BRIDGE_WOOD = new THREE.MeshStandardMaterial({ color: 0x6e4a2e, roughness: 0.85 });
+      const bridgeMeshes: InstanceType<typeof THREE.Group>[] = [];
+      function samplePath(points: number[]) {
+        const v: { x: number; y: number }[] = [];
+        for (let i = 0; i + 1 < points.length; i += 2) v.push({ x: points[i], y: points[i + 1] });
+        if (v.length < 2) return v;
+        const out: { x: number; y: number }[] = [];
+        for (let i = 0; i < v.length - 1; i++) {
+          const a = v[i];
+          const b = v[i + 1];
+          const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.01));
+          for (let s = 0; s < steps; s++) {
+            const f = s / steps;
+            out.push({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
+          }
+        }
+        out.push(v[v.length - 1]);
+        return out;
+      }
+      function makeBridge(nx: number, ny: number, ang: number) {
+        const g = new THREE.Group();
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.09, 0.55), BRIDGE_WOOD);
+        deck.position.y = 0.05;
+        g.add(deck);
+        for (const z of [0.26, -0.26]) {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.14, 0.05), BRIDGE_WOOD);
+          rail.position.set(0, 0.16, z);
+          g.add(rail);
+        }
+        g.position.set((nx - 0.5) * W, baseHeightAtNorm(nx, ny) * HEIGHT + 0.16, (ny - 0.5) * W);
+        g.rotation.y = -ang;
+        g.scale.setScalar(0.7);
+        return g;
+      }
+      function buildBridges() {
+        for (const m of bridgeMeshes) {
+          scene.remove(m);
+          m.traverse((o) => {
+            const me = o as InstanceType<typeof THREE.Mesh>;
+            if (me.geometry) me.geometry.dispose();
+          });
+        }
+        bridgeMeshes.length = 0;
+        const paths = worldRef.current.paths ?? [];
+        const riverPts = paths
+          .filter((p) => p.kind === "river")
+          .map((p) => samplePath(p.points));
+        const roads = paths.filter((p) => p.kind === "road" || p.kind === "cobble");
+        if (!riverPts.length || !roads.length) return;
+        const placed: { x: number; y: number }[] = [];
+        const thr = 0.013;
+        for (const road of roads) {
+          const rs = samplePath(road.points);
+          for (let i = 0; i < rs.length; i++) {
+            const a = rs[i];
+            let best = Infinity;
+            for (const rv of riverPts) {
+              for (const rp of rv) {
+                const d = (rp.x - a.x) ** 2 + (rp.y - a.y) ** 2;
+                if (d < best) best = d;
+              }
+            }
+            if (best > thr * thr) continue;
+            if (placed.some((p) => (p.x - a.x) ** 2 + (p.y - a.y) ** 2 < 0.025 * 0.025)) continue;
+            placed.push(a);
+            const prev = rs[Math.max(0, i - 1)];
+            const next = rs[Math.min(rs.length - 1, i + 1)];
+            const ang = Math.atan2(next.y - prev.y, next.x - prev.x);
+            const br = makeBridge(a.x, a.y, ang);
+            scene.add(br);
+            bridgeMeshes.push(br);
+          }
+        }
+      }
       // Paths are painted into the terrain by computeMods; this just reflows the
       // surface + objects when the path list changes.
       function syncPaths() {
@@ -1000,6 +1117,7 @@ export function WorldMapBuilder({
         refreshPositions();
         refreshColors();
         buildRivers();
+        buildBridges();
         buildTrees();
         buildLanterns();
         repositionPois();
@@ -1056,8 +1174,8 @@ export function WorldMapBuilder({
         for (let i = 0; i < treeArr.length; i++) {
           const d = treeArr[i];
           if (d < 8 || heightArr[i] < seaLevel) continue;
-          // cull trees under rivers (carved) and roads (flattened)
-          if (carveArr[i] < -0.002 || roadW[i] > 0.1) continue;
+          // cull trees under any path that culls (rivers, roads, cobble, routes)
+          if (cullArr[i]) continue;
           // per-cell density: expected count from the painted value, with a
           // fractional remainder placed probabilistically (so it stays sparse)
           const f = (d / 255) * 2.6;
@@ -1231,14 +1349,19 @@ export function WorldMapBuilder({
         pathG.fill(0);
         pathB.fill(0);
         pathWt.fill(0);
+        cullArr.fill(0);
         const cell = W / size;
         for (const p of worldRef.current.paths ?? []) {
           const isRiver = p.kind === "river";
-          const isRoad = p.kind === "road";
+          const isRoad = p.kind === "road" || p.kind === "cobble";
+          const culls = isRiver || isRoad || p.kind === "route";
           const dashed = p.kind === "border" || p.kind === "route";
           const paint = PATH_PAINT[p.kind] ?? PATH_PAINT.route;
           const rgb = p.color ? hex01(p.color) : paint.rgb;
-          const rad = Math.max(1, Math.round((PATH_WIDTH[p.kind] ?? 0.5) / 2 / cell));
+          const rad = Math.max(
+            1,
+            Math.round((p.width ?? PATH_WIDTH[p.kind] ?? 0.5) / 2 / cell),
+          );
           const depth = 0.05;
           const pts = p.points;
           let dashCounter = 0;
@@ -1274,6 +1397,7 @@ export function WorldMapBuilder({
                       roadTarget[i] = baseH;
                     }
                   }
+                  if (culls) cullArr[i] = 1;
                   if (dashOn) {
                     const w = paint.w * (0.4 + fall * 0.6);
                     if (w > pathWt[i]) {
@@ -1506,8 +1630,9 @@ export function WorldMapBuilder({
       let lanternPosts: InstanceType<typeof THREE.InstancedMesh> | null = null;
       let lanternHeads: InstanceType<typeof THREE.InstancedMesh> | null = null;
       let lanternGlows: InstanceType<typeof THREE.InstancedMesh> | null = null;
+      const roadLights: InstanceType<typeof THREE.PointLight>[] = []; // a few real lights along roads
       function lanternPositions() {
-        const out: { x: number; y: number }[] = [];
+        const out: { x: number; y: number; road: boolean }[] = [];
         const pois = canEdit
           ? worldRef.current.pois ?? []
           : (worldRef.current.pois ?? []).filter((p) => !p.hidden);
@@ -1517,12 +1642,12 @@ export function WorldMapBuilder({
           const rad = 0.007;
           for (let k = 0; k < n; k++) {
             const a = (k / n) * Math.PI * 2;
-            out.push({ x: p.x + Math.cos(a) * rad, y: p.y + Math.sin(a) * rad });
+            out.push({ x: p.x + Math.cos(a) * rad, y: p.y + Math.sin(a) * rad, road: false });
           }
         }
         let side = 0;
         for (const path of worldRef.current.paths ?? []) {
-          if (path.kind !== "road") continue;
+          if (path.kind !== "road" && path.kind !== "cobble") continue;
           const pts = path.points;
           const spacing = 0.028;
           const off = 0.008; // lanterns line the road edges
@@ -1540,6 +1665,7 @@ export function WorldMapBuilder({
               out.push({
                 x: ax + (bx - ax) * f + px * off * sgn,
                 y: ay + (by - ay) * f + py * off * sgn,
+                road: true,
               });
             }
           }
@@ -1554,6 +1680,8 @@ export function WorldMapBuilder({
           }
         }
         lanternPosts = lanternHeads = lanternGlows = null;
+        for (const l of roadLights) scene.remove(l);
+        roadLights.length = 0;
       }
       function buildLanterns() {
         disposeLanterns();
@@ -1588,6 +1716,17 @@ export function WorldMapBuilder({
         scene.add(lanternPosts);
         scene.add(lanternHeads);
         scene.add(lanternGlows);
+        // A capped pool of real point-lights along roads so they cast light too.
+        const roadPs = ps.filter((p) => p.road);
+        const CAP = 10;
+        const stride = roadPs.length > CAP ? roadPs.length / CAP : 1;
+        for (let j = 0; j < Math.min(CAP, roadPs.length); j++) {
+          const { x, y } = roadPs[Math.floor(j * stride)];
+          const l = new THREE.PointLight(0xffb060, 0, 7, 2);
+          l.position.set((x - 0.5) * W, heightAtNorm(x, y) * HEIGHT + 0.35, (y - 0.5) * W);
+          scene.add(l);
+          roadLights.push(l);
+        }
       }
 
       // --- region name labels: text laid flat across the land (HOI style) ---
@@ -1796,6 +1935,7 @@ export function WorldMapBuilder({
         ambient.color.setRGB(0.6 + day * 0.4, 0.65 + day * 0.35, 0.8);
         const lv = lightLevel();
         for (const l of lightMap.values()) l.intensity = lv;
+        for (const l of roadLights) l.intensity = lv * 0.5; // softer than towns
         lanternBase = 0.2 + nightFactor * 2.6 + (1 - dim) * 0.6;
         lanternGlowMat.emissiveIntensity = lanternBase;
       }
@@ -1864,6 +2004,16 @@ export function WorldMapBuilder({
               const d = y < size - 1 ? heightArr[i + size] : heightArr[i];
               const avg = (l + r + u + d) / 4;
               heightArr[i] += (avg - heightArr[i]) * strength * fall;
+              touchedHeight = true;
+            } else if (t === "lake") {
+              // dig a basin below sea level so the water plane fills it
+              const target = seaLevel - 0.06;
+              if (heightArr[i] > target) {
+                heightArr[i] = Math.max(
+                  target,
+                  heightArr[i] - strength * fall * 0.05,
+                );
+              }
               touchedHeight = true;
             } else if (t === "reveal") {
               exploredArr[i] = 1;
@@ -1957,13 +2107,33 @@ export function WorldMapBuilder({
       }
       function onMove(e: PointerEvent) {
         const rect = dom.getBoundingClientRect();
-        lastNdc.set(
+        ndc.set(
           ((e.clientX - rect.left) / rect.width) * 2 - 1,
           -((e.clientY - rect.top) / rect.height) * 2 + 1,
         );
-        if (!painting) return;
-        const c = cellFromEvent(e);
-        if (c !== null) applyBrush(c.i);
+        lastNdc.copy(ndc);
+        ray.setFromCamera(ndc, camera);
+        const hit = ray.intersectObject(terrain, false)[0];
+        // brush footprint ring
+        const showRing =
+          BRUSH_TOOLS.has(toolRef.current) &&
+          !onPlaceRef.current &&
+          !drawKindRef.current &&
+          !onPartyRef.current &&
+          !measureRef.current;
+        if (hit && showRing) {
+          brushRing.visible = true;
+          brushRing.position.copy(hit.point);
+          brushRing.position.y += 0.06;
+          const rWorld = sizeRef.current * (W / size);
+          brushRing.scale.set(rWorld, rWorld, 1);
+        } else {
+          brushRing.visible = false;
+        }
+        if (!painting || !hit || !hit.uv) return;
+        const col = Math.round(hit.uv.x * N);
+        const row = Math.round((1 - hit.uv.y) * N);
+        applyBrush(Math.max(0, Math.min(size * size - 1, row * size + col)));
       }
       function onUp(e: PointerEvent) {
         if (painting && edited) {
@@ -1972,12 +2142,12 @@ export function WorldMapBuilder({
           } else {
             geo.computeVertexNormals(); // accurate lighting after the stroke
             refreshColors();
-            if (toolRef.current === "raise" ||
-              toolRef.current === "lower" ||
-              toolRef.current === "smooth") {
+            const tt = toolRef.current;
+            if (tt === "raise" || tt === "lower" || tt === "smooth" || tt === "lake") {
               repositionPois();
+              buildTrees(); // drop trees that fell below the new water
             }
-            if (toolRef.current === "region") syncRegionLabels();
+            if (tt === "region") syncRegionLabels();
           }
           scheduleSave();
         } else if (
@@ -2206,11 +2376,23 @@ export function WorldMapBuilder({
             treeLeaves.geometry.dispose();
           }
           disposeLanterns();
+          scene.remove(brushRing);
+          brushRing.geometry.dispose();
+          (brushRing.material as InstanceType<typeof THREE.MeshBasicMaterial>).dispose();
           for (const m of riverMeshes) {
             scene.remove(m);
             m.geometry.dispose();
           }
           riverMeshes.length = 0;
+          for (const m of bridgeMeshes) {
+            scene.remove(m);
+            m.traverse((o) => {
+              const me = o as InstanceType<typeof THREE.Mesh>;
+              if (me.geometry) me.geometry.dispose();
+            });
+          }
+          bridgeMeshes.length = 0;
+          BRIDGE_WOOD.dispose();
           waterTex.dispose();
           riverWaterMat.dispose();
           for (const rec of regionLabelMap.values()) disposeRegionLabel(rec);
@@ -2287,7 +2469,11 @@ export function WorldMapBuilder({
   // Finish / cancel an in-progress path draw (shared by buttons + keyboard).
   const finishDrawing = () => {
     const pts = engineRef.current?.finishDraw();
-    if (pts) savePaths([...paths, { id: newId(), kind: drawKind, points: pts }]);
+    if (pts)
+      savePaths([
+        ...paths,
+        { id: newId(), kind: drawKind, points: pts, width: drawWidth },
+      ]);
     setDrawing(false);
   };
   const cancelDrawing = () => {
@@ -2407,6 +2593,7 @@ export function WorldMapBuilder({
                   ["lower", "Lower"],
                   ["smooth", "Smooth"],
                   ["paint", "Paint"],
+                  ["lake", "Lake"],
                   ...(fog
                     ? ([
                         ["reveal", "Reveal"],
@@ -2463,7 +2650,10 @@ export function WorldMapBuilder({
                   onChange={(e) => setBrushSize(Number(e.target.value))}
                   className="w-full accent-oxblood"
                 />
-                {(tool === "raise" || tool === "lower" || tool === "smooth") && (
+                {(tool === "raise" ||
+                  tool === "lower" ||
+                  tool === "smooth" ||
+                  tool === "lake") && (
                   <>
                     <div className="flex items-center justify-between text-[0.65rem] text-ink-soft">
                       <span>Strength</span>
@@ -2651,17 +2841,36 @@ export function WorldMapBuilder({
               <div className="flex items-center justify-end">
                 <select
                   value={drawKind}
-                  onChange={(e) => setDrawKind(e.target.value as WorldPath["kind"])}
+                  onChange={(e) => {
+                    const k = e.target.value as WorldPath["kind"];
+                    setDrawKind(k);
+                    setDrawWidth(PATH_W_DEFAULT[k]);
+                  }}
                   aria-label="Path kind"
                   disabled={drawing}
                   className="h-6 rounded border border-parchment-400 bg-parchment-50 px-1 text-[0.65rem] text-ink"
                 >
                   <option value="river">River</option>
                   <option value="road">Road</option>
+                  <option value="cobble">Cobblestone road</option>
                   <option value="route">Route</option>
                   <option value="border">Border</option>
                 </select>
               </div>
+              <div className="flex items-center justify-between text-[0.65rem] text-ink-soft">
+                <span>Width</span>
+                <span className="font-semibold text-ink">{drawWidth.toFixed(2)}</span>
+              </div>
+              <input
+                type="range"
+                min={0.15}
+                max={1.6}
+                step={0.05}
+                value={drawWidth}
+                onChange={(e) => setDrawWidth(Number(e.target.value))}
+                disabled={drawing}
+                className="w-full accent-arcane"
+              />
               {!drawing ? (
                 <button
                   onClick={() => {
