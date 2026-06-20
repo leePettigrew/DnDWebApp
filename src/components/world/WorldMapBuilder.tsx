@@ -2651,7 +2651,7 @@ export function WorldMapBuilder({
             cum,
             len,
             phase: Math.random() * 2,
-            speed: 0.1 + Math.min(0.3, (r.volume ?? 5) * 0.008),
+            speed: (0.1 + Math.min(0.3, (r.volume ?? 5) * 0.008)) / 3,
             bob: Math.random() * 6,
           });
         }
