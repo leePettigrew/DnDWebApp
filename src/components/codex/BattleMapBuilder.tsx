@@ -16,7 +16,17 @@ import {
 } from "@/lib/battle/materials";
 import { PROPS, PROP_MAP } from "@/lib/battle/props";
 import type { PropDef } from "@/lib/battle/props";
-import type { BattleBuild, BattleMap, BattleProp, BattleWall } from "@/lib/domain/types";
+import {
+  brushCells,
+  cellCenter,
+  cellPolygon,
+  mapSize,
+  neighbors,
+  pixelToCell,
+  snapVertex,
+} from "@/lib/battle/grid";
+import type { BattleBuild, BattleGrid, BattleMap, BattleProp, BattleWall } from "@/lib/domain/types";
+import type { Material } from "@/lib/battle/materials";
 
 /** Draw all wall segments (shared by live canvas + flatten). */
 function drawWalls(ctx: CanvasRenderingContext2D, walls: BattleWall[], cp: number) {
@@ -103,20 +113,13 @@ function mulberry32(seed: number) {
 }
 const rngFor = (c: number, r: number) => mulberry32((c * 374761393 + r * 668265263) >>> 0);
 
-function drawCell(ctx: CanvasRenderingContext2D, c: number, r: number, cp: number, id: string) {
-  const m = MATERIAL_MAP.get(id);
-  if (!m) return;
-  const x = c * cp;
-  const y = r * cp;
-  ctx.fillStyle = m.color;
-  ctx.fillRect(x, y, cp, cp);
-
-  const rnd = rngFor(c, r);
+function paintGrain(ctx: CanvasRenderingContext2D, m: Material, id: string, col: number, row: number, cx: number, cy: number, cp: number) {
+  const rnd = rngFor(col, row);
   const count = m.look === "smooth" ? 4 : m.look === "liquid" ? 6 : 12;
   ctx.fillStyle = m.grain;
   for (let i = 0; i < count; i++) {
-    const gx = x + rnd() * cp;
-    const gy = y + rnd() * cp;
+    const gx = cx + (rnd() - 0.5) * cp * 0.92;
+    const gy = cy + (rnd() - 0.5) * cp * 0.92;
     const sz = (m.look === "rough" ? 0.06 : 0.035) * cp * (0.5 + rnd());
     ctx.globalAlpha = 0.14 + rnd() * 0.2;
     ctx.beginPath();
@@ -124,16 +127,15 @@ function drawCell(ctx: CanvasRenderingContext2D, c: number, r: number, cp: numbe
     ctx.fill();
   }
   ctx.globalAlpha = 1;
-
   if (m.look === "floor" && id === "wood") {
     ctx.strokeStyle = m.grain;
     ctx.globalAlpha = 0.25;
     ctx.lineWidth = Math.max(1, cp * 0.02);
     for (let i = 1; i < 3; i++) {
-      const ly = y + (i / 3) * cp;
+      const ly = cy - cp * 0.4 + (i / 3) * cp * 0.8;
       ctx.beginPath();
-      ctx.moveTo(x, ly);
-      ctx.lineTo(x + cp, ly);
+      ctx.moveTo(cx - cp * 0.45, ly);
+      ctx.lineTo(cx + cp * 0.45, ly);
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
@@ -142,13 +144,37 @@ function drawCell(ctx: CanvasRenderingContext2D, c: number, r: number, cp: numbe
     ctx.strokeStyle = m.grain;
     ctx.globalAlpha = 0.32;
     ctx.lineWidth = Math.max(1, cp * 0.03);
-    const wy = y + cp * (0.3 + rnd() * 0.4);
+    const wy = cy + (rnd() - 0.3) * cp * 0.3;
     ctx.beginPath();
-    ctx.moveTo(x, wy);
-    ctx.quadraticCurveTo(x + cp / 2, wy - cp * 0.12, x + cp, wy);
+    ctx.moveTo(cx - cp * 0.45, wy);
+    ctx.quadraticCurveTo(cx, wy - cp * 0.12, cx + cp * 0.45, wy);
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
+}
+
+function drawCell(ctx: CanvasRenderingContext2D, grid: BattleGrid, col: number, row: number, cp: number, id: string) {
+  const m = MATERIAL_MAP.get(id);
+  if (!m) return;
+  if (grid === "square") {
+    const x = col * cp;
+    const y = row * cp;
+    ctx.fillStyle = m.color;
+    ctx.fillRect(x, y, cp, cp);
+    paintGrain(ctx, m, id, col, row, x + cp / 2, y + cp / 2, cp);
+    return;
+  }
+  const c = cellCenter("hex", col, row, cp);
+  const poly = cellPolygon("hex", col, row, cp);
+  ctx.save();
+  ctx.beginPath();
+  poly.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.closePath();
+  ctx.clip();
+  ctx.fillStyle = m.color;
+  ctx.fillRect(c.x - cp, c.y - cp, cp * 2, cp * 2);
+  paintGrain(ctx, m, id, col, row, c.x, c.y, cp);
+  ctx.restore();
 }
 
 type Tool = "paint" | "fill" | "erase" | "room" | "wall" | "prop" | "select" | "pan";
@@ -180,6 +206,9 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   const [propKind, setPropKind] = useState<string>("chest");
   const [selectedPropId, setSelectedPropId] = useState<string | null>(null);
   const [propCat, setPropCat] = useState("dungeon");
+  const [showTrace, setShowTrace] = useState(true);
+  const [traceOpacity, setTraceOpacity] = useState(0.5);
+  const [isFs, setIsFs] = useState(false);
 
   const buildRef = useRef(build);
   buildRef.current = build;
@@ -195,9 +224,15 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   propKindRef.current = propKind;
   const selPropRef = useRef(selectedPropId);
   selPropRef.current = selectedPropId;
+  const showTraceRef = useRef(showTrace);
+  showTraceRef.current = showTrace;
+  const traceOpacityRef = useRef(traceOpacity);
+  traceOpacityRef.current = traceOpacity;
+  const traceImg = useRef<HTMLImageElement | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const view = useRef({ zoom: 1, panX: 0, panY: 0 });
   const hover = useRef<{ c: number; r: number } | null>(null);
   const renderScheduled = useRef(false);
@@ -243,14 +278,23 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     ctx.fillRect(0, 0, cv.width, cv.height);
     ctx.setTransform(zoom, 0, 0, zoom, panX, panY);
 
+    const ms = mapSize(b.grid, b.cols, b.rows, cp);
+
     // Void area (unpainted map).
     ctx.fillStyle = "#241f1a";
-    ctx.fillRect(0, 0, b.cols * cp, b.rows * cp);
+    ctx.fillRect(0, 0, ms.w, ms.h);
+
+    // Reference/trace image under everything.
+    if (traceImg.current && showTraceRef.current) {
+      ctx.globalAlpha = traceOpacityRef.current;
+      ctx.drawImage(traceImg.current, 0, 0, ms.w, ms.h);
+      ctx.globalAlpha = 1;
+    }
 
     for (let r = 0; r < b.rows; r++) {
       for (let c = 0; c < b.cols; c++) {
         const id = b.tiles[r * b.cols + c];
-        if (id) drawCell(ctx, c, r, cp, id);
+        if (id) drawCell(ctx, b.grid, c, r, cp, id);
       }
     }
 
@@ -258,13 +302,23 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       ctx.strokeStyle = "rgba(0,0,0,0.28)";
       ctx.lineWidth = 1 / zoom;
       ctx.beginPath();
-      for (let c = 0; c <= b.cols; c++) {
-        ctx.moveTo(c * cp, 0);
-        ctx.lineTo(c * cp, b.rows * cp);
-      }
-      for (let r = 0; r <= b.rows; r++) {
-        ctx.moveTo(0, r * cp);
-        ctx.lineTo(b.cols * cp, r * cp);
+      if (b.grid === "square") {
+        for (let c = 0; c <= b.cols; c++) {
+          ctx.moveTo(c * cp, 0);
+          ctx.lineTo(c * cp, b.rows * cp);
+        }
+        for (let r = 0; r <= b.rows; r++) {
+          ctx.moveTo(0, r * cp);
+          ctx.lineTo(b.cols * cp, r * cp);
+        }
+      } else {
+        for (let r = 0; r < b.rows; r++) {
+          for (let c = 0; c < b.cols; c++) {
+            const poly = cellPolygon("hex", c, r, cp);
+            poly.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+            ctx.closePath();
+          }
+        }
       }
       ctx.stroke();
     }
@@ -272,7 +326,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     // Map border.
     ctx.strokeStyle = "rgba(230,199,114,0.6)";
     ctx.lineWidth = 2 / zoom;
-    ctx.strokeRect(0, 0, b.cols * cp, b.rows * cp);
+    ctx.strokeRect(0, 0, ms.w, ms.h);
 
     // Walls (under props so furniture can sit against them).
     drawWalls(ctx, b.walls ?? [], cp);
@@ -292,10 +346,16 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     const h = hover.current;
     if (h && (toolRef.current === "paint" || toolRef.current === "erase" || toolRef.current === "fill")) {
       const sz = toolRef.current === "fill" ? 1 : brushRef.current;
-      const off = Math.floor((sz - 1) / 2);
+      const cells = brushCells(b.grid, h.c, h.r, sz, b.cols, b.rows);
       ctx.strokeStyle = toolRef.current === "erase" ? "rgba(180,60,40,0.9)" : "rgba(230,199,114,0.95)";
       ctx.lineWidth = 2 / zoom;
-      ctx.strokeRect((h.c - off) * cp, (h.r - off) * cp, sz * cp, sz * cp);
+      ctx.beginPath();
+      for (const [c, r] of cells) {
+        const poly = cellPolygon(b.grid, c, r, cp);
+        poly.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.closePath();
+      }
+      ctx.stroke();
     }
 
     // Room / wall drag preview.
@@ -334,8 +394,9 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     cv.width = w;
     cv.height = hgt;
     const b = buildRef.current;
-    const mw = b.cols * b.cellPx;
-    const mh = b.rows * b.cellPx;
+    const ms = mapSize(b.grid, b.cols, b.rows, b.cellPx);
+    const mw = ms.w;
+    const mh = ms.h;
     const zoom = Math.min(w / mw, hgt / mh) * 0.92;
     view.current = {
       zoom,
@@ -366,6 +427,42 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     requestRender();
   });
 
+  // Load the trace/reference image.
+  useEffect(() => {
+    if (!build.trace) {
+      traceImg.current = null;
+      requestRender();
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      traceImg.current = img;
+      requestRender();
+    };
+    img.src = build.trace;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [build.trace]);
+
+  // Track browser fullscreen state.
+  useEffect(() => {
+    const onFs = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+  function toggleFullscreen() {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void rootRef.current?.requestFullscreen?.();
+    setTimeout(fit, 120);
+  }
+  function importImage(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      setBuild({ ...buildRef.current, trace: reader.result as string });
+      setDirty(true);
+    };
+    reader.readAsDataURL(file);
+  }
+
   // --- coordinate + paint helpers ---
   function cellAt(e: { clientX: number; clientY: number }): { c: number; r: number } | null {
     const cv = canvasRef.current;
@@ -374,41 +471,35 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     const { zoom, panX, panY } = view.current;
     const wx = (e.clientX - rect.left - panX) / zoom;
     const wy = (e.clientY - rect.top - panY) / zoom;
-    const cp = buildRef.current.cellPx;
-    const c = Math.floor(wx / cp);
-    const r = Math.floor(wy / cp);
     const b = buildRef.current;
-    if (c < 0 || r < 0 || c >= b.cols || r >= b.rows) return null;
-    return { c, r };
+    const cell = pixelToCell(b.grid, wx, wy, b.cellPx, b.cols, b.rows);
+    return cell ? { c: cell.col, r: cell.row } : null;
   }
 
   function paintAt(c: number, r: number) {
     const b = buildRef.current;
     const id = toolRef.current === "erase" ? "" : matRef.current;
     const sz = brushRef.current;
-    const off = Math.floor((sz - 1) / 2);
+    const cells = brushCells(b.grid, c, r, sz, b.cols, b.rows);
     const tiles = b.tiles;
     let changed = false;
-    for (let dr = 0; dr < sz; dr++) {
-      for (let dc = 0; dc < sz; dc++) {
-        const cc = c - off + dc;
-        const rr = r - off + dr;
-        if (cc < 0 || rr < 0 || cc >= b.cols || rr >= b.rows) continue;
-        const idx = rr * b.cols + cc;
-        if (tiles[idx] !== id) {
-          tiles[idx] = id;
-          changed = true;
-        }
+    for (const [cc, rr] of cells) {
+      const idx = rr * b.cols + cc;
+      if (tiles[idx] !== id) {
+        tiles[idx] = id;
+        changed = true;
       }
     }
-    // Erasing also clears walls whose midpoint is under the brush.
+    // Erasing also clears walls whose midpoint cell is under the brush.
     let walls = b.walls;
     let wallsChanged = false;
     if (id === "" && b.walls?.length) {
+      const keys = new Set(cells.map(([cc, rr]) => rr * b.cols + cc));
       const kept = b.walls.filter((w) => {
-        const mx = (w.x1 + w.x2) / 2;
-        const my = (w.y1 + w.y2) / 2;
-        return !(mx >= c - off && mx <= c - off + sz && my >= r - off && my <= r - off + sz);
+        const mx = ((w.x1 + w.x2) / 2) * b.cellPx;
+        const my = ((w.y1 + w.y2) / 2) * b.cellPx;
+        const cell = pixelToCell(b.grid, mx, my, b.cellPx, b.cols, b.rows);
+        return !(cell && keys.has(cell.row * b.cols + cell.col));
       });
       if (kept.length !== b.walls.length) {
         walls = kept;
@@ -427,14 +518,14 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     const replace = matRef.current;
     if (target === replace) return;
     const tiles = b.tiles.slice();
-    const stack = [[c, r]];
+    const stack: [number, number][] = [[c, r]];
     while (stack.length) {
       const [cc, rr] = stack.pop()!;
       if (cc < 0 || rr < 0 || cc >= b.cols || rr >= b.rows) continue;
       const idx = rr * b.cols + cc;
       if (tiles[idx] !== target) continue;
       tiles[idx] = replace;
-      stack.push([cc + 1, rr], [cc - 1, rr], [cc, rr + 1], [cc, rr - 1]);
+      for (const [nc, nr] of neighbors(b.grid, cc, rr)) stack.push([nc, nr]);
     }
     setBuild({ ...b, tiles });
     setDirty(true);
@@ -505,10 +596,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     const wp = worldPoint(e);
     const b = buildRef.current;
     if (!wp) return null;
-    return {
-      x: Math.max(0, Math.min(b.cols, Math.round(wp.x))),
-      y: Math.max(0, Math.min(b.rows, Math.round(wp.y))),
-    };
+    return snapVertex(b.grid, wp.x, wp.y, b.cellPx, b.cols, b.rows);
   }
 
   function onPointerDown(e: RPointerEvent) {
@@ -605,11 +693,18 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       const rMin = Math.min(ds.sy, ds.cy);
       const rMax = Math.max(ds.sy, ds.cy);
       const b = buildRef.current;
-      if (toolRef.current === "room" && cMax > cMin && rMax > rMin) {
+      if (toolRef.current === "room" && cMax - cMin > 0.1 && rMax - rMin > 0.1) {
         pushUndo();
+        const cp = b.cellPx;
         const tiles = b.tiles.slice();
-        for (let r = rMin; r < rMax; r++) {
-          for (let c = cMin; c < cMax; c++) tiles[r * b.cols + c] = matRef.current;
+        // Paint every cell whose centre falls inside the dragged rectangle.
+        for (let r = 0; r < b.rows; r++) {
+          for (let c = 0; c < b.cols; c++) {
+            const ctr = cellCenter(b.grid, c, r, cp);
+            if (ctr.x >= cMin * cp && ctr.x <= cMax * cp && ctr.y >= rMin * cp && ctr.y <= rMax * cp) {
+              tiles[r * b.cols + c] = matRef.current;
+            }
+          }
         }
         const add: BattleWall[] = [
           { id: newId(), x1: cMin, y1: rMin, x2: cMax, y2: rMin },
@@ -705,17 +800,33 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   function flatten() {
     const b = buildRef.current;
     const cp = b.cellPx;
+    const ms = mapSize(b.grid, b.cols, b.rows, cp);
     const off = document.createElement("canvas");
-    off.width = b.cols * cp;
-    off.height = b.rows * cp;
+    off.width = Math.ceil(ms.w);
+    off.height = Math.ceil(ms.h);
     const ctx = off.getContext("2d")!;
     ctx.fillStyle = "#1d1916";
     ctx.fillRect(0, 0, off.width, off.height);
+    if (traceImg.current) ctx.drawImage(traceImg.current, 0, 0, off.width, off.height);
     for (let r = 0; r < b.rows; r++) {
       for (let c = 0; c < b.cols; c++) {
         const id = b.tiles[r * b.cols + c];
-        if (id) drawCell(ctx, c, r, cp, id);
+        if (id) drawCell(ctx, b.grid, c, r, cp, id);
       }
+    }
+    // Bake the hex grid into the image (the combat board only draws square grids).
+    if (b.grid === "hex") {
+      ctx.strokeStyle = "rgba(0,0,0,0.3)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let r = 0; r < b.rows; r++) {
+        for (let c = 0; c < b.cols; c++) {
+          const poly = cellPolygon("hex", c, r, cp);
+          poly.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+          ctx.closePath();
+        }
+      }
+      ctx.stroke();
     }
     drawWalls(ctx, b.walls ?? [], cp);
     for (const p of b.props ?? []) drawProp(ctx, p, cp);
@@ -730,7 +841,8 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       width,
       height,
       gridSize: b.cellPx,
-      showGrid: true,
+      // Square maps let the combat board draw the grid; hex bakes its own.
+      showGrid: b.grid === "square",
       feetPerCell: map.feetPerCell ?? 5,
       // Export walls (cell coords → image px) so combat line-of-sight works.
       walls: (b.walls ?? []).map((w) => ({
@@ -746,12 +858,15 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-ink">
+    <div ref={rootRef} className="fixed inset-0 z-[70] flex flex-col bg-ink">
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-parchment-400/30 bg-parchment-100 px-4 py-2">
         <span className="font-display text-sm font-bold text-ink">{map.name} — Battle Builder</span>
         {dirty && <span className="text-xs text-oxblood">unsaved</span>}
         <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={toggleFullscreen}>
+            {isFs ? "⤡ Exit" : "⤢ Fullscreen"}
+          </Button>
           <Button size="sm" variant="secondary" onClick={fit}>Fit</Button>
           <Button size="sm" onClick={save}>Save map</Button>
           <button
@@ -822,6 +937,27 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Grid</p>
+            <div className="flex gap-1">
+              {(["square", "hex"] as BattleGrid[]).map((g) => (
+                <button
+                  key={g}
+                  onClick={() => {
+                    setBuild({ ...build, grid: g });
+                    setTimeout(fit, 0);
+                  }}
+                  className={cn(
+                    "h-7 flex-1 rounded-md border text-xs font-semibold capitalize",
+                    build.grid === g ? "border-brass bg-brass/20 text-brass-dark" : "border-parchment-400 text-ink-soft hover:bg-parchment-300/50",
+                  )}
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div>
@@ -947,6 +1083,44 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
                 className="h-8 w-16 rounded-md border border-parchment-400 bg-parchment-50 px-1 text-xs text-ink focus:border-brass focus:outline-none"
               />
             </div>
+          </div>
+
+          <div className="border-t border-parchment-400/40 pt-2">
+            <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Reference image</p>
+            {build.trace ? (
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-1.5 text-xs text-ink-soft">
+                  <input type="checkbox" checked={showTrace} onChange={(e) => setShowTrace(e.target.checked)} />
+                  Show under map
+                </label>
+                <label className="block text-[0.65rem] text-ink-soft">
+                  Opacity
+                  <input
+                    type="range"
+                    min={0.1}
+                    max={1}
+                    step={0.05}
+                    value={traceOpacity}
+                    onChange={(e) => setTraceOpacity(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </label>
+                <Button size="sm" variant="ghost" className="w-full" onClick={() => { setBuild({ ...build, trace: undefined }); setDirty(true); }}>
+                  Remove image
+                </Button>
+              </div>
+            ) : (
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) importImage(f);
+                }}
+                className="block w-full text-[0.65rem] text-ink-soft file:mr-2 file:rounded file:border file:border-parchment-400 file:bg-parchment-50 file:px-2 file:py-1 file:text-[0.65rem] file:font-semibold file:text-ink"
+              />
+            )}
+            <p className="mt-1 text-[0.6rem] text-ink-faint">Trace or build over a map image (stretched to the grid; baked into the saved map).</p>
           </div>
         </div>
 
