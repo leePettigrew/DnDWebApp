@@ -278,6 +278,11 @@ export function WorldMapBuilder({
   const treeDensityRef = useRef(treeDensity);
   treeDensityRef.current = treeDensity;
 
+  // --- lakes ---
+  const [lakeMode, setLakeMode] = useState<"fill" | "erase">("fill");
+  const lakeModeRef = useRef(lakeMode);
+  lakeModeRef.current = lakeMode;
+
   // --- region visibility (all users) ---
   const [showRegions, setShowRegions] = useState(false);
   const showRegionsRef = useRef(showRegions);
@@ -1083,8 +1088,34 @@ export function WorldMapBuilder({
           lakeMesh = null;
         }
         const total = size * size;
-        // A thin water layer sits at bank level over each lake cell (like a
-        // river's water in its channel) — no rim/flood-fill needed.
+        // Group lake cells into connected bodies (4-connectivity) and give each
+        // body ONE flat water level so the surface is dead level, not a bumpy
+        // sheet that follows the terrain. The level is the highest bank in the
+        // body, so every painted cell ends up submerged.
+        const level = new Float32Array(total);
+        const comp = new Int8Array(total); // 0 = unvisited, 1 = visited
+        const stack: number[] = [];
+        for (let s = 0; s < total; s++) {
+          if (!lakeArr[s] || comp[s]) continue;
+          comp[s] = 1;
+          stack.length = 0;
+          stack.push(s);
+          const cells: number[] = [];
+          let maxH = 0;
+          while (stack.length) {
+            const i = stack.pop() as number;
+            cells.push(i);
+            if (heightArr[i] > maxH) maxH = heightArr[i];
+            const x = i % size;
+            const y = (i / size) | 0;
+            if (x > 0 && lakeArr[i - 1] && !comp[i - 1]) { comp[i - 1] = 1; stack.push(i - 1); }
+            if (x < size - 1 && lakeArr[i + 1] && !comp[i + 1]) { comp[i + 1] = 1; stack.push(i + 1); }
+            if (y > 0 && lakeArr[i - size] && !comp[i - size]) { comp[i - size] = 1; stack.push(i - size); }
+            if (y < size - 1 && lakeArr[i + size] && !comp[i + size]) { comp[i + size] = 1; stack.push(i + size); }
+          }
+          for (const i of cells) level[i] = maxH;
+        }
+
         const pos: number[] = [];
         const uv: number[] = [];
         const idx: number[] = [];
@@ -1094,7 +1125,7 @@ export function WorldMapBuilder({
           const x = i % size;
           const y = (i / size) | 0;
           if (x >= size - 1 || y >= size - 1) continue;
-          const wl = heightArr[i] * HEIGHT - 0.02; // just below the bank
+          const wl = level[i] * HEIGHT - 0.02; // flat across the whole body
           const wx0 = (x / N - 0.5) * W;
           const wx1 = ((x + 1) / N - 0.5) * W;
           const wz0 = (y / N - 0.5) * W;
@@ -2352,9 +2383,9 @@ export function WorldMapBuilder({
               heightArr[i] += (avg - heightArr[i]) * strength * fall;
               touchedHeight = true;
             } else if (t === "lake") {
-              // mark a lake — a shallow basin is carved in the display layer,
-              // and a thin water layer is laid at bank level (like rivers)
-              lakeArr[i] = 1;
+              // Fill marks a lake (shallow basin carved + flat water laid on
+              // top); erase removes it and lets the basin fill back in.
+              lakeArr[i] = lakeModeRef.current === "erase" ? 0 : 1;
               touchedHeight = true; // dispArr changes via the lake carve
             } else if (t === "reveal") {
               exploredArr[i] = 1;
@@ -3259,6 +3290,32 @@ export function WorldMapBuilder({
                       className="w-full accent-oxblood"
                     />
                   </>
+                )}
+                {tool === "lake" && (
+                  <div className="flex gap-1 pt-0.5">
+                    <button
+                      onClick={() => setLakeMode("fill")}
+                      className={cn(
+                        "flex-1 rounded px-2 py-1 text-[0.65rem] font-semibold",
+                        lakeMode === "fill"
+                          ? "bg-[#2f74b0] text-parchment-50"
+                          : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                      )}
+                    >
+                      🌊 Fill
+                    </button>
+                    <button
+                      onClick={() => setLakeMode("erase")}
+                      className={cn(
+                        "flex-1 rounded px-2 py-1 text-[0.65rem] font-semibold",
+                        lakeMode === "erase"
+                          ? "bg-oxblood text-parchment-50"
+                          : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                      )}
+                    >
+                      Erase
+                    </button>
+                  </div>
                 )}
               </div>
             )}
