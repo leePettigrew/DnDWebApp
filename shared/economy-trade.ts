@@ -3,8 +3,10 @@ import type {
   Character,
   Commission,
   Currency,
+  DeliveryJob,
   EconomyState,
   EconomyTransaction,
+  InventoryItem,
   Market,
   MarketGood,
 } from "./domain";
@@ -295,6 +297,134 @@ export function applyCommission(
   };
 
   return { economy: nextEconomy, character: nextChar, transaction, total, completed, factionId: com.factionId };
+}
+
+// --- caravan delivery jobs -------------------------------------------------
+
+function addInventory(
+  inv: InventoryItem[],
+  name: string,
+  qty: number,
+  meta?: { value?: number; weight?: number },
+): InventoryItem[] {
+  const existing = inv.find((i) => i.name === name);
+  return existing
+    ? inv.map((i) => (i === existing ? { ...i, quantity: i.quantity + qty } : i))
+    : [...inv, { id: newId(), name, quantity: qty, value: meta?.value, weight: meta?.weight }];
+}
+function removeInventory(inv: InventoryItem[], name: string, qty: number): InventoryItem[] | null {
+  const owned = inv.filter((i) => i.name === name).reduce((n, i) => n + i.quantity, 0);
+  if (owned < qty) return null;
+  let take = qty;
+  return inv
+    .map((i) => {
+      if (i.name !== name || take <= 0) return i;
+      const t = Math.min(i.quantity, take);
+      take -= t;
+      return { ...i, quantity: i.quantity - t };
+    })
+    .filter((i) => i.quantity > 0);
+}
+function adjustMarketStock(markets: Market[], marketId: string, ref: string, delta: number): Market[] {
+  return markets.map((m) => {
+    if (m.id !== marketId) return m;
+    const g = m.goods.find((x) => x.ref === ref);
+    if (g) {
+      return { ...m, goods: m.goods.map((x) => (x.ref === ref ? { ...x, stock: Math.max(0, x.stock + delta) } : x)) };
+    }
+    return delta > 0
+      ? { ...m, goods: [...m.goods, { ref, kind: "commodity" as const, stock: delta, baseStock: delta * 5 }] }
+      : m;
+  });
+}
+
+export interface JobApplied {
+  economy: EconomyState;
+  character: Character;
+  transaction?: EconomyTransaction;
+  total: number;
+}
+
+/** Accept (load cargo) or deliver (drop + get paid) a haulage job. */
+export function applyJobAction(
+  economy: EconomyState,
+  character: Character,
+  req: { jobId: string; action: "accept" | "deliver" },
+  ctx: TradeContext,
+): JobApplied | { error: string } {
+  if (!economy.enabled) return { error: "The economy is closed." };
+  const jobs = economy.jobs ?? [];
+  const idx = jobs.findIndex((j) => j.id === req.jobId);
+  if (idx < 0) return { error: "No such job." };
+  const job = jobs[idx];
+  if (job.active === false) return { error: "That job is closed." };
+  if (job.hidden && !ctx.isDM) return { error: "That job isn't available." };
+  if (job.minRep && ctx.rep < job.minRep) return { error: "Your standing isn't high enough." };
+
+  const commodity = (economy.commodities ?? []).find((c) => c.id === job.commodityId);
+  const name = commodity?.name ?? job.commodityId;
+  const status = job.status ?? "open";
+
+  if (req.action === "accept") {
+    if (status !== "open") return { error: "That job is already taken." };
+    const from = (economy.markets ?? []).find((m) => m.id === job.fromMarketId);
+    const stock = from?.goods.find((g) => g.ref === job.commodityId)?.stock ?? 0;
+    if (stock < job.qty) return { error: `${from?.name ?? "The source"} only has ${stock} ${name}.` };
+
+    const markets = adjustMarketStock(economy.markets ?? [], job.fromMarketId, job.commodityId, -job.qty);
+    const nextJob: DeliveryJob = {
+      ...job,
+      status: "taken",
+      takenBy: character.id,
+      takenByName: ctx.actorName,
+    };
+    return {
+      economy: { ...economy, markets, jobs: jobs.map((j, i) => (i === idx ? nextJob : j)), updatedAt: nowISO() },
+      character: { ...character, inventory: addInventory(character.inventory ?? [], name, job.qty, { value: commodity?.baseValue, weight: commodity?.weight }) },
+      total: 0,
+    };
+  }
+
+  // deliver
+  if (status !== "taken" || job.takenBy !== character.id) {
+    return { error: "This isn't your active haul." };
+  }
+  const inv = removeInventory(character.inventory ?? [], name, job.qty);
+  if (!inv) return { error: `You're missing the ${name} cargo.` };
+
+  const markets = adjustMarketStock(economy.markets ?? [], job.toMarketId, job.commodityId, job.qty);
+  const reward = roundPrice(job.reward);
+  const transaction: EconomyTransaction = {
+    id: newId(),
+    at: nowISO(),
+    actorId: ctx.actorId,
+    actorName: ctx.actorName,
+    marketId: job.toMarketId,
+    marketName: (economy.markets ?? []).find((m) => m.id === job.toMarketId)?.name,
+    action: "sell",
+    goodName: `${name} (delivery)`,
+    qty: job.qty,
+    unitPrice: job.qty > 0 ? roundPrice(reward / job.qty) : reward,
+    total: reward,
+    note: "delivery",
+  };
+  const nextJob: DeliveryJob = { ...job, status: "done" };
+  return {
+    economy: {
+      ...economy,
+      markets,
+      jobs: jobs.map((j, i) => (i === idx ? nextJob : j)),
+      log: [transaction, ...(economy.log ?? [])].slice(0, MAX_LOG),
+      updatedAt: nowISO(),
+    },
+    character: {
+      ...character,
+      inventory: inv,
+      currency: { ...ZERO_CURRENCY, ...character.currency, gp: (character.currency?.gp ?? 0) + reward },
+    },
+    transaction,
+    total: reward,
+  };
 }
 
 /** Undo a logged buy/sell: restore stock, flag it, and log a revert entry. */

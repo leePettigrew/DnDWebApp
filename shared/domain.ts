@@ -615,6 +615,31 @@ export interface Commission {
   active?: boolean;
 }
 
+/**
+ * A haulage contract: pick up a commodity at one market and deliver it to
+ * another for a flat reward. Accepting loads the cargo into the courier's pack
+ * (drawn from the source market's stock); delivering drops it at the
+ * destination and pays out.
+ */
+export interface DeliveryJob {
+  id: ID;
+  name?: string;
+  commodityId: ID;
+  qty: number;
+  fromMarketId: ID;
+  toMarketId: ID;
+  /** gp paid on delivery. */
+  reward: number;
+  status?: "open" | "taken" | "done";
+  /** Courier character id + name once accepted. */
+  takenBy?: ID;
+  takenByName?: string;
+  minRep?: number;
+  note?: string;
+  hidden?: boolean;
+  active?: boolean;
+}
+
 /** A daily snapshot of representative commodity prices (for trend charts). */
 export interface PriceSample {
   day: number;
@@ -653,6 +678,8 @@ export interface EconomyState {
   services?: Service[];
   /** Faction buy/sell orders the party can fulfill. */
   commissions?: Commission[];
+  /** Haulage contracts: deliver goods between markets for a reward. */
+  jobs?: DeliveryJob[];
   /** Map resource nodes that feed supply into markets each day. */
   nodes?: ResourceNode[];
   /** Faction reserves used to steady their markets. */

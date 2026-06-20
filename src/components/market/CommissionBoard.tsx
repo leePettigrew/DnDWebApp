@@ -15,7 +15,7 @@ import {
   useRealtime,
 } from "@/lib/data/hooks";
 import { standingToRep } from "@shared/economy-pricing";
-import type { Commission } from "@/lib/domain/types";
+import type { Commission, DeliveryJob } from "@/lib/domain/types";
 
 type Feedback = { kind: "ok" | "err"; text: string } | null;
 
@@ -65,6 +65,43 @@ export function CommissionBoard() {
   const gp = selected?.currency?.gp ?? 0;
   const ownedOf = (name: string) =>
     (selected?.inventory ?? []).filter((i) => i.name === name).reduce((n, i) => n + i.quantity, 0);
+  const marketName = (id?: string) => economy.markets.find((m) => m.id === id)?.name ?? "—";
+
+  const jobs = useMemo(() => {
+    if (!economy?.enabled) return [];
+    return (economy.jobs ?? []).filter(
+      (j) =>
+        j.active !== false &&
+        (isDM || !j.hidden) &&
+        (j.status ?? "open") !== "done" &&
+        ((j.status ?? "open") === "open" || j.takenBy === selected?.id),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [economy, isDM, selected?.id]);
+
+  const doJob = async (job: DeliveryJob, action: "accept" | "deliver") => {
+    if (!selected || busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const out = await realtime.executeJob({
+        jobId: job.id,
+        action,
+        characterId: selected.id,
+        characterName: selected.name,
+      });
+      if (!out.ok) setMsg({ kind: "err", text: out.error ?? "Couldn't do that." });
+      else
+        setMsg({
+          kind: "ok",
+          text: action === "accept" ? "Cargo loaded — haul it to its destination." : `Delivered! +${out.total}gp.`,
+        });
+    } catch {
+      setMsg({ kind: "err", text: "That didn't go through." });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const fulfill = async (c: Commission) => {
     if (!selected || busy) return;
@@ -121,15 +158,57 @@ export function CommissionBoard() {
         )}
       </Panel>
 
-      {open.length === 0 ? (
+      {open.length === 0 && jobs.length === 0 && (
         <Panel tone="flat">
           <EmptyState
             icon={<CoinIcon />}
-            title="No commissions on the board"
-            description="No faction is buying or selling right now — check back after the world turns."
+            title="The board is empty"
+            description="No commissions or haulage jobs are posted right now — check back after the world turns."
           />
         </Panel>
-      ) : (
+      )}
+
+      {jobs.length > 0 && (
+        <Panel title="Haulage jobs" eyebrow="Pick up here, deliver there">
+          <ul className="space-y-3">
+            {jobs.map((j) => {
+              const name = commodity(j.commodityId)?.name ?? j.commodityId;
+              const status = j.status ?? "open";
+              const mine = status === "taken" && j.takenBy === selected?.id;
+              return (
+                <li key={j.id} className="rounded-lg border border-parchment-400/70 bg-parchment-50/60 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone={mine ? "brass" : "arcane"}>{mine ? "Carrying" : "Haul"}</Badge>
+                    <span className="font-semibold text-ink">
+                      {j.qty}× {name}
+                    </span>
+                    <span className="text-sm text-ink-soft">
+                      {marketName(j.fromMarketId)} → {marketName(j.toMarketId)}
+                    </span>
+                    <span className="text-xs text-forest">+{j.reward} gp</span>
+                    <span className="ml-auto">
+                      {status === "open" ? (
+                        <Button size="sm" variant="secondary" disabled={!selected || busy} onClick={() => doJob(j, "accept")}>
+                          Accept
+                        </Button>
+                      ) : mine ? (
+                        <Button size="sm" disabled={busy} onClick={() => doJob(j, "deliver")}>
+                          Deliver
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-ink-faint">taken by {j.takenByName ?? "another"}</span>
+                      )}
+                    </span>
+                  </div>
+                  {j.note && <p className="mt-1 text-xs text-ink-faint">{j.note}</p>}
+                </li>
+              );
+            })}
+          </ul>
+        </Panel>
+      )}
+
+      {open.length > 0 && (
         <Panel title="Commissions" eyebrow="What the factions want">
           <ul className="space-y-3">
             {open.map((c) => {

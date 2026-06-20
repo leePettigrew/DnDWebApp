@@ -33,6 +33,7 @@ import type {
   TradeExecuteMessage,
   ServiceBuyMessage,
   CommissionFulfillMessage,
+  JobActionMessage,
   P2pTradeProposeMessage,
   P2pTradeOfferMessage,
   P2pTradeConfirmMessage,
@@ -40,7 +41,13 @@ import type {
 } from "../../shared/protocol";
 import { DM_ONLY_COLLECTIONS } from "../../shared/protocol";
 import type { CombatState, EconomyState } from "../../shared/domain";
-import { applyCommission, applyServicePurchase, applyTrade, isTradeError } from "../../shared/economy-trade";
+import {
+  applyCommission,
+  applyJobAction,
+  applyServicePurchase,
+  applyTrade,
+  isTradeError,
+} from "../../shared/economy-trade";
 import { improveStanding, standingToRep } from "../../shared/economy-pricing";
 import type { TradeParty, TradeSession } from "../../shared/trade";
 import { applyP2PTrade, makeParty, touchSession } from "../../shared/trade";
@@ -138,6 +145,8 @@ export class ClientSession {
         return this.onServiceBuy(msg);
       case "commission:fulfill":
         return this.onCommissionFulfill(msg);
+      case "job:action":
+        return this.onJobAction(msg);
       case "p2ptrade:propose":
         return this.onP2pTradePropose(msg);
       case "p2ptrade:offer":
@@ -659,6 +668,48 @@ export class ClientSession {
     }
 
     reply(true, { transaction: outcome.transaction, total: outcome.total, unitPrice: outcome.transaction.unitPrice });
+  }
+
+  /** Accept or deliver a haulage job — moves market stock, cargo, and reward. */
+  private onJobAction(msg: JobActionMessage): void {
+    if (!this.requireCampaign()) return;
+    const cid = this.campaignId!;
+    const reply = (ok: boolean, extra: Record<string, unknown> = {}) =>
+      this.send({ type: "trade:result", requestId: msg.requestId, ok, ...extra });
+
+    const character = this.character(msg.characterId);
+    if (!character) return reply(false, { error: "Character not found." });
+    if (!this.mayActAs(character)) return reply(false, { error: "That isn't your character." });
+
+    const economy = this.repos.economy.get(cid) ?? emptyEconomy();
+    const outcome = applyJobAction(
+      economy,
+      character,
+      { jobId: msg.jobId, action: msg.action },
+      {
+        rep: 2,
+        actorId: this.userId!,
+        actorName: msg.characterName || character.name,
+        isDM: this.role === "dm",
+        userId: this.userId!,
+      },
+    );
+    if (isTradeError(outcome)) return reply(false, { error: outcome.error });
+
+    const stamp = nowISO();
+    this.repos.economy.set(cid, outcome.economy);
+    this.repos.entities.characters.upsert(
+      cid,
+      { ...outcome.character, updatedAt: stamp },
+      outcome.character.ownerId ?? null,
+    );
+    this.rooms.get(cid).broadcast({ type: "economy:changed", state: outcome.economy });
+    this.broadcastCollection("characters");
+    reply(true, {
+      transaction: outcome.transaction,
+      total: outcome.total,
+      unitPrice: outcome.transaction?.unitPrice,
+    });
   }
 
   // --- player ↔ player trading (live, server-mediated swap) ----------------

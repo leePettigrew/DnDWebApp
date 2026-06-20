@@ -16,6 +16,7 @@ import { rollSpec } from "@/lib/domain/dice";
 import { emptyEconomy } from "@shared/economy";
 import {
   applyCommission,
+  applyJobAction,
   applyServicePurchase,
   applyTrade,
   isTradeError,
@@ -44,6 +45,7 @@ import type {
   RealtimeController,
   RegisterInput,
   CommissionInput,
+  JobInput,
   ProposeTradeInput,
   ProposeTradeResult,
   Repository,
@@ -480,6 +482,36 @@ class LocalRealtimeController implements RealtimeController {
       ok: true,
       transaction: outcome.transaction,
       unitPrice: outcome.transaction.unitPrice,
+      total: outcome.total,
+    };
+  }
+
+  async executeJob(input: JobInput): Promise<TradeOutcome> {
+    const economy = await this.economy.get();
+    const character = await this.characters.get(input.characterId);
+    if (!character) return { ok: false, error: "Character not found." };
+    const outcome = applyJobAction(
+      economy,
+      character,
+      { jobId: input.jobId, action: input.action },
+      {
+        rep: 2,
+        actorId: LOCAL_USER.id,
+        actorName: input.characterName || character.name,
+        isDM: true,
+        userId: LOCAL_USER.id,
+      },
+    );
+    if ("error" in outcome) return { ok: false, error: outcome.error };
+    await this.economy.set(outcome.economy);
+    await this.characters.update(outcome.character.id, {
+      inventory: outcome.character.inventory,
+      currency: outcome.character.currency,
+    });
+    return {
+      ok: true,
+      transaction: outcome.transaction,
+      unitPrice: outcome.transaction?.unitPrice,
       total: outcome.total,
     };
   }

@@ -46,6 +46,7 @@ import type {
   RealtimeController,
   RegisterInput,
   CommissionInput,
+  JobInput,
   ProposeTradeInput,
   ProposeTradeResult,
   Repository,
@@ -523,6 +524,7 @@ export class RealtimeDataProvider implements DataProvider {
       executeTrade: (input) => this.executeTrade(input),
       executeService: (input) => this.executeService(input),
       executeCommission: (input) => this.executeCommission(input),
+      executeJob: (input) => this.executeJob(input),
       proposeTrade: (input) => this.proposeTrade(input),
       updateTradeOffer: (sid, gold, items, side) =>
         this.updateTradeOffer(sid, gold, items, side),
@@ -800,6 +802,36 @@ export class RealtimeDataProvider implements DataProvider {
       });
     }
     return this.local.realtime.executeCommission(input);
+  }
+
+  private executeJob(input: JobInput): Promise<TradeOutcome> {
+    if (this.activeCampaignId && this.conn.isOpen()) {
+      return new Promise<TradeOutcome>((resolve, reject) => {
+        const requestId = newId();
+        this.pendingTrades.set(requestId, { resolve, reject });
+        const ok = this.conn.send({
+          type: "job:action",
+          requestId,
+          jobId: input.jobId,
+          action: input.action,
+          characterId: input.characterId,
+          characterName: input.characterName,
+        });
+        if (!ok) {
+          this.pendingTrades.delete(requestId);
+          resolve({ ok: false, error: "Not connected." });
+          return;
+        }
+        setTimeout(() => {
+          const p = this.pendingTrades.get(requestId);
+          if (p) {
+            this.pendingTrades.delete(requestId);
+            p.reject(new Error("Job request timed out."));
+          }
+        }, 10_000);
+      });
+    }
+    return this.local.realtime.executeJob(input);
   }
 
   // --- player ↔ player trading --------------------------------------------

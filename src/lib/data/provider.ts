@@ -147,6 +147,13 @@ export interface CommissionInput {
   characterName?: string;
 }
 
+export interface JobInput {
+  jobId: ID;
+  action: "accept" | "deliver";
+  characterId: ID;
+  characterName?: string;
+}
+
 export type TradeSide = "from" | "to";
 
 export interface ProposeTradeInput {
@@ -279,6 +286,9 @@ export interface RealtimeController {
 
   /** Fulfil a faction commission (moves goods/gold; may raise standing). */
   executeCommission(input: CommissionInput): Promise<TradeOutcome>;
+
+  /** Accept or deliver a haulage job (moves market stock, cargo, reward). */
+  executeJob(input: JobInput): Promise<TradeOutcome>;
 
   /**
    * Player ↔ player trading. Propose a live trade with another character; both

@@ -268,6 +268,15 @@ export interface CommissionFulfillMessage {
   characterId: ID;
   characterName?: string;
 }
+/** Accept or deliver a haulage job. Replies with trade:result. */
+export interface JobActionMessage {
+  type: "job:action";
+  requestId: string;
+  jobId: ID;
+  action: "accept" | "deliver";
+  characterId: ID;
+  characterName?: string;
+}
 /** Propose a player↔player trade with another character at the table. */
 export interface P2pTradeProposeMessage {
   type: "p2ptrade:propose";
@@ -364,6 +373,7 @@ export type ClientMessage =
   | TradeExecuteMessage
   | ServiceBuyMessage
   | CommissionFulfillMessage
+  | JobActionMessage
   | P2pTradeProposeMessage
   | P2pTradeOfferMessage
   | P2pTradeConfirmMessage
