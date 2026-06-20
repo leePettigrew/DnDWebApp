@@ -1,6 +1,5 @@
 import { PageHeader } from "@/components/ui/PageHeader";
-import { MarketBrowser } from "@/components/market/MarketBrowser";
-import { PlayerTradePanel } from "@/components/market/PlayerTradePanel";
+import { MarketTabs } from "@/components/market/MarketTabs";
 
 export default function MarketPage() {
   return (
@@ -8,10 +7,9 @@ export default function MarketPage() {
       <PageHeader
         eyebrow="The Trade Quarter"
         title="Markets"
-        description="Buy and sell at the markets within your reach. Standing with a faction sways their prices — and a sharp tongue can haggle them lower. Or strike a deal with a fellow adventurer."
+        description="Shop the markets within your reach, watch prices move on the Exchange, and follow the table's trade as it happens."
       />
-      <PlayerTradePanel />
-      <MarketBrowser />
+      <MarketTabs />
     </div>
   );
 }

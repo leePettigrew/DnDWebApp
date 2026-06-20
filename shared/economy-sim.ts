@@ -4,8 +4,12 @@ import type {
   FactionEconomy,
   Market,
   MarketGood,
+  PriceSample,
   ResourceNode,
 } from "./domain";
+import { quoteCommodityGood } from "./economy-pricing";
+
+const HISTORY_DAYS = 30;
 
 /**
  * The market simulation. `tickEconomy` advances the world one day: markets
@@ -198,6 +202,26 @@ function runStockpiles(
   }
 }
 
+/** Representative price per commodity: mean mid across markets that stock it. */
+function samplePrices(economy: EconomyState): PriceSample {
+  const prices: Record<string, number> = {};
+  for (const c of economy.commodities ?? []) {
+    let sum = 0;
+    let n = 0;
+    for (const m of economy.markets ?? []) {
+      const g = m.goods.find((x) => x.ref === c.id);
+      if (!g) continue;
+      const q = quoteCommodityGood(economy, m, g, 0);
+      if (q) {
+        sum += q.mid;
+        n += 1;
+      }
+    }
+    prices[c.id] = n > 0 ? Math.round((sum / n) * 100) / 100 : c.baseValue;
+  }
+  return { day: economy.day ?? 1, prices };
+}
+
 export function tickEconomy(
   economy: EconomyState,
   opts: TickOptions = {},
@@ -229,5 +253,17 @@ export function tickEconomy(
     (e) => e.until == null || e.until > day,
   );
 
-  return { ...economy, day, markets, stockpiles, events, updatedAt: nowISO() };
+  const next: EconomyState = {
+    ...economy,
+    day,
+    markets,
+    stockpiles,
+    events,
+    updatedAt: nowISO(),
+  };
+  // 6. Record a daily price snapshot for the Exchange trend view.
+  next.priceHistory = [...(economy.priceHistory ?? []), samplePrices(next)].slice(
+    -HISTORY_DAYS,
+  );
+  return next;
 }

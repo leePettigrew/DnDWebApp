@@ -46,6 +46,7 @@ export function emptyEconomy(): EconomyState {
     stockpiles: [],
     routes: [],
     policies: [],
+    priceHistory: [],
     events: [],
     log: [],
     updatedAt: nowISO(),

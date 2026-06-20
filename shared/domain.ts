@@ -588,6 +588,13 @@ export interface FactionPolicy {
   active?: boolean;
 }
 
+/** A daily snapshot of representative commodity prices (for trend charts). */
+export interface PriceSample {
+  day: number;
+  /** Representative gp price per commodity id on that day. */
+  prices: Record<ID, number>;
+}
+
 /** A purchasable service at a market (lodging, healing, passage…). No stock. */
 export interface Service {
   id: ID;
@@ -625,6 +632,8 @@ export interface EconomyState {
   routes?: TradeRoute[];
   /** Pacts, tariffs, and embargoes attached to faction markets. */
   policies?: FactionPolicy[];
+  /** Rolling daily price snapshots (capped) for the Exchange trend view. */
+  priceHistory?: PriceSample[];
   events: EconomyEvent[];
   /** Recent transaction log (capped). */
   log: EconomyTransaction[];
