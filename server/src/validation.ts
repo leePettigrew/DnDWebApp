@@ -126,6 +126,14 @@ const message = z.discriminatedUnion("type", [
     characterName: z.string().max(120).optional(),
   }),
   z.object({
+    type: z.literal("service:buy"),
+    requestId: z.string().max(80),
+    marketId: z.string().max(80),
+    serviceId: z.string().max(80),
+    characterId: z.string().max(80).optional(),
+    characterName: z.string().max(120).optional(),
+  }),
+  z.object({
     type: z.literal("p2ptrade:propose"),
     requestId: z.string().max(80),
     toUserId: z.string().max(80),

@@ -31,6 +31,7 @@ import type {
   ScopedCollection,
   ServerMessage,
   TradeExecuteMessage,
+  ServiceBuyMessage,
   P2pTradeProposeMessage,
   P2pTradeOfferMessage,
   P2pTradeConfirmMessage,
@@ -38,7 +39,7 @@ import type {
 } from "../../shared/protocol";
 import { DM_ONLY_COLLECTIONS } from "../../shared/protocol";
 import type { CombatState, EconomyState } from "../../shared/domain";
-import { applyTrade, isTradeError } from "../../shared/economy-trade";
+import { applyServicePurchase, applyTrade, isTradeError } from "../../shared/economy-trade";
 import { standingToRep } from "../../shared/economy-pricing";
 import type { TradeParty, TradeSession } from "../../shared/trade";
 import { applyP2PTrade, makeParty, touchSession } from "../../shared/trade";
@@ -132,6 +133,8 @@ export class ClientSession {
         return this.onEconomyUpdate(msg.patch);
       case "trade:execute":
         return this.onTradeExecute(msg);
+      case "service:buy":
+        return this.onServiceBuy(msg);
       case "p2ptrade:propose":
         return this.onP2pTradePropose(msg);
       case "p2ptrade:offer":
@@ -511,6 +514,56 @@ export class ClientSession {
         qty: msg.qty,
         haggleRoll: msg.haggleRoll,
       },
+      {
+        rep,
+        actorId: this.userId!,
+        actorName: msg.characterName || this.displayName,
+        isDM: this.role === "dm",
+        userId: this.userId!,
+      },
+    );
+
+    if (isTradeError(outcome)) {
+      this.send({
+        type: "trade:result",
+        requestId: msg.requestId,
+        ok: false,
+        error: outcome.error,
+      });
+      return;
+    }
+
+    this.repos.economy.set(cid, outcome.economy);
+    this.rooms.get(cid).broadcast({ type: "economy:changed", state: outcome.economy });
+    this.send({
+      type: "trade:result",
+      requestId: msg.requestId,
+      ok: true,
+      transaction: outcome.transaction,
+      unitPrice: outcome.unitPrice,
+      total: outcome.total,
+    });
+  }
+
+  /** Hire a service at a market — server-validated, logged like a purchase. */
+  private onServiceBuy(msg: ServiceBuyMessage): void {
+    if (!this.requireCampaign()) return;
+    const cid = this.campaignId!;
+    const economy = this.repos.economy.get(cid) ?? emptyEconomy();
+
+    let rep = 2;
+    const market = (economy.markets ?? []).find((m) => m.id === msg.marketId);
+    if (market?.factionId) {
+      const faction = this.repos.entities.factions.get(
+        cid,
+        market.factionId,
+      ) as Faction | null;
+      rep = standingToRep(faction?.standing);
+    }
+
+    const outcome = applyServicePurchase(
+      economy,
+      { marketId: msg.marketId, serviceId: msg.serviceId },
       {
         rep,
         actorId: this.userId!,

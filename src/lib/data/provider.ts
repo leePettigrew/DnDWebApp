@@ -133,6 +133,13 @@ export interface TradeOutcome {
   total?: number;
 }
 
+export interface ServiceInput {
+  marketId: ID;
+  serviceId: ID;
+  characterId?: ID;
+  characterName?: string;
+}
+
 export type TradeSide = "from" | "to";
 
 export interface ProposeTradeInput {
@@ -259,6 +266,9 @@ export interface RealtimeController {
    * coin/inventory is the caller's job (their own character).
    */
   executeTrade(input: TradeInput): Promise<TradeOutcome>;
+
+  /** Hire a service at a market (server-validated; logged like a purchase). */
+  executeService(input: ServiceInput): Promise<TradeOutcome>;
 
   /**
    * Player ↔ player trading. Propose a live trade with another character; both

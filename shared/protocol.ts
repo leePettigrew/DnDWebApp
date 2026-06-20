@@ -250,6 +250,15 @@ export interface TradeExecuteMessage {
   characterId?: ID;
   characterName?: string;
 }
+/** Hire a service at a market. Server-validated; replies with trade:result. */
+export interface ServiceBuyMessage {
+  type: "service:buy";
+  requestId: string;
+  marketId: ID;
+  serviceId: ID;
+  characterId?: ID;
+  characterName?: string;
+}
 /** Propose a player↔player trade with another character at the table. */
 export interface P2pTradeProposeMessage {
   type: "p2ptrade:propose";
@@ -344,6 +353,7 @@ export type ClientMessage =
   | EconomySetMessage
   | EconomyUpdateMessage
   | TradeExecuteMessage
+  | ServiceBuyMessage
   | P2pTradeProposeMessage
   | P2pTradeOfferMessage
   | P2pTradeConfirmMessage

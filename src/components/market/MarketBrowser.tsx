@@ -16,7 +16,7 @@ import {
   usePermissions,
   useRealtime,
 } from "@/lib/data/hooks";
-import { quoteCommodityGood, standingToRep } from "@shared/economy-pricing";
+import { quoteCommodityGood, quoteService, standingToRep } from "@shared/economy-pricing";
 import { canAccessMarket } from "@shared/economy-trade";
 import { SKILLS } from "@shared/domain";
 import type {
@@ -24,6 +24,7 @@ import type {
   Currency,
   Market,
   MarketGood,
+  Service,
 } from "@/lib/domain/types";
 
 const ZERO: Currency = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
@@ -193,6 +194,36 @@ export function MarketBrowser() {
     }
   }
 
+  async function hire(market: Market, service: Service) {
+    if (!selected || busy) return;
+    const price = quoteService(economy!, market, service, repForMarket(market));
+    if (gp < price) {
+      setMsg({ kind: "err", text: `Not enough gold (need ${price}gp).` });
+      return;
+    }
+    setBusy(true);
+    try {
+      const out = await realtime.executeService({
+        marketId: market.id,
+        serviceId: service.id,
+        characterId: selected.id,
+        characterName: selected.name,
+      });
+      if (!out.ok) {
+        setMsg({ kind: "err", text: out.error ?? "Couldn't hire that." });
+        return;
+      }
+      await updateCharacter(selected.id, {
+        currency: { ...ZERO, ...selected.currency, gp: (selected.currency?.gp ?? 0) - (out.total ?? 0) },
+      });
+      setMsg({ kind: "ok", text: `Hired ${service.name} for ${out.total}gp.` });
+    } catch {
+      setMsg({ kind: "err", text: "The hire didn't go through." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       {/* Trader bar */}
@@ -247,6 +278,9 @@ export function MarketBrowser() {
           const faction = factions.find((f) => f.id === m.factionId);
           const rep = repForMarket(m);
           const goods = m.goods.filter((g) => rep >= (g.minRep ?? 0));
+          const services = (economy!.services ?? []).filter(
+            (s) => s.marketId === m.id && !s.hidden && rep >= (s.minRep ?? 0),
+          );
           return (
             <Panel
               key={m.id}
@@ -262,9 +296,9 @@ export function MarketBrowser() {
                 m.hidden ? <Badge tone="arcane">Shown to you</Badge> : undefined
               }
             >
-              {goods.length === 0 ? (
+              {goods.length === 0 && services.length === 0 ? (
                 <p className="text-sm text-ink-faint">Nothing here you can trade.</p>
-              ) : (
+              ) : goods.length === 0 ? null : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[40rem] text-sm">
                     <thead>
@@ -338,6 +372,42 @@ export function MarketBrowser() {
                       })}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {services.length > 0 && (
+                <div className={cn(goods.length > 0 && "mt-4 border-t border-parchment-400/40 pt-3")}>
+                  <h4 className="mb-2 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">
+                    Services
+                  </h4>
+                  <ul className="space-y-1.5">
+                    {services.map((s) => {
+                      const price = quoteService(economy!, m, s, rep);
+                      return (
+                        <li key={s.id} className="flex items-center justify-between gap-3">
+                          <span className="min-w-0">
+                            <span className="font-semibold text-ink">{s.name}</span>
+                            {s.category && (
+                              <span className="ml-1 text-xs text-ink-faint">· {s.category}</span>
+                            )}
+                            {s.description && (
+                              <span className="block text-xs text-ink-faint">{s.description}</span>
+                            )}
+                          </span>
+                          <span className="flex shrink-0 items-center gap-2">
+                            <span className="font-mono text-forest">{price}gp</span>
+                            <Button
+                              size="sm"
+                              disabled={!selected || busy}
+                              onClick={() => hire(m, s)}
+                            >
+                              Hire
+                            </Button>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
               )}
             </Panel>

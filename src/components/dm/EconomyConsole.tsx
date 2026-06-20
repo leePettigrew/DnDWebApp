@@ -13,6 +13,7 @@ import { tickEconomy } from "@shared/economy-sim";
 import { MarketEditor } from "@/components/dm/MarketEditor";
 import { FactionEconomyEditor } from "@/components/dm/FactionEconomyEditor";
 import { EconomyEventsEditor } from "@/components/dm/EconomyEventsEditor";
+import { ServicesEditor } from "@/components/dm/ServicesEditor";
 import type { Commodity, EconomyConfig, ResourceNode } from "@/lib/domain/types";
 
 const CATEGORIES = [
@@ -297,6 +298,11 @@ export function EconomyConsole() {
           sell previews use each market&apos;s standing.
         </p>
         <MarketEditor economy={economy} update={update} />
+      </Panel>
+
+      {/* Services */}
+      <Panel title="Services" eyebrow="Hire, don't haul">
+        <ServicesEditor economy={economy} update={update} />
       </Panel>
 
       {/* Faction macro economy */}

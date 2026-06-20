@@ -14,7 +14,7 @@ import { newId, nowISO } from "@/lib/domain/ids";
 import type { ID } from "@/lib/domain/ids";
 import { rollSpec } from "@/lib/domain/dice";
 import { emptyEconomy } from "@shared/economy";
-import { applyTrade, isTradeError } from "@shared/economy-trade";
+import { applyServicePurchase, applyTrade, isTradeError } from "@shared/economy-trade";
 import { standingToRep } from "@shared/economy-pricing";
 import { applyP2PTrade, makeParty, touchSession } from "@shared/trade";
 import type { TradeSession } from "@shared/trade";
@@ -43,6 +43,7 @@ import type {
   Repository,
   SessionController,
   SingletonRepository,
+  ServiceInput,
   TradeInput,
   TradeItemRef,
   TradeOutcome,
@@ -395,6 +396,35 @@ class LocalRealtimeController implements RealtimeController {
       },
     );
     if (isTradeError(outcome)) return { ok: false, error: outcome.error };
+    await this.economy.set(outcome.economy);
+    return {
+      ok: true,
+      transaction: outcome.transaction,
+      unitPrice: outcome.unitPrice,
+      total: outcome.total,
+    };
+  }
+
+  async executeService(input: ServiceInput): Promise<TradeOutcome> {
+    const economy = await this.economy.get();
+    let rep = 2;
+    const market = (economy.markets ?? []).find((m) => m.id === input.marketId);
+    if (market?.factionId) {
+      const faction = await this.factions.get(market.factionId);
+      rep = standingToRep(faction?.standing);
+    }
+    const outcome = applyServicePurchase(
+      economy,
+      { marketId: input.marketId, serviceId: input.serviceId },
+      {
+        rep,
+        actorId: LOCAL_USER.id,
+        actorName: input.characterName || LOCAL_USER.name,
+        isDM: true,
+        userId: LOCAL_USER.id,
+      },
+    );
+    if ("error" in outcome) return { ok: false, error: outcome.error };
     await this.economy.set(outcome.economy);
     return {
       ok: true,

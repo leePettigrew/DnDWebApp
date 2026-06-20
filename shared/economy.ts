@@ -41,6 +41,7 @@ export function emptyEconomy(): EconomyState {
     config: { ...DEFAULT_ECONOMY_CONFIG },
     commodities: SEED_COMMODITIES.map((c) => ({ ...c })),
     markets: [],
+    services: [],
     nodes: [],
     stockpiles: [],
     routes: [],

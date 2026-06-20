@@ -5,6 +5,7 @@ import type {
   FactionStanding,
   Market,
   MarketGood,
+  Service,
 } from "./domain";
 
 /** Map a faction standing to a 0..5 reputation used by the pricing model. */
@@ -172,6 +173,23 @@ export function quotePrice(opts: {
     eventMul,
     inStock: good.stock > 0,
   };
+}
+
+/** What a service costs to hire: base × market markup × faction policy × rep. */
+export function quoteService(
+  economy: EconomyState,
+  market: Market,
+  service: Service,
+  rep = 0,
+): number {
+  const policyMul = factionPolicyMultiplier(
+    economy,
+    market,
+    service.id,
+    service.category,
+  );
+  const repBuy = 1 - economy.config.repDiscount * (clamp(rep, 0, 5) / 5);
+  return roundPrice(service.price * market.buyMul * policyMul * repBuy);
 }
 
 /** Convenience: quote a commodity-backed good, resolving its base + volatility. */

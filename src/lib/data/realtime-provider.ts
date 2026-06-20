@@ -48,6 +48,7 @@ import type {
   ProposeTradeInput,
   ProposeTradeResult,
   Repository,
+  ServiceInput,
   SessionController,
   SingletonRepository,
   TradeInput,
@@ -519,6 +520,7 @@ export class RealtimeDataProvider implements DataProvider {
       },
       roll: (spec, opts) => this.roll(spec, opts),
       executeTrade: (input) => this.executeTrade(input),
+      executeService: (input) => this.executeService(input),
       proposeTrade: (input) => this.proposeTrade(input),
       updateTradeOffer: (sid, gold, items, side) =>
         this.updateTradeOffer(sid, gold, items, side),
@@ -736,6 +738,36 @@ export class RealtimeDataProvider implements DataProvider {
     }
     // Solo / offline: apply locally.
     return this.local.realtime.executeTrade(input);
+  }
+
+  private executeService(input: ServiceInput): Promise<TradeOutcome> {
+    if (this.activeCampaignId && this.conn.isOpen()) {
+      return new Promise<TradeOutcome>((resolve, reject) => {
+        const requestId = newId();
+        this.pendingTrades.set(requestId, { resolve, reject });
+        const ok = this.conn.send({
+          type: "service:buy",
+          requestId,
+          marketId: input.marketId,
+          serviceId: input.serviceId,
+          characterId: input.characterId,
+          characterName: input.characterName,
+        });
+        if (!ok) {
+          this.pendingTrades.delete(requestId);
+          resolve({ ok: false, error: "Not connected." });
+          return;
+        }
+        setTimeout(() => {
+          const p = this.pendingTrades.get(requestId);
+          if (p) {
+            this.pendingTrades.delete(requestId);
+            p.reject(new Error("Service request timed out."));
+          }
+        }, 10_000);
+      });
+    }
+    return this.local.realtime.executeService(input);
   }
 
   // --- player ↔ player trading --------------------------------------------

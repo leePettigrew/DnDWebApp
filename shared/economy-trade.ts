@@ -5,7 +5,7 @@ import type {
   Market,
   MarketGood,
 } from "./domain";
-import { haggleDiscount, quoteCommodityGood, roundPrice } from "./economy-pricing";
+import { haggleDiscount, quoteCommodityGood, quoteService, roundPrice } from "./economy-pricing";
 
 /**
  * The trade engine. Applies a buy/sell to an economy and returns the next
@@ -133,6 +133,53 @@ export function applyTrade(
     updatedAt: nowISO(),
   };
   return { economy: nextEconomy, transaction, unitPrice, total };
+}
+
+export interface ServiceRequest {
+  marketId: string;
+  serviceId: string;
+}
+
+/** Hire a service: validate access, price it, and log the spend (no stock). */
+export function applyServicePurchase(
+  economy: EconomyState,
+  req: ServiceRequest,
+  ctx: TradeContext,
+): TradeApplied | { error: string } {
+  if (!economy.enabled) return { error: "The economy is closed." };
+  const market = (economy.markets ?? []).find((m) => m.id === req.marketId);
+  if (!market) return { error: "Market not found." };
+  if (!canAccessMarket(market, ctx)) return { error: "You can't trade here." };
+  const service = (economy.services ?? []).find(
+    (s) => s.id === req.serviceId && s.marketId === req.marketId,
+  );
+  if (!service) return { error: "That service isn't offered here." };
+  if (service.hidden && !ctx.isDM) return { error: "That service isn't available." };
+  if (service.minRep && ctx.rep < service.minRep) {
+    return { error: "Your standing isn't high enough for that." };
+  }
+
+  const total = quoteService(economy, market, service, ctx.rep);
+  const transaction: EconomyTransaction = {
+    id: newId(),
+    at: nowISO(),
+    actorId: ctx.actorId,
+    actorName: ctx.actorName,
+    marketId: market.id,
+    marketName: market.name,
+    action: "buy",
+    goodName: service.name,
+    qty: 1,
+    unitPrice: total,
+    total,
+    note: "service",
+  };
+  const nextEconomy: EconomyState = {
+    ...economy,
+    log: [transaction, ...(economy.log ?? [])].slice(0, MAX_LOG),
+    updatedAt: nowISO(),
+  };
+  return { economy: nextEconomy, transaction, unitPrice: total, total };
 }
 
 /** Undo a logged buy/sell: restore stock, flag it, and log a revert entry. */

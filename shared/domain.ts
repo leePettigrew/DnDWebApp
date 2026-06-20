@@ -580,6 +580,22 @@ export interface FactionPolicy {
   active?: boolean;
 }
 
+/** A purchasable service at a market (lodging, healing, passage…). No stock. */
+export interface Service {
+  id: ID;
+  name: string;
+  /** Base price in gp. */
+  price: number;
+  /** lodging | healing | passage | labor | training | other */
+  category?: string;
+  description?: string;
+  /** The market that offers it. */
+  marketId: ID;
+  /** Minimum standing (0..5) to see/hire it. */
+  minRep?: number;
+  hidden?: boolean;
+}
+
 export interface EconomyState {
   id: "economy"; // singleton key
   enabled?: boolean;
@@ -591,6 +607,8 @@ export interface EconomyState {
   config: EconomyConfig;
   commodities: Commodity[];
   markets: Market[];
+  /** Purchasable services offered at markets. */
+  services?: Service[];
   /** Map resource nodes that feed supply into markets each day. */
   nodes?: ResourceNode[];
   /** Faction reserves used to steady their markets. */
