@@ -1090,8 +1090,10 @@ export function WorldMapBuilder({
         const total = size * size;
         // Group lake cells into connected bodies (4-connectivity) and give each
         // body ONE flat water level so the surface is dead level, not a bumpy
-        // sheet that follows the terrain. The level is the highest bank in the
-        // body, so every painted cell ends up submerged.
+        // sheet that follows the terrain. The level is the body's spill point:
+        // the lowest cell along its edge (a lake cell touching non-lake terrain
+        // or the grid border). Water fills the basin up to where it would pour
+        // over the lowest part of the rim.
         const level = new Float32Array(total);
         const comp = new Int8Array(total); // 0 = unvisited, 1 = visited
         const stack: number[] = [];
@@ -1101,19 +1103,29 @@ export function WorldMapBuilder({
           stack.length = 0;
           stack.push(s);
           const cells: number[] = [];
-          let maxH = 0;
+          let minEdge = Infinity; // lowest edge cell = spill point
+          let maxAll = 0; // fallback if the body has no edge (fills the grid)
           while (stack.length) {
             const i = stack.pop() as number;
             cells.push(i);
-            if (heightArr[i] > maxH) maxH = heightArr[i];
+            if (heightArr[i] > maxAll) maxAll = heightArr[i];
             const x = i % size;
             const y = (i / size) | 0;
-            if (x > 0 && lakeArr[i - 1] && !comp[i - 1]) { comp[i - 1] = 1; stack.push(i - 1); }
-            if (x < size - 1 && lakeArr[i + 1] && !comp[i + 1]) { comp[i + 1] = 1; stack.push(i + 1); }
-            if (y > 0 && lakeArr[i - size] && !comp[i - size]) { comp[i - size] = 1; stack.push(i - size); }
-            if (y < size - 1 && lakeArr[i + size] && !comp[i + size]) { comp[i + size] = 1; stack.push(i + size); }
+            const lL = x > 0 && lakeArr[i - 1];
+            const lR = x < size - 1 && lakeArr[i + 1];
+            const lU = y > 0 && lakeArr[i - size];
+            const lD = y < size - 1 && lakeArr[i + size];
+            // Edge cell: it borders a non-lake cell or the map edge.
+            if (!lL || !lR || !lU || !lD) {
+              if (heightArr[i] < minEdge) minEdge = heightArr[i];
+            }
+            if (lL && !comp[i - 1]) { comp[i - 1] = 1; stack.push(i - 1); }
+            if (lR && !comp[i + 1]) { comp[i + 1] = 1; stack.push(i + 1); }
+            if (lU && !comp[i - size]) { comp[i - size] = 1; stack.push(i - size); }
+            if (lD && !comp[i + size]) { comp[i + size] = 1; stack.push(i + size); }
           }
-          for (const i of cells) level[i] = maxH;
+          const lvl = minEdge === Infinity ? maxAll : minEdge;
+          for (const i of cells) level[i] = lvl;
         }
 
         const pos: number[] = [];
