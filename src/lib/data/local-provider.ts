@@ -16,11 +16,15 @@ import { rollSpec } from "@/lib/domain/dice";
 import { emptyEconomy } from "@shared/economy";
 import {
   applyCommission,
+  applyConsignBuy,
+  applyConsignList,
+  applyConsignManage,
   applyJobAction,
   applyServicePurchase,
   applyTrade,
   isTradeError,
 } from "@shared/economy-trade";
+import type { ConsignApplied } from "@shared/economy-trade";
 import { improveStanding, standingToRep } from "@shared/economy-pricing";
 import { applyP2PTrade, makeParty, touchSession } from "@shared/trade";
 import type { TradeSession } from "@shared/trade";
@@ -45,6 +49,8 @@ import type {
   RealtimeController,
   RegisterInput,
   CommissionInput,
+  ConsignActInput,
+  ConsignListInput,
   JobInput,
   ProposeTradeInput,
   ProposeTradeResult,
@@ -514,6 +520,47 @@ class LocalRealtimeController implements RealtimeController {
       unitPrice: outcome.transaction?.unitPrice,
       total: outcome.total,
     };
+  }
+
+  private async commitConsign(outcome: ConsignApplied): Promise<TradeOutcome> {
+    await this.economy.set(outcome.economy);
+    await this.characters.update(outcome.character.id, {
+      inventory: outcome.character.inventory,
+      currency: outcome.character.currency,
+    });
+    return {
+      ok: true,
+      transaction: outcome.transaction,
+      unitPrice: outcome.transaction?.unitPrice,
+      total: outcome.total,
+    };
+  }
+
+  async consignList(input: ConsignListInput): Promise<TradeOutcome> {
+    const economy = await this.economy.get();
+    const character = await this.characters.get(input.characterId);
+    if (!character) return { ok: false, error: "Character not found." };
+    const outcome = applyConsignList(
+      economy,
+      character,
+      { marketId: input.marketId, itemId: input.itemId, qty: input.qty, price: input.price },
+      { rep: 2, actorId: LOCAL_USER.id, actorName: input.characterName || character.name, isDM: true, userId: LOCAL_USER.id },
+    );
+    if ("error" in outcome) return { ok: false, error: outcome.error };
+    return this.commitConsign(outcome);
+  }
+
+  async consignAct(input: ConsignActInput): Promise<TradeOutcome> {
+    const economy = await this.economy.get();
+    const character = await this.characters.get(input.characterId);
+    if (!character) return { ok: false, error: "Character not found." };
+    const ctx = { rep: 2, actorId: LOCAL_USER.id, actorName: input.characterName || character.name, isDM: true, userId: LOCAL_USER.id };
+    const outcome =
+      input.action === "buy"
+        ? applyConsignBuy(economy, character, { consignmentId: input.consignmentId, qty: input.qty ?? 1 }, ctx)
+        : applyConsignManage(economy, character, { consignmentId: input.consignmentId, action: input.action }, ctx);
+    if ("error" in outcome) return { ok: false, error: outcome.error };
+    return this.commitConsign(outcome);
   }
 
   // --- player ↔ player trading (solo: between two of your characters) -------

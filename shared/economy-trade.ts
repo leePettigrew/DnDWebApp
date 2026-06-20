@@ -2,6 +2,7 @@ import { newId, nowISO } from "./ids";
 import type {
   Character,
   Commission,
+  Consignment,
   Currency,
   DeliveryJob,
   EconomyState,
@@ -424,6 +425,151 @@ export function applyJobAction(
     },
     transaction,
     total: reward,
+  };
+}
+
+// --- player consignment stalls ---------------------------------------------
+
+export interface ConsignApplied {
+  economy: EconomyState;
+  character: Character;
+  transaction?: EconomyTransaction;
+  total: number;
+}
+
+/** List `qty` of an inventory item for sale at a market (escrows the items). */
+export function applyConsignList(
+  economy: EconomyState,
+  character: Character,
+  req: { marketId: string; itemId: string; qty: number; price: number },
+  ctx: TradeContext,
+): ConsignApplied | { error: string } {
+  if (!economy.enabled) return { error: "The economy is closed." };
+  const market = (economy.markets ?? []).find((m) => m.id === req.marketId);
+  if (!market) return { error: "Market not found." };
+  if (!canAccessMarket(market, ctx)) return { error: "You can't trade here." };
+  const item = (character.inventory ?? []).find((i) => i.id === req.itemId);
+  if (!item) return { error: "You don't have that item." };
+  const qty = Math.max(1, Math.floor(req.qty || 0));
+  if (item.quantity < qty) return { error: `You only have ${item.quantity}.` };
+  const price = Math.max(0, req.price || 0);
+
+  const inv = (character.inventory ?? [])
+    .map((i) => (i.id === req.itemId ? { ...i, quantity: i.quantity - qty } : i))
+    .filter((i) => i.quantity > 0);
+
+  const listing: Consignment = {
+    id: newId(),
+    marketId: req.marketId,
+    sellerId: character.id,
+    sellerName: ctx.actorName ?? character.name,
+    itemName: item.name,
+    qty,
+    price,
+    escrow: 0,
+    value: item.value,
+    weight: item.weight,
+    rarity: item.rarity,
+    category: item.category,
+    createdDay: economy.day,
+  };
+  return {
+    economy: { ...economy, consignments: [listing, ...(economy.consignments ?? [])], updatedAt: nowISO() },
+    character: { ...character, inventory: inv },
+    total: 0,
+  };
+}
+
+/** Buy `qty` units from a stall: the buyer pays into the seller's escrow. */
+export function applyConsignBuy(
+  economy: EconomyState,
+  buyer: Character,
+  req: { consignmentId: string; qty: number },
+  ctx: TradeContext,
+): ConsignApplied | { error: string } {
+  if (!economy.enabled) return { error: "The economy is closed." };
+  const list = economy.consignments ?? [];
+  const idx = list.findIndex((c) => c.id === req.consignmentId);
+  if (idx < 0) return { error: "That stall is gone." };
+  const con = list[idx];
+  if (con.sellerId === buyer.id) return { error: "That's your own stall." };
+  const qty = Math.min(Math.max(1, Math.floor(req.qty || 0)), con.qty);
+  if (qty <= 0) return { error: "Nothing left to buy." };
+  const total = roundPrice(con.price * qty);
+  if ((buyer.currency?.gp ?? 0) < total) return { error: `Not enough gold (need ${total}gp).` };
+
+  const inv = addInventory(buyer.inventory ?? [], con.itemName, qty, { value: con.value, weight: con.weight });
+  const nextChar: Character = {
+    ...buyer,
+    inventory: inv,
+    currency: { ...ZERO_CURRENCY, ...buyer.currency, gp: (buyer.currency?.gp ?? 0) - total },
+  };
+  // Keep a sold-out listing (qty 0) so the seller can still collect escrow.
+  const nextCon: Consignment = { ...con, qty: con.qty - qty, escrow: (con.escrow ?? 0) + total };
+  const consignments = list.map((c, i) => (i === idx ? nextCon : c));
+
+  const transaction: EconomyTransaction = {
+    id: newId(),
+    at: nowISO(),
+    actorId: ctx.actorId,
+    actorName: ctx.actorName,
+    marketName: (economy.markets ?? []).find((m) => m.id === con.marketId)?.name,
+    action: "buy",
+    goodName: `${con.itemName} (from ${con.sellerName})`,
+    qty,
+    unitPrice: con.price,
+    total,
+    note: "consignment",
+  };
+  return {
+    economy: {
+      ...economy,
+      consignments,
+      log: [transaction, ...(economy.log ?? [])].slice(0, MAX_LOG),
+      updatedAt: nowISO(),
+    },
+    character: nextChar,
+    transaction,
+    total,
+  };
+}
+
+/** Collect escrowed earnings (and, if cancelling, reclaim remaining stock). */
+export function applyConsignManage(
+  economy: EconomyState,
+  character: Character,
+  req: { consignmentId: string; action: "collect" | "cancel" },
+  ctx: TradeContext,
+): ConsignApplied | { error: string } {
+  const list = economy.consignments ?? [];
+  const idx = list.findIndex((c) => c.id === req.consignmentId);
+  if (idx < 0) return { error: "That stall is gone." };
+  const con = list[idx];
+  if (con.sellerId !== character.id && !ctx.isDM) return { error: "That isn't your stall." };
+
+  const escrow = con.escrow ?? 0;
+  let inv = character.inventory ?? [];
+  if (req.action === "cancel" && con.qty > 0) {
+    inv = addInventory(inv, con.itemName, con.qty, { value: con.value, weight: con.weight });
+  }
+  const nextChar: Character = {
+    ...character,
+    inventory: inv,
+    currency: { ...ZERO_CURRENCY, ...character.currency, gp: (character.currency?.gp ?? 0) + escrow },
+  };
+
+  let consignments: Consignment[];
+  if (req.action === "cancel") {
+    consignments = list.filter((_, i) => i !== idx);
+  } else {
+    const cleared: Consignment = { ...con, escrow: 0 };
+    // A collected, sold-out stall is done.
+    consignments = cleared.qty <= 0 ? list.filter((_, i) => i !== idx) : list.map((c, i) => (i === idx ? cleared : c));
+  }
+  return {
+    economy: { ...economy, consignments, updatedAt: nowISO() },
+    character: nextChar,
+    total: escrow,
   };
 }
 

@@ -154,6 +154,23 @@ export interface JobInput {
   characterName?: string;
 }
 
+export interface ConsignListInput {
+  marketId: ID;
+  itemId: ID;
+  qty: number;
+  price: number;
+  characterId: ID;
+  characterName?: string;
+}
+
+export interface ConsignActInput {
+  consignmentId: ID;
+  action: "buy" | "collect" | "cancel";
+  qty?: number;
+  characterId: ID;
+  characterName?: string;
+}
+
 export type TradeSide = "from" | "to";
 
 export interface ProposeTradeInput {
@@ -289,6 +306,11 @@ export interface RealtimeController {
 
   /** Accept or deliver a haulage job (moves market stock, cargo, reward). */
   executeJob(input: JobInput): Promise<TradeOutcome>;
+
+  /** List an inventory item for sale at a market stall (escrows the items). */
+  consignList(input: ConsignListInput): Promise<TradeOutcome>;
+  /** Buy from / collect / cancel a consignment stall. */
+  consignAct(input: ConsignActInput): Promise<TradeOutcome>;
 
   /**
    * Player ↔ player trading. Propose a live trade with another character; both

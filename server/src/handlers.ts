@@ -34,6 +34,8 @@ import type {
   ServiceBuyMessage,
   CommissionFulfillMessage,
   JobActionMessage,
+  ConsignListMessage,
+  ConsignActMessage,
   P2pTradeProposeMessage,
   P2pTradeOfferMessage,
   P2pTradeConfirmMessage,
@@ -43,11 +45,15 @@ import { DM_ONLY_COLLECTIONS } from "../../shared/protocol";
 import type { CombatState, EconomyState } from "../../shared/domain";
 import {
   applyCommission,
+  applyConsignBuy,
+  applyConsignList,
+  applyConsignManage,
   applyJobAction,
   applyServicePurchase,
   applyTrade,
   isTradeError,
 } from "../../shared/economy-trade";
+import type { ConsignApplied } from "../../shared/economy-trade";
 import { improveStanding, standingToRep } from "../../shared/economy-pricing";
 import type { TradeParty, TradeSession } from "../../shared/trade";
 import { applyP2PTrade, makeParty, touchSession } from "../../shared/trade";
@@ -147,6 +153,10 @@ export class ClientSession {
         return this.onCommissionFulfill(msg);
       case "job:action":
         return this.onJobAction(msg);
+      case "consign:list":
+        return this.onConsignList(msg);
+      case "consign:act":
+        return this.onConsignAct(msg);
       case "p2ptrade:propose":
         return this.onP2pTradePropose(msg);
       case "p2ptrade:offer":
@@ -710,6 +720,87 @@ export class ClientSession {
       total: outcome.total,
       unitPrice: outcome.transaction?.unitPrice,
     });
+  }
+
+  /** Resolve a market's owning-faction reputation (0..5). */
+  private marketRep(economy: EconomyState, marketId?: string): number {
+    const market = (economy.markets ?? []).find((m) => m.id === marketId);
+    if (!market?.factionId) return 2;
+    const faction = this.repos.entities.factions.get(this.campaignId!, market.factionId) as Faction | null;
+    return standingToRep(faction?.standing);
+  }
+
+  /** Persist a consignment/economy+character outcome and reply to the actor. */
+  private commitConsign(requestId: string, outcome: ConsignApplied): void {
+    const cid = this.campaignId!;
+    const stamp = nowISO();
+    this.repos.economy.set(cid, outcome.economy);
+    this.repos.entities.characters.upsert(
+      cid,
+      { ...outcome.character, updatedAt: stamp },
+      outcome.character.ownerId ?? null,
+    );
+    this.rooms.get(cid).broadcast({ type: "economy:changed", state: outcome.economy });
+    this.broadcastCollection("characters");
+    this.send({
+      type: "trade:result",
+      requestId,
+      ok: true,
+      transaction: outcome.transaction,
+      total: outcome.total,
+      unitPrice: outcome.transaction?.unitPrice,
+    });
+  }
+
+  private onConsignList(msg: ConsignListMessage): void {
+    if (!this.requireCampaign()) return;
+    const cid = this.campaignId!;
+    const character = this.character(msg.characterId);
+    if (!character || !this.mayActAs(character)) {
+      return this.send({ type: "trade:result", requestId: msg.requestId, ok: false, error: "That isn't your character." });
+    }
+    const economy = this.repos.economy.get(cid) ?? emptyEconomy();
+    const outcome = applyConsignList(
+      economy,
+      character,
+      { marketId: msg.marketId, itemId: msg.itemId, qty: msg.qty, price: msg.price },
+      {
+        rep: this.marketRep(economy, msg.marketId),
+        actorId: this.userId!,
+        actorName: msg.characterName || character.name,
+        isDM: this.role === "dm",
+        userId: this.userId!,
+      },
+    );
+    if (isTradeError(outcome)) {
+      return this.send({ type: "trade:result", requestId: msg.requestId, ok: false, error: outcome.error });
+    }
+    this.commitConsign(msg.requestId, outcome);
+  }
+
+  private onConsignAct(msg: ConsignActMessage): void {
+    if (!this.requireCampaign()) return;
+    const cid = this.campaignId!;
+    const character = this.character(msg.characterId);
+    if (!character || !this.mayActAs(character)) {
+      return this.send({ type: "trade:result", requestId: msg.requestId, ok: false, error: "That isn't your character." });
+    }
+    const economy = this.repos.economy.get(cid) ?? emptyEconomy();
+    const ctx = {
+      rep: 2,
+      actorId: this.userId!,
+      actorName: msg.characterName || character.name,
+      isDM: this.role === "dm",
+      userId: this.userId!,
+    };
+    const outcome =
+      msg.action === "buy"
+        ? applyConsignBuy(economy, character, { consignmentId: msg.consignmentId, qty: msg.qty ?? 1 }, ctx)
+        : applyConsignManage(economy, character, { consignmentId: msg.consignmentId, action: msg.action }, ctx);
+    if (isTradeError(outcome)) {
+      return this.send({ type: "trade:result", requestId: msg.requestId, ok: false, error: outcome.error });
+    }
+    this.commitConsign(msg.requestId, outcome);
   }
 
   // --- player ↔ player trading (live, server-mediated swap) ----------------

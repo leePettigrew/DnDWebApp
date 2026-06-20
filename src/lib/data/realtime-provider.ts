@@ -46,6 +46,8 @@ import type {
   RealtimeController,
   RegisterInput,
   CommissionInput,
+  ConsignActInput,
+  ConsignListInput,
   JobInput,
   ProposeTradeInput,
   ProposeTradeResult,
@@ -525,6 +527,8 @@ export class RealtimeDataProvider implements DataProvider {
       executeService: (input) => this.executeService(input),
       executeCommission: (input) => this.executeCommission(input),
       executeJob: (input) => this.executeJob(input),
+      consignList: (input) => this.consignList(input),
+      consignAct: (input) => this.consignAct(input),
       proposeTrade: (input) => this.proposeTrade(input),
       updateTradeOffer: (sid, gold, items, side) =>
         this.updateTradeOffer(sid, gold, items, side),
@@ -832,6 +836,66 @@ export class RealtimeDataProvider implements DataProvider {
       });
     }
     return this.local.realtime.executeJob(input);
+  }
+
+  /** Shared request/await over the trade:result channel. */
+  private tradeRequest(
+    build: (requestId: string) => ClientMessage,
+    timeoutLabel: string,
+  ): Promise<TradeOutcome> {
+    return new Promise<TradeOutcome>((resolve, reject) => {
+      const requestId = newId();
+      this.pendingTrades.set(requestId, { resolve, reject });
+      if (!this.conn.send(build(requestId))) {
+        this.pendingTrades.delete(requestId);
+        resolve({ ok: false, error: "Not connected." });
+        return;
+      }
+      setTimeout(() => {
+        const p = this.pendingTrades.get(requestId);
+        if (p) {
+          this.pendingTrades.delete(requestId);
+          p.reject(new Error(`${timeoutLabel} timed out.`));
+        }
+      }, 10_000);
+    });
+  }
+
+  private consignList(input: ConsignListInput): Promise<TradeOutcome> {
+    if (this.activeCampaignId && this.conn.isOpen()) {
+      return this.tradeRequest(
+        (requestId) => ({
+          type: "consign:list",
+          requestId,
+          marketId: input.marketId,
+          itemId: input.itemId,
+          qty: input.qty,
+          price: input.price,
+          characterId: input.characterId,
+          characterName: input.characterName,
+        }),
+        "Listing",
+      );
+    }
+    return this.local.realtime.consignList(input);
+  }
+
+  private consignAct(input: ConsignActInput): Promise<TradeOutcome> {
+    if (this.activeCampaignId && this.conn.isOpen()) {
+      return this.tradeRequest(
+        (requestId) => ({
+          type: "consign:act",
+          requestId,
+          consignmentId: input.consignmentId,
+          action: input.action,
+          qty: input.qty,
+          characterId: input.characterId,
+          characterName: input.characterName,
+        }),
+        "Stall action",
+      );
+    }
+    return this.local.realtime.consignAct(input);
   }
 
   // --- player ↔ player trading --------------------------------------------

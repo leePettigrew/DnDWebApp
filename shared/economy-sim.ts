@@ -1,5 +1,6 @@
 import { nowISO } from "./ids";
 import type {
+  Consignment,
   EconomyState,
   FactionEconomy,
   Market,
@@ -202,6 +203,15 @@ function runStockpiles(
   }
 }
 
+/** Slow NPC offtake from player stalls: a unit may sell into escrow each day. */
+function sellConsignmentsToNpcs(economy: EconomyState, rng: () => number): Consignment[] {
+  return (economy.consignments ?? []).map((c) =>
+    c.qty > 0 && rng() < 0.25
+      ? { ...c, qty: c.qty - 1, escrow: (c.escrow ?? 0) + c.price }
+      : c,
+  );
+}
+
 /** Representative price per commodity: mean mid across markets that stock it. */
 function samplePrices(economy: EconomyState): PriceSample {
   const prices: Record<string, number> = {};
@@ -259,6 +269,7 @@ export function tickEconomy(
     markets,
     stockpiles,
     events,
+    consignments: sellConsignmentsToNpcs(economy, rng),
     updatedAt: nowISO(),
   };
   // 6. Record a daily price snapshot for the Exchange trend view.

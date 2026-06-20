@@ -44,6 +44,7 @@ export function emptyEconomy(): EconomyState {
     services: [],
     commissions: [],
     jobs: [],
+    consignments: [],
     nodes: [],
     stockpiles: [],
     routes: [],

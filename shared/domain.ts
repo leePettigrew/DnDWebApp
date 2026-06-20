@@ -640,6 +640,31 @@ export interface DeliveryJob {
   active?: boolean;
 }
 
+/**
+ * A player-run stall: items a character has listed for sale at a market. Buyers
+ * (other players or, slowly, NPCs as the world turns) pay into `escrow`, which
+ * the seller collects. Cancelling reclaims the remaining items + escrow.
+ */
+export interface Consignment {
+  id: ID;
+  marketId: ID;
+  sellerId: ID;
+  sellerName: string;
+  itemName: string;
+  /** Units still for sale. */
+  qty: number;
+  /** gp per unit. */
+  price: number;
+  /** gp earned from sales, waiting for the seller to collect. */
+  escrow?: number;
+  // item metadata, copied so buyers receive a faithful item:
+  value?: number;
+  weight?: number;
+  rarity?: ItemRarity;
+  category?: ItemCategory;
+  createdDay?: number;
+}
+
 /** A daily snapshot of representative commodity prices (for trend charts). */
 export interface PriceSample {
   day: number;
@@ -680,6 +705,8 @@ export interface EconomyState {
   commissions?: Commission[];
   /** Haulage contracts: deliver goods between markets for a reward. */
   jobs?: DeliveryJob[];
+  /** Player-run stalls: items players have listed for sale. */
+  consignments?: Consignment[];
   /** Map resource nodes that feed supply into markets each day. */
   nodes?: ResourceNode[];
   /** Faction reserves used to steady their markets. */

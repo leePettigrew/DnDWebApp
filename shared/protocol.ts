@@ -277,6 +277,27 @@ export interface JobActionMessage {
   characterId: ID;
   characterName?: string;
 }
+/** List an inventory item for sale at a market stall. */
+export interface ConsignListMessage {
+  type: "consign:list";
+  requestId: string;
+  marketId: ID;
+  itemId: ID;
+  qty: number;
+  price: number;
+  characterId: ID;
+  characterName?: string;
+}
+/** Buy from / collect / cancel a consignment stall. Replies with trade:result. */
+export interface ConsignActMessage {
+  type: "consign:act";
+  requestId: string;
+  consignmentId: ID;
+  action: "buy" | "collect" | "cancel";
+  qty?: number;
+  characterId: ID;
+  characterName?: string;
+}
 /** Propose a player↔player trade with another character at the table. */
 export interface P2pTradeProposeMessage {
   type: "p2ptrade:propose";
@@ -374,6 +395,8 @@ export type ClientMessage =
   | ServiceBuyMessage
   | CommissionFulfillMessage
   | JobActionMessage
+  | ConsignListMessage
+  | ConsignActMessage
   | P2pTradeProposeMessage
   | P2pTradeOfferMessage
   | P2pTradeConfirmMessage

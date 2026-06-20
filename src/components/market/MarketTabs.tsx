@@ -3,20 +3,22 @@
 import { useState } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { cn } from "@/components/ui/cn";
-import { CoinIcon, SparkIcon, ChatIcon, ScrollIcon } from "@/components/ui/icons";
+import { CoinIcon, SparkIcon, ChatIcon, ScrollIcon, HelmIcon } from "@/components/ui/icons";
 import { useEconomy } from "@/lib/data/hooks";
 import { PlayerTradePanel } from "./PlayerTradePanel";
 import { MarketBrowser } from "./MarketBrowser";
 import { MarketExchange } from "./MarketExchange";
 import { CommissionBoard } from "./CommissionBoard";
+import { StallBoard } from "./StallBoard";
 import { TransactionFeed } from "./TransactionFeed";
 
-type Tab = "shops" | "exchange" | "board" | "activity";
+type Tab = "shops" | "exchange" | "board" | "stalls" | "activity";
 
 const TABS: { key: Tab; label: string; icon: typeof CoinIcon }[] = [
   { key: "shops", label: "Shops", icon: CoinIcon },
   { key: "exchange", label: "Exchange", icon: SparkIcon },
   { key: "board", label: "Board", icon: ScrollIcon },
+  { key: "stalls", label: "Stalls", icon: HelmIcon },
   { key: "activity", label: "Activity", icon: ChatIcon },
 ];
 
@@ -64,6 +66,7 @@ export function MarketTabs() {
       )}
       {tab === "exchange" && <MarketExchange onJump={jumpToMarket} />}
       {tab === "board" && <CommissionBoard />}
+      {tab === "stalls" && <StallBoard />}
       {tab === "activity" && (
         <Panel title="Market activity" eyebrow="Who's trading what">
           <TransactionFeed transactions={log} maxHeight="max-h-[32rem]" />
