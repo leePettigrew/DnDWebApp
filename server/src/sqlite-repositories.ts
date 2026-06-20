@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   CombatState,
+  EconomyState,
   Entity,
   RollHistoryEntry,
 } from "../../shared/domain";
@@ -14,6 +15,7 @@ import type {
   ContentRecord,
   ContentRepository,
   CombatRepository,
+  EconomyRepository,
   EntityRepository,
   MembershipRecord,
   MembershipRepository,
@@ -219,6 +221,26 @@ function createCombatRepository(db: DatabaseSync): CombatRepository {
   };
 }
 
+function createEconomyRepository(db: DatabaseSync): EconomyRepository {
+  const getStmt = db.prepare(
+    `SELECT data FROM economy_state WHERE campaign_id = ?`,
+  );
+  const setStmt = db.prepare(
+    `INSERT INTO economy_state (campaign_id, data, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(campaign_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+  );
+  return {
+    get(campaignId) {
+      const r = getStmt.get(campaignId) as Row | undefined;
+      return r ? (JSON.parse(str(r.data)) as EconomyState) : null;
+    },
+    set(campaignId, state) {
+      setStmt.run(campaignId, JSON.stringify(state), state.updatedAt);
+    },
+  };
+}
+
 function createRollLogRepository(db: DatabaseSync): RollLogRepository {
   const insert = db.prepare(
     `INSERT INTO roll_log (id, campaign_id, rolled_by_user_id, hidden, data, created_at)
@@ -357,6 +379,7 @@ function createAdminRepository(db: DatabaseSync): AdminRepository {
     db.prepare(`DELETE FROM ${t} WHERE campaign_id = ?`),
   );
   const delCombat = db.prepare(`DELETE FROM combat_state WHERE campaign_id = ?`);
+  const delEconomy = db.prepare(`DELETE FROM economy_state WHERE campaign_id = ?`);
   const delRolls = db.prepare(`DELETE FROM roll_log WHERE campaign_id = ?`);
   const delChat = db.prepare(`DELETE FROM chat_messages WHERE campaign_id = ?`);
   const delMembersByCampaign = db.prepare(
@@ -386,6 +409,7 @@ function createAdminRepository(db: DatabaseSync): AdminRepository {
     deleteCampaign(id) {
       for (const stmt of delScoped) stmt.run(id);
       delCombat.run(id);
+      delEconomy.run(id);
       delRolls.run(id);
       delChat.run(id);
       delMembersByCampaign.run(id);
@@ -415,6 +439,7 @@ export function createSqliteRepositories(db: DatabaseSync): Repositories {
     memberships: createMembershipRepository(db),
     entities,
     combat: createCombatRepository(db),
+    economy: createEconomyRepository(db),
     rollLog: createRollLogRepository(db),
     chat: createChatRepository(db),
     content: createContentRepository(db),

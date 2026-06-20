@@ -11,6 +11,7 @@ import {
   BookIcon,
   ScrollIcon,
   FeatherIcon,
+  CoinIcon,
 } from "@/components/ui/icons";
 import { usePermissions } from "@/lib/data/hooks";
 import { TreasureGenerator } from "@/components/dm/TreasureGenerator";
@@ -19,14 +20,16 @@ import { NpcGenerator } from "@/components/dm/NpcGenerator";
 import { DmScreen } from "@/components/dm/DmScreen";
 import { HandoutComposer } from "@/components/dm/HandoutComposer";
 import { HomebrewEditor } from "@/components/dm/HomebrewEditor";
+import { EconomyConsole } from "@/components/dm/EconomyConsole";
 
-type Tab = "treasure" | "npcs" | "homebrew" | "handouts" | "screen";
+type Tab = "treasure" | "npcs" | "homebrew" | "handouts" | "economy" | "screen";
 
 const TABS: { key: Tab; label: string; icon: typeof SparkIcon }[] = [
   { key: "treasure", label: "Treasure", icon: SparkIcon },
   { key: "npcs", label: "NPC Forge", icon: HelmIcon },
   { key: "homebrew", label: "Homebrew", icon: FeatherIcon },
   { key: "handouts", label: "Handouts", icon: ScrollIcon },
+  { key: "economy", label: "Economy", icon: CoinIcon },
   { key: "screen", label: "DM Screen", icon: BookIcon },
 ];
 
@@ -91,6 +94,7 @@ export default function DmPage() {
       {tab === "npcs" && <NpcGenerator />}
       {tab === "homebrew" && <HomebrewEditor />}
       {tab === "handouts" && <HandoutComposer />}
+      {tab === "economy" && <EconomyConsole />}
       {tab === "screen" && <DmScreen />}
     </div>
   );

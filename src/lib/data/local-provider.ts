@@ -10,6 +10,7 @@ import type {
 import { newId, nowISO } from "@/lib/domain/ids";
 import type { ID } from "@/lib/domain/ids";
 import { rollSpec } from "@/lib/domain/dice";
+import { emptyEconomy } from "@shared/economy";
 import type {
   CampaignSummary,
   ChatMessage,
@@ -401,6 +402,7 @@ class LocalDataProvider implements DataProvider {
   readonly timeline;
   readonly rollHistory;
   readonly combat;
+  readonly economy;
   readonly session: SessionController;
   readonly auth: AuthController;
   readonly realtime: RealtimeController;
@@ -422,6 +424,7 @@ class LocalDataProvider implements DataProvider {
     this.timeline = new LocalCollection("timeline", persistence, seed.timeline);
     this.rollHistory = new LocalCollection("rollHistory", persistence, []);
     this.combat = new LocalSingleton("combat", persistence, emptyCombatState);
+    this.economy = new LocalSingleton("economy", persistence, emptyEconomy());
 
     const auth = new LocalAuthController();
     this.auth = auth;

@@ -3,6 +3,7 @@ import type {
   Campaign,
   Character,
   CombatState,
+  EconomyState,
   Encounter,
   Entity,
   Faction,
@@ -253,6 +254,7 @@ export interface DataProvider {
   readonly timeline: Repository<TimelineEvent>;
   readonly rollHistory: Repository<RollHistoryEntry>;
   readonly combat: SingletonRepository<CombatState>;
+  readonly economy: SingletonRepository<EconomyState>;
 
   /** Current user. Kept for Phase 1 back-compat; `auth` is the superset. */
   readonly session: SessionController;

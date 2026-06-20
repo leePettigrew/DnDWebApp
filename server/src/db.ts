@@ -69,6 +69,12 @@ function applySchema(db: DatabaseSync): void {
       updated_at  TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS economy_state (
+      campaign_id TEXT PRIMARY KEY,
+      data        TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS roll_log (
       id                TEXT PRIMARY KEY,
       campaign_id       TEXT NOT NULL,

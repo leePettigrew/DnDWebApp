@@ -396,6 +396,129 @@ export interface CombatState {
   updatedAt: ISODateString;
 }
 
+// ---------------------------------------------------------------------------
+// Trading economy (singleton `economy`). A configurable, dynamic supply/demand
+// market system: commodities, faction + location + global markets, events, and
+// a transaction log. The DM console edits it; players trade via the server.
+// ---------------------------------------------------------------------------
+
+export type CommodityTier = 0 | 1 | 2 | 3 | 4 | 5;
+
+/** A tradeable raw material / good (separate from the item catalog). */
+export interface Commodity {
+  id: ID;
+  name: string;
+  /** metal | ore | wood | cloth | food | gem | reagent | good | other */
+  category: string;
+  /** Base price in gp per unit. */
+  baseValue: number;
+  tier?: CommodityTier;
+  /** Weight (lb) per unit. */
+  weight?: number;
+  /** 0..1 — how strongly price swings with supply/demand. */
+  volatility?: number;
+  /** Unit label, e.g. "ingot", "bushel", "bolt". */
+  unit?: string;
+  description?: string;
+  /** Whether it can be traded at all (default true). */
+  tradeable?: boolean;
+}
+
+/** A line of stock in a market (a commodity or a homebrew item). */
+export interface MarketGood {
+  ref: ID; // commodityId or itemId
+  kind: "commodity" | "item";
+  /** Current stock units (drives supply/demand pricing). */
+  stock: number;
+  /** Baseline stock the market restocks toward. */
+  baseStock?: number;
+  /** Optional per-good price multiplier on top of the market. */
+  priceMul?: number;
+  /** Minimum reputation/standing (0..5) to see/buy this good. */
+  minRep?: number;
+}
+
+export interface Market {
+  id: ID;
+  name: string;
+  kind: "global" | "faction" | "location";
+  factionId?: ID; // faction markets
+  poiId?: ID; // location markets (atlas POI)
+  mapId?: ID; // world map the POI lives on
+  /** Price players PAY = base × buyMul (markup). */
+  buyMul: number;
+  /** Price players GET = base × sellMul (markdown). */
+  sellMul: number;
+  goods: MarketGood[];
+  /** Min reputation/standing (0..5) to access at all. */
+  minRep?: number;
+  hidden?: boolean;
+  visibleTo?: ID[];
+}
+
+/** A temporary economic shock (war, famine, embargo, boom/bust…). */
+export interface EconomyEvent {
+  id: ID;
+  name: string;
+  /** "all" | a category | a commodityId — what it affects. */
+  scope?: string;
+  /** Price multiplier while active. */
+  priceMul: number;
+  note?: string;
+  /** Sim day it ends (null/undefined = manual until removed). */
+  until?: number | null;
+}
+
+export interface EconomyConfig {
+  /** How strongly stock vs baseStock moves price. */
+  elasticity: number;
+  /** Global volatility multiplier. */
+  volatility: number;
+  /** Max ± fraction supply/demand can move a price (e.g. 0.6 → 0.4×..1.6×). */
+  priceClamp: number;
+  /** Default market buy/sell margins for new markets. */
+  defaultBuyMul: number;
+  defaultSellMul: number;
+  /** Best discount (fraction) a maxed reputation grants. */
+  repDiscount: number;
+  /** Best fraction a perfect haggle can knock off. */
+  haggleMax: number;
+  /** Fraction of the gap to baseStock restored each tick. */
+  restockRate: number;
+}
+
+export interface EconomyTransaction {
+  id: ID;
+  at: ISODateString;
+  actorId?: ID;
+  actorName?: string;
+  marketId?: ID;
+  marketName?: string;
+  action: "buy" | "sell" | "trade" | "revert";
+  goodRef?: ID;
+  goodName?: string;
+  qty?: number;
+  unitPrice?: number;
+  total?: number; // gp
+  reverted?: boolean;
+  note?: string;
+}
+
+export interface EconomyState {
+  id: "economy"; // singleton key
+  enabled?: boolean;
+  /** Simulation clock. */
+  sim?: "live" | "paused";
+  day?: number;
+  config: EconomyConfig;
+  commodities: Commodity[];
+  markets: Market[];
+  events: EconomyEvent[];
+  /** Recent transaction log (capped). */
+  log: EconomyTransaction[];
+  updatedAt: ISODateString;
+}
+
 export interface Campaign extends Entity {
   name: string;
   description?: string;

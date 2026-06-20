@@ -112,6 +112,8 @@ const message = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("combat:set"), state: combatState }),
   z.object({ type: z.literal("combat:update"), patch: combatPatch }),
+  z.object({ type: z.literal("economy:set"), state: z.record(z.unknown()) }),
+  z.object({ type: z.literal("economy:update"), patch: z.record(z.unknown()) }),
   z.object({
     type: z.literal("dice:roll"),
     requestId: z.string().max(80),

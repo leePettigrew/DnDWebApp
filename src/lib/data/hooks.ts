@@ -117,6 +117,7 @@ export const useFactions = () => useCollection(useDataProvider().factions);
 export const useTimeline = () => useCollection(useDataProvider().timeline);
 export const useRollHistory = () => useCollection(useDataProvider().rollHistory);
 export const useCombat = () => useSingleton(useDataProvider().combat);
+export const useEconomy = () => useSingleton(useDataProvider().economy);
 
 /** The current user (a fixed local DM in Phase 1; real auth in Phase 2). */
 export function useCurrentUser(): CurrentUser | null {

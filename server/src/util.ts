@@ -3,6 +3,8 @@ import { nowISO } from "../../shared/ids";
 import type { CombatState } from "../../shared/domain";
 import type { Repositories } from "./repositories";
 
+export { emptyEconomy } from "../../shared/economy";
+
 // Unambiguous alphabet (no I, O, 0, 1) for human-friendly invite codes.
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -31,3 +33,4 @@ export function emptyCombat(): CombatState {
     updatedAt: nowISO(),
   };
 }
+

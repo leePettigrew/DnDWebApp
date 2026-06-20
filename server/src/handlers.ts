@@ -30,13 +30,13 @@ import type {
   ServerMessage,
 } from "../../shared/protocol";
 import { DM_ONLY_COLLECTIONS } from "../../shared/protocol";
-import type { CombatState } from "../../shared/domain";
+import type { CombatState, EconomyState } from "../../shared/domain";
 import type { Repositories } from "./repositories";
 import type { RoomMember, RoomManager } from "./rooms";
 import { parseClientMessage } from "./validation";
 import { isAdminUser, verifyToken } from "./auth";
 import { isVisible } from "./visibility";
-import { cryptoRng, emptyCombat, generateJoinCode } from "./util";
+import { cryptoRng, emptyCombat, emptyEconomy, generateJoinCode } from "./util";
 
 /** Collections only the DM may write. characters + rollPresets have own rules. */
 const DM_ONLY: ReadonlySet<ScopedCollection> = new Set<ScopedCollection>(
@@ -115,6 +115,10 @@ export class ClientSession {
         return this.onCombatSet(msg.state);
       case "combat:update":
         return this.onCombatUpdate(msg.patch);
+      case "economy:set":
+        return this.onEconomySet(msg.state);
+      case "economy:update":
+        return this.onEconomyUpdate(msg.patch);
       case "dice:roll":
         return this.onDiceRoll(msg);
       case "dice:physical":
@@ -292,6 +296,7 @@ export class ClientSession {
       factions: vis(e.factions.list(cid)) as CampaignSnapshot["factions"],
       timeline: vis(e.timeline.list(cid)) as CampaignSnapshot["timeline"],
       combat: this.repos.combat.get(cid) ?? emptyCombat(),
+      economy: this.repos.economy.get(cid) ?? emptyEconomy(),
       rollLog: this.repos.rollLog.list(cid, { includeHidden: role === "dm" }),
       presence: this.rooms.get(cid).presence(),
       chat: this.repos.chat.list(cid),
@@ -428,6 +433,34 @@ export class ClientSession {
     };
     this.repos.combat.set(this.campaignId!, next);
     this.rooms.get(this.campaignId!).broadcast({ type: "combat:changed", state: next });
+  }
+
+  // --- economy (DM only for config; trades come via dedicated messages) -----
+
+  private onEconomySet(state: EconomyState): void {
+    if (!this.requireCampaign()) return;
+    if (this.role !== "dm") {
+      return this.error("forbidden", "Only the DM configures the economy.");
+    }
+    const next: EconomyState = { ...state, id: "economy", updatedAt: nowISO() };
+    this.repos.economy.set(this.campaignId!, next);
+    this.rooms.get(this.campaignId!).broadcast({ type: "economy:changed", state: next });
+  }
+
+  private onEconomyUpdate(patch: Partial<EconomyState>): void {
+    if (!this.requireCampaign()) return;
+    if (this.role !== "dm") {
+      return this.error("forbidden", "Only the DM configures the economy.");
+    }
+    const current = this.repos.economy.get(this.campaignId!) ?? emptyEconomy();
+    const next: EconomyState = {
+      ...current,
+      ...patch,
+      id: "economy",
+      updatedAt: nowISO(),
+    };
+    this.repos.economy.set(this.campaignId!, next);
+    this.rooms.get(this.campaignId!).broadcast({ type: "economy:changed", state: next });
   }
 
   // --- dice (server-authoritative, hidden-aware) ---------------------------

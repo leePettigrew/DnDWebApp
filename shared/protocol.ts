@@ -3,6 +3,7 @@ import type {
   Campaign,
   Character,
   CombatState,
+  EconomyState,
   Encounter,
   Faction,
   Note,
@@ -128,6 +129,7 @@ export interface CampaignSnapshot {
   factions: Faction[];
   timeline: TimelineEvent[];
   combat: CombatState;
+  economy: EconomyState;
   rollLog: RollHistoryEntry[];
   presence: PresenceUser[];
   chat: ChatMessage[];
@@ -224,6 +226,14 @@ export interface CombatUpdateMessage {
   type: "combat:update";
   patch: Partial<CombatState>;
 }
+export interface EconomySetMessage {
+  type: "economy:set";
+  state: EconomyState;
+}
+export interface EconomyUpdateMessage {
+  type: "economy:update";
+  patch: Partial<EconomyState>;
+}
 export interface DiceRollMessage {
   type: "dice:roll";
   requestId: string;
@@ -292,6 +302,8 @@ export type ClientMessage =
   | EntityRemoveMessage
   | CombatSetMessage
   | CombatUpdateMessage
+  | EconomySetMessage
+  | EconomyUpdateMessage
   | DiceRollMessage
   | DicePhysicalMessage
   | PresenceTypingMessage
@@ -344,6 +356,10 @@ export interface CombatChangedMessage {
   type: "combat:changed";
   state: CombatState;
 }
+export interface EconomyChangedMessage {
+  type: "economy:changed";
+  state: EconomyState;
+}
 export interface DiceRolledMessage {
   type: "dice:rolled";
   /** Echoed to the roller so it can resolve its optimistic promise. */
@@ -394,6 +410,7 @@ export type ServerMessage =
   | CampaignLeftMessage
   | EntityChangedMessage
   | CombatChangedMessage
+  | EconomyChangedMessage
   | DiceRolledMessage
   | PresenceStateMessage
   | ChatMessageMessage

@@ -250,3 +250,14 @@ export function ChatIcon(props: IconProps) {
     </Base>
   );
 }
+
+export function CoinIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <ellipse cx="9" cy="8" rx="6" ry="3.2" />
+      <path d="M3 8v3.5c0 1.77 2.69 3.2 6 3.2s6-1.43 6-3.2V8" />
+      <ellipse cx="15" cy="14.5" rx="6" ry="3.2" />
+      <path d="M9 14.5V18c0 1.77 2.69 3.2 6 3.2s6-1.43 6-3.2v-3.5" />
+    </Base>
+  );
+}

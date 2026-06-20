@@ -3,6 +3,7 @@ import type {
   Campaign,
   Character,
   CombatState,
+  EconomyState,
   Encounter,
   Entity,
   Faction,
@@ -31,6 +32,7 @@ import type {
 } from "@shared/protocol";
 import { SocketConnection } from "./realtime-connection";
 import { createLocalDataProvider, emptyCombatState } from "./local-provider";
+import { emptyEconomy } from "@shared/economy";
 import type {
   AuthController,
   ConnectionStatus,
@@ -227,17 +229,22 @@ class SwitchableCollection<T extends Entity> implements Repository<T> {
   }
 }
 
-/** The combat singleton, switchable between local and live like the collections. */
-class SwitchableSingleton implements SingletonRepository<CombatState> {
-  private listeners = new Set<(v: CombatState) => void>();
-  private liveValue: CombatState = emptyCombatState;
-  private localValue: CombatState = emptyCombatState;
+/** A singleton (combat / economy), switchable between local and live. */
+class SwitchableSingleton<T> implements SingletonRepository<T> {
+  private listeners = new Set<(v: T) => void>();
+  private liveValue: T;
+  private localValue: T;
   private mode: Mode = "local";
 
   constructor(
-    private readonly localRepo: SingletonRepository<CombatState>,
+    private readonly localRepo: SingletonRepository<T>,
     private readonly send: SendFn,
+    empty: T,
+    private readonly setType: string,
+    private readonly updateType: string,
   ) {
+    this.liveValue = empty;
+    this.localValue = empty;
     this.localRepo.subscribe((v) => {
       this.localValue = v;
       if (this.mode === "local") this.emit();
@@ -249,35 +256,35 @@ class SwitchableSingleton implements SingletonRepository<CombatState> {
     this.mode = mode;
     this.emit();
   }
-  setLive(v: CombatState): void {
+  setLive(v: T): void {
     this.liveValue = v;
     if (this.mode === "live") this.emit();
   }
-  private current(): CombatState {
+  private current(): T {
     return this.mode === "live" ? this.liveValue : this.localValue;
   }
   private emit(): void {
     const v = this.current();
     this.listeners.forEach((l) => l(v));
   }
-  async get(): Promise<CombatState> {
+  async get(): Promise<T> {
     return this.current();
   }
-  async set(v: CombatState): Promise<CombatState> {
+  async set(v: T): Promise<T> {
     if (this.mode === "local") return this.localRepo.set(v);
     this.liveValue = v;
     this.emit();
-    this.send({ type: "combat:set", state: v });
+    this.send({ type: this.setType, state: v } as unknown as ClientMessage);
     return v;
   }
-  async update(patch: Partial<CombatState>): Promise<CombatState> {
+  async update(patch: Partial<T>): Promise<T> {
     if (this.mode === "local") return this.localRepo.update(patch);
     this.liveValue = { ...this.liveValue, ...patch };
     this.emit();
-    this.send({ type: "combat:update", patch });
+    this.send({ type: this.updateType, patch } as unknown as ClientMessage);
     return this.liveValue;
   }
-  subscribe(listener: (v: CombatState) => void): Unsubscribe {
+  subscribe(listener: (v: T) => void): Unsubscribe {
     this.listeners.add(listener);
     listener(this.current());
     return () => this.listeners.delete(listener);
@@ -309,7 +316,8 @@ export class RealtimeDataProvider implements DataProvider {
   readonly timeline: SwitchableCollection<TimelineEvent>;
   readonly rollHistory: SwitchableCollection<RollHistoryEntry>;
   readonly campaigns: SwitchableCollection<Campaign>;
-  readonly combat: SwitchableSingleton;
+  readonly combat: SwitchableSingleton<CombatState>;
+  readonly economy: SwitchableSingleton<EconomyState>;
 
   readonly session: SessionController;
   readonly auth: AuthController;
@@ -361,7 +369,20 @@ export class RealtimeDataProvider implements DataProvider {
     this.timeline = new SwitchableCollection(this.local.timeline, send, "timeline");
     this.rollHistory = new SwitchableCollection(this.local.rollHistory, send);
     this.campaigns = new SwitchableCollection(this.local.campaigns, send);
-    this.combat = new SwitchableSingleton(this.local.combat, send);
+    this.combat = new SwitchableSingleton<CombatState>(
+      this.local.combat,
+      send,
+      emptyCombatState,
+      "combat:set",
+      "combat:update",
+    );
+    this.economy = new SwitchableSingleton<EconomyState>(
+      this.local.economy,
+      send,
+      emptyEconomy(),
+      "economy:set",
+      "economy:update",
+    );
 
     this.session = {
       getCurrentUser: async () => this.currentUser,
@@ -539,6 +560,7 @@ export class RealtimeDataProvider implements DataProvider {
     this.timeline.setMode(mode);
     this.rollHistory.setMode(mode);
     this.combat.setMode(mode);
+    this.economy.setMode(mode);
   }
 
   private clearActiveCampaign(): void {
@@ -722,6 +744,10 @@ export class RealtimeDataProvider implements DataProvider {
         this.applyEntityChanged(msg.collection, msg.items);
         break;
       }
+      case "economy:changed": {
+        this.economy.setLive(msg.state);
+        break;
+      }
       case "combat:changed": {
         this.combat.setLive(msg.state);
         break;
@@ -819,6 +845,7 @@ export class RealtimeDataProvider implements DataProvider {
     this.timeline.setLive(snap.timeline);
     this.rollHistory.setLive(snap.rollLog);
     this.combat.setLive(snap.combat);
+    this.economy.setLive(snap.economy);
     this.presence = snap.presence;
     this.presenceListeners.forEach((fn) => fn(snap.presence));
     this.chat = snap.chat;

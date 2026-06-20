@@ -1,4 +1,9 @@
-import type { CombatState, Entity, RollHistoryEntry } from "../../shared/domain";
+import type {
+  CombatState,
+  EconomyState,
+  Entity,
+  RollHistoryEntry,
+} from "../../shared/domain";
 import type {
   ChatMessage,
   Role,
@@ -74,6 +79,11 @@ export interface CombatRepository {
   set(campaignId: string, state: CombatState): void;
 }
 
+export interface EconomyRepository {
+  get(campaignId: string): EconomyState | null;
+  set(campaignId: string, state: EconomyState): void;
+}
+
 export interface RollLogRepository {
   append(campaignId: string, entry: RollHistoryEntry): void;
   /** Most recent rolls (chronological). `includeHidden` gates DM-only rolls. */
@@ -131,6 +141,7 @@ export interface Repositories {
   memberships: MembershipRepository;
   entities: Record<ScopedCollection, EntityRepository>;
   combat: CombatRepository;
+  economy: EconomyRepository;
   rollLog: RollLogRepository;
   chat: ChatRepository;
   content: ContentRepository;
