@@ -16,7 +16,30 @@ import {
 } from "@/lib/battle/materials";
 import { PROPS, PROP_MAP } from "@/lib/battle/props";
 import type { PropDef } from "@/lib/battle/props";
-import type { BattleBuild, BattleMap, BattleProp } from "@/lib/domain/types";
+import type { BattleBuild, BattleMap, BattleProp, BattleWall } from "@/lib/domain/types";
+
+/** Draw all wall segments (shared by live canvas + flatten). */
+function drawWalls(ctx: CanvasRenderingContext2D, walls: BattleWall[], cp: number) {
+  if (!walls.length) return;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#332e28";
+  ctx.lineWidth = cp * 0.18;
+  for (const w of walls) {
+    ctx.beginPath();
+    ctx.moveTo(w.x1 * cp, w.y1 * cp);
+    ctx.lineTo(w.x2 * cp, w.y2 * cp);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "#574f45";
+  ctx.lineWidth = cp * 0.07;
+  for (const w of walls) {
+    ctx.beginPath();
+    ctx.moveTo(w.x1 * cp, w.y1 * cp);
+    ctx.lineTo(w.x2 * cp, w.y2 * cp);
+    ctx.stroke();
+  }
+  ctx.lineCap = "butt";
+}
 
 /** Draw a placed prop (shared by live canvas + flatten). */
 function drawProp(ctx: CanvasRenderingContext2D, p: BattleProp, cp: number) {
@@ -128,7 +151,7 @@ function drawCell(ctx: CanvasRenderingContext2D, c: number, r: number, cp: numbe
   }
 }
 
-type Tool = "paint" | "fill" | "erase" | "prop" | "select" | "pan";
+type Tool = "paint" | "fill" | "erase" | "room" | "wall" | "prop" | "select" | "pan";
 
 const PROP_CATS: { key: string; label: string }[] = [
   { key: "dungeon", label: "Dungeon" },
@@ -251,6 +274,9 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     ctx.lineWidth = 2 / zoom;
     ctx.strokeRect(0, 0, b.cols * cp, b.rows * cp);
 
+    // Walls (under props so furniture can sit against them).
+    drawWalls(ctx, b.walls ?? [], cp);
+
     // Props.
     for (const p of b.props ?? []) {
       drawProp(ctx, p, cp);
@@ -270,6 +296,31 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       ctx.strokeStyle = toolRef.current === "erase" ? "rgba(180,60,40,0.9)" : "rgba(230,199,114,0.95)";
       ctx.lineWidth = 2 / zoom;
       ctx.strokeRect((h.c - off) * cp, (h.r - off) * cp, sz * cp, sz * cp);
+    }
+
+    // Room / wall drag preview.
+    const ds = dragStruct.current;
+    if (ds) {
+      ctx.strokeStyle = "rgba(230,199,114,0.95)";
+      if (toolRef.current === "room") {
+        ctx.lineWidth = 2 / zoom;
+        ctx.setLineDash([6 / zoom, 4 / zoom]);
+        ctx.strokeRect(
+          Math.min(ds.sx, ds.cx) * cp,
+          Math.min(ds.sy, ds.cy) * cp,
+          Math.abs(ds.cx - ds.sx) * cp,
+          Math.abs(ds.cy - ds.sy) * cp,
+        );
+        ctx.setLineDash([]);
+      } else {
+        ctx.lineCap = "round";
+        ctx.lineWidth = cp * 0.16;
+        ctx.beginPath();
+        ctx.moveTo(ds.sx * cp, ds.sy * cp);
+        ctx.lineTo(ds.cx * cp, ds.cy * cp);
+        ctx.stroke();
+        ctx.lineCap = "butt";
+      }
     }
   }
 
@@ -350,8 +401,22 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         }
       }
     }
-    if (changed) {
-      setBuild({ ...b, tiles });
+    // Erasing also clears walls whose midpoint is under the brush.
+    let walls = b.walls;
+    let wallsChanged = false;
+    if (id === "" && b.walls?.length) {
+      const kept = b.walls.filter((w) => {
+        const mx = (w.x1 + w.x2) / 2;
+        const my = (w.y1 + w.y2) / 2;
+        return !(mx >= c - off && mx <= c - off + sz && my >= r - off && my <= r - off + sz);
+      });
+      if (kept.length !== b.walls.length) {
+        walls = kept;
+        wallsChanged = true;
+      }
+    }
+    if (changed || wallsChanged) {
+      setBuild({ ...b, tiles, ...(wallsChanged ? { walls } : {}) });
       setDirty(true);
     }
   }
@@ -434,6 +499,17 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   const panning = useRef<{ x: number; y: number } | null>(null);
   const dragProp = useRef<string | null>(null);
   const dragUndo = useRef(false);
+  const dragStruct = useRef<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
+
+  function snapCorner(e: { clientX: number; clientY: number }) {
+    const wp = worldPoint(e);
+    const b = buildRef.current;
+    if (!wp) return null;
+    return {
+      x: Math.max(0, Math.min(b.cols, Math.round(wp.x))),
+      y: Math.max(0, Math.min(b.rows, Math.round(wp.y))),
+    };
+  }
 
   function onPointerDown(e: RPointerEvent) {
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -458,6 +534,12 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       setSelectedPropId(p?.id ?? null);
       dragProp.current = p?.id ?? null;
       dragUndo.current = false;
+      requestRender();
+      return;
+    }
+    if (tool === "room" || tool === "wall") {
+      const s = snapCorner(e);
+      if (s) dragStruct.current = { sx: s.x, sy: s.y, cx: s.x, cy: s.y };
       requestRender();
       return;
     }
@@ -495,6 +577,15 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       requestRender();
       return;
     }
+    if (dragStruct.current) {
+      const s = snapCorner(e);
+      if (s) {
+        dragStruct.current.cx = s.x;
+        dragStruct.current.cy = s.y;
+      }
+      requestRender();
+      return;
+    }
     const cell = cellAt(e);
     hover.current = cell;
     if (painting.current && cell) paintAt(cell.c, cell.r);
@@ -506,6 +597,38 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     panning.current = null;
     dragProp.current = null;
     dragUndo.current = false;
+    const ds = dragStruct.current;
+    if (ds) {
+      dragStruct.current = null;
+      const cMin = Math.min(ds.sx, ds.cx);
+      const cMax = Math.max(ds.sx, ds.cx);
+      const rMin = Math.min(ds.sy, ds.cy);
+      const rMax = Math.max(ds.sy, ds.cy);
+      const b = buildRef.current;
+      if (toolRef.current === "room" && cMax > cMin && rMax > rMin) {
+        pushUndo();
+        const tiles = b.tiles.slice();
+        for (let r = rMin; r < rMax; r++) {
+          for (let c = cMin; c < cMax; c++) tiles[r * b.cols + c] = matRef.current;
+        }
+        const add: BattleWall[] = [
+          { id: newId(), x1: cMin, y1: rMin, x2: cMax, y2: rMin },
+          { id: newId(), x1: cMin, y1: rMax, x2: cMax, y2: rMax },
+          { id: newId(), x1: cMin, y1: rMin, x2: cMin, y2: rMax },
+          { id: newId(), x1: cMax, y1: rMin, x2: cMax, y2: rMax },
+        ];
+        setBuild({ ...b, tiles, walls: [...(b.walls ?? []), ...add] });
+        setDirty(true);
+      } else if (toolRef.current === "wall" && (ds.sx !== ds.cx || ds.sy !== ds.cy)) {
+        pushUndo();
+        setBuild({
+          ...b,
+          walls: [...(b.walls ?? []), { id: newId(), x1: ds.sx, y1: ds.sy, x2: ds.cx, y2: ds.cy }],
+        });
+        setDirty(true);
+      }
+      requestRender();
+    }
   }
 
   function onWheel(e: RWheelEvent) {
@@ -551,6 +674,11 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     setBuild({ ...build, tiles: new Array(build.cols * build.rows).fill("") });
     setDirty(true);
   }
+  function clearWalls() {
+    pushUndo();
+    setBuild({ ...build, walls: [] });
+    setDirty(true);
+  }
 
   function resize(cols: number, rows: number) {
     cols = Math.max(8, Math.min(80, cols));
@@ -589,6 +717,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         if (id) drawCell(ctx, c, r, cp, id);
       }
     }
+    drawWalls(ctx, b.walls ?? [], cp);
     for (const p of b.props ?? []) drawProp(ctx, p, cp);
     return { dataUrl: off.toDataURL("image/png"), width: off.width, height: off.height };
   }
@@ -603,6 +732,14 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       gridSize: b.cellPx,
       showGrid: true,
       feetPerCell: map.feetPerCell ?? 5,
+      // Export walls (cell coords → image px) so combat line-of-sight works.
+      walls: (b.walls ?? []).map((w) => ({
+        id: w.id,
+        x1: w.x1 * b.cellPx,
+        y1: w.y1 * b.cellPx,
+        x2: w.x2 * b.cellPx,
+        y2: w.y2 * b.cellPx,
+      })),
       build: { ...b, updatedAt: nowISO() },
     });
     setDirty(false);
@@ -646,6 +783,14 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
                 </button>
               ))}
             </div>
+            {(tool === "room" || tool === "wall") && (
+              <p className="mt-1 text-[0.65rem] text-ink-faint">
+                {tool === "room" ? "Drag a rectangle → floor + walls." : "Drag corner to corner → a wall."}
+              </p>
+            )}
+            {tool === "select" && (
+              <p className="mt-1 text-[0.65rem] text-ink-faint">Click a prop to select &amp; drag it.</p>
+            )}
           </div>
 
           <div>
@@ -769,7 +914,10 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
               <Button size="sm" variant="secondary" className="flex-1" onClick={redo} disabled={redoStack.current.length === 0}>Redo</Button>
             </div>
             <Button size="sm" variant="secondary" className="w-full" onClick={fillAll}>Fill all ({theme.base})</Button>
-            <Button size="sm" variant="ghost" className="w-full" onClick={clearAll}>Clear</Button>
+            <div className="flex gap-1">
+              <Button size="sm" variant="ghost" className="flex-1" onClick={clearAll}>Clear tiles</Button>
+              <Button size="sm" variant="ghost" className="flex-1" onClick={clearWalls}>Clear walls</Button>
+            </div>
             <label className="flex items-center gap-1.5 text-xs text-ink-soft">
               <input type="checkbox" checked={showGrid} onChange={(e) => { setShowGrid(e.target.checked); requestRender(); }} />
               Show grid

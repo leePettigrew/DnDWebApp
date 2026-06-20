@@ -1203,6 +1203,15 @@ export interface BattleProp {
   tint?: string;
 }
 
+/** A wall segment in CELL coordinates (converted to px on save). */
+export interface BattleWall {
+  id: ID;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 export interface BattleBuild {
   grid: BattleGrid;
   cols: number;
@@ -1214,6 +1223,8 @@ export interface BattleBuild {
   /** Terrain material id per cell, row-major (length cols*rows). "" = void. */
   tiles: string[];
   props?: BattleProp[];
+  /** Walls (cell coords) — drawn on the map and exported to BattleMap.walls. */
+  walls?: BattleWall[];
   /** Optional imported reference image (data URL) to trace over. */
   trace?: string;
   updatedAt: ISODateString;
