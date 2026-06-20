@@ -140,6 +140,13 @@ export interface ServiceInput {
   characterName?: string;
 }
 
+export interface CommissionInput {
+  commissionId: ID;
+  qty: number;
+  characterId: ID;
+  characterName?: string;
+}
+
 export type TradeSide = "from" | "to";
 
 export interface ProposeTradeInput {
@@ -269,6 +276,9 @@ export interface RealtimeController {
 
   /** Hire a service at a market (server-validated; logged like a purchase). */
   executeService(input: ServiceInput): Promise<TradeOutcome>;
+
+  /** Fulfil a faction commission (moves goods/gold; may raise standing). */
+  executeCommission(input: CommissionInput): Promise<TradeOutcome>;
 
   /**
    * Player ↔ player trading. Propose a live trade with another character; both

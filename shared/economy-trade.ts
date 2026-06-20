@@ -1,11 +1,16 @@
 import { newId, nowISO } from "./ids";
 import type {
+  Character,
+  Commission,
+  Currency,
   EconomyState,
   EconomyTransaction,
   Market,
   MarketGood,
 } from "./domain";
 import { haggleDiscount, quoteCommodityGood, quoteService, roundPrice } from "./economy-pricing";
+
+const ZERO_CURRENCY: Currency = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
 
 /**
  * The trade engine. Applies a buy/sell to an economy and returns the next
@@ -42,7 +47,7 @@ export interface TradeApplied {
 
 export type TradeOutcome = TradeApplied | { error: string };
 
-export function isTradeError(o: TradeOutcome): o is { error: string } {
+export function isTradeError<T>(o: T | { error: string }): o is { error: string } {
   return typeof (o as { error?: unknown }).error === "string";
 }
 
@@ -180,6 +185,116 @@ export function applyServicePurchase(
     updatedAt: nowISO(),
   };
   return { economy: nextEconomy, transaction, unitPrice: total, total };
+}
+
+export interface CommissionRequest {
+  commissionId: string;
+  qty: number;
+}
+
+export interface CommissionApplied {
+  economy: EconomyState;
+  character: Character;
+  transaction: EconomyTransaction;
+  total: number;
+  completed: boolean;
+  factionId?: string;
+}
+
+/**
+ * Fulfil a faction commission. A "buy" order has the player SELL the commodity
+ * (gains gp, loses items); a "sell" order has the player BUY it. Mutates both
+ * the economy (filled + log) and the acting character (inventory + gold).
+ */
+export function applyCommission(
+  economy: EconomyState,
+  character: Character,
+  req: CommissionRequest,
+  ctx: TradeContext,
+): CommissionApplied | { error: string } {
+  if (!economy.enabled) return { error: "The economy is closed." };
+  const commissions = economy.commissions ?? [];
+  const idx = commissions.findIndex((c) => c.id === req.commissionId);
+  if (idx < 0) return { error: "No such commission." };
+  const com = commissions[idx];
+  if (com.active === false) return { error: "That commission is closed." };
+  if (com.hidden && !ctx.isDM) return { error: "That commission isn't available." };
+  if (com.minRep && ctx.rep < com.minRep) {
+    return { error: "Your standing isn't high enough for that." };
+  }
+  if (com.marketId) {
+    const market = (economy.markets ?? []).find((m) => m.id === com.marketId);
+    if (market && !canAccessMarket(market, ctx)) return { error: "You can't trade here." };
+  }
+
+  const remaining = com.qty - (com.filled ?? 0);
+  if (remaining <= 0) return { error: "That commission is already filled." };
+  const actual = Math.min(Math.max(1, Math.floor(req.qty || 0)), remaining);
+
+  const commodity = (economy.commodities ?? []).find((c) => c.id === com.commodityId);
+  const name = commodity?.name ?? com.commodityId;
+  const total = roundPrice(com.unitPrice * actual);
+
+  let inv = character.inventory ?? [];
+  let gp = character.currency?.gp ?? 0;
+
+  if (com.kind === "buy") {
+    const owned = inv.filter((i) => i.name === name).reduce((n, i) => n + i.quantity, 0);
+    if (owned < actual) return { error: `You only have ${owned} ${name}.` };
+    let take = actual;
+    inv = inv
+      .map((i) => {
+        if (i.name !== name || take <= 0) return i;
+        const t = Math.min(i.quantity, take);
+        take -= t;
+        return { ...i, quantity: i.quantity - t };
+      })
+      .filter((i) => i.quantity > 0);
+    gp += total;
+  } else {
+    if (gp < total) return { error: `Not enough gold (need ${total}gp).` };
+    const existing = inv.find((i) => i.name === name);
+    inv = existing
+      ? inv.map((i) => (i === existing ? { ...i, quantity: i.quantity + actual } : i))
+      : [...inv, { id: newId(), name, quantity: actual, value: commodity?.baseValue, weight: commodity?.weight }];
+    gp -= total;
+  }
+
+  const nextCom: Commission = { ...com, filled: (com.filled ?? 0) + actual };
+  const completed = (nextCom.filled ?? 0) >= nextCom.qty;
+  const marketName = com.marketId
+    ? (economy.markets ?? []).find((m) => m.id === com.marketId)?.name
+    : undefined;
+
+  const transaction: EconomyTransaction = {
+    id: newId(),
+    at: nowISO(),
+    actorId: ctx.actorId,
+    actorName: ctx.actorName,
+    marketId: com.marketId,
+    marketName,
+    // The player's side of the deal is the opposite of the faction's.
+    action: com.kind === "buy" ? "sell" : "buy",
+    goodName: name,
+    qty: actual,
+    unitPrice: com.unitPrice,
+    total,
+    note: "commission",
+  };
+
+  const nextEconomy: EconomyState = {
+    ...economy,
+    commissions: commissions.map((c, i) => (i === idx ? nextCom : c)),
+    log: [transaction, ...(economy.log ?? [])].slice(0, MAX_LOG),
+    updatedAt: nowISO(),
+  };
+  const nextChar: Character = {
+    ...character,
+    inventory: inv,
+    currency: { ...ZERO_CURRENCY, ...character.currency, gp },
+  };
+
+  return { economy: nextEconomy, character: nextChar, transaction, total, completed, factionId: com.factionId };
 }
 
 /** Undo a logged buy/sell: restore stock, flag it, and log a revert entry. */

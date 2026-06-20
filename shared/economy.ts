@@ -42,6 +42,7 @@ export function emptyEconomy(): EconomyState {
     commodities: SEED_COMMODITIES.map((c) => ({ ...c })),
     markets: [],
     services: [],
+    commissions: [],
     nodes: [],
     stockpiles: [],
     routes: [],

@@ -8,6 +8,20 @@ import type {
   Service,
 } from "./domain";
 
+const STANDING_ORDER: FactionStanding[] = [
+  "hostile",
+  "suspicious",
+  "neutral",
+  "friendly",
+  "ally",
+];
+
+/** Nudge a standing one step warmer (capped at ally). */
+export function improveStanding(s: FactionStanding | undefined): FactionStanding {
+  const i = STANDING_ORDER.indexOf(s ?? "neutral");
+  return STANDING_ORDER[Math.min(STANDING_ORDER.length - 1, (i < 0 ? 2 : i) + 1)];
+}
+
 /** Map a faction standing to a 0..5 reputation used by the pricing model. */
 export function standingToRep(standing: FactionStanding | undefined): number {
   switch (standing) {

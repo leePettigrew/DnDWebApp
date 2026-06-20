@@ -14,8 +14,13 @@ import { newId, nowISO } from "@/lib/domain/ids";
 import type { ID } from "@/lib/domain/ids";
 import { rollSpec } from "@/lib/domain/dice";
 import { emptyEconomy } from "@shared/economy";
-import { applyServicePurchase, applyTrade, isTradeError } from "@shared/economy-trade";
-import { standingToRep } from "@shared/economy-pricing";
+import {
+  applyCommission,
+  applyServicePurchase,
+  applyTrade,
+  isTradeError,
+} from "@shared/economy-trade";
+import { improveStanding, standingToRep } from "@shared/economy-pricing";
 import { applyP2PTrade, makeParty, touchSession } from "@shared/trade";
 import type { TradeSession } from "@shared/trade";
 import type {
@@ -38,6 +43,7 @@ import type {
   MapPing,
   RealtimeController,
   RegisterInput,
+  CommissionInput,
   ProposeTradeInput,
   ProposeTradeResult,
   Repository,
@@ -430,6 +436,50 @@ class LocalRealtimeController implements RealtimeController {
       ok: true,
       transaction: outcome.transaction,
       unitPrice: outcome.unitPrice,
+      total: outcome.total,
+    };
+  }
+
+  async executeCommission(input: CommissionInput): Promise<TradeOutcome> {
+    const economy = await this.economy.get();
+    const character = await this.characters.get(input.characterId);
+    if (!character) return { ok: false, error: "Character not found." };
+    const com = (economy.commissions ?? []).find((c) => c.id === input.commissionId);
+    let rep = 2;
+    if (com?.factionId) {
+      const faction = await this.factions.get(com.factionId);
+      rep = standingToRep(faction?.standing);
+    }
+    const outcome = applyCommission(
+      economy,
+      character,
+      { commissionId: input.commissionId, qty: input.qty },
+      {
+        rep,
+        actorId: LOCAL_USER.id,
+        actorName: input.characterName || character.name,
+        isDM: true,
+        userId: LOCAL_USER.id,
+      },
+    );
+    if ("error" in outcome) return { ok: false, error: outcome.error };
+    await this.economy.set(outcome.economy);
+    await this.characters.update(outcome.character.id, {
+      inventory: outcome.character.inventory,
+      currency: outcome.character.currency,
+    });
+    if (outcome.completed && com?.repReward && outcome.factionId) {
+      const faction = await this.factions.get(outcome.factionId);
+      if (faction) {
+        await this.factions.update(faction.id, {
+          standing: improveStanding(faction.standing),
+        });
+      }
+    }
+    return {
+      ok: true,
+      transaction: outcome.transaction,
+      unitPrice: outcome.transaction.unitPrice,
       total: outcome.total,
     };
   }

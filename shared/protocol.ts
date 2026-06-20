@@ -259,6 +259,15 @@ export interface ServiceBuyMessage {
   characterId?: ID;
   characterName?: string;
 }
+/** Fulfil a faction commission (buy/sell order). Replies with trade:result. */
+export interface CommissionFulfillMessage {
+  type: "commission:fulfill";
+  requestId: string;
+  commissionId: ID;
+  qty: number;
+  characterId: ID;
+  characterName?: string;
+}
 /** Propose a player↔player trade with another character at the table. */
 export interface P2pTradeProposeMessage {
   type: "p2ptrade:propose";
@@ -354,6 +363,7 @@ export type ClientMessage =
   | EconomyUpdateMessage
   | TradeExecuteMessage
   | ServiceBuyMessage
+  | CommissionFulfillMessage
   | P2pTradeProposeMessage
   | P2pTradeOfferMessage
   | P2pTradeConfirmMessage

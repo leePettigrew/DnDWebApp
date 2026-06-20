@@ -45,6 +45,7 @@ import type {
   MapPing,
   RealtimeController,
   RegisterInput,
+  CommissionInput,
   ProposeTradeInput,
   ProposeTradeResult,
   Repository,
@@ -521,6 +522,7 @@ export class RealtimeDataProvider implements DataProvider {
       roll: (spec, opts) => this.roll(spec, opts),
       executeTrade: (input) => this.executeTrade(input),
       executeService: (input) => this.executeService(input),
+      executeCommission: (input) => this.executeCommission(input),
       proposeTrade: (input) => this.proposeTrade(input),
       updateTradeOffer: (sid, gold, items, side) =>
         this.updateTradeOffer(sid, gold, items, side),
@@ -768,6 +770,36 @@ export class RealtimeDataProvider implements DataProvider {
       });
     }
     return this.local.realtime.executeService(input);
+  }
+
+  private executeCommission(input: CommissionInput): Promise<TradeOutcome> {
+    if (this.activeCampaignId && this.conn.isOpen()) {
+      return new Promise<TradeOutcome>((resolve, reject) => {
+        const requestId = newId();
+        this.pendingTrades.set(requestId, { resolve, reject });
+        const ok = this.conn.send({
+          type: "commission:fulfill",
+          requestId,
+          commissionId: input.commissionId,
+          qty: input.qty,
+          characterId: input.characterId,
+          characterName: input.characterName,
+        });
+        if (!ok) {
+          this.pendingTrades.delete(requestId);
+          resolve({ ok: false, error: "Not connected." });
+          return;
+        }
+        setTimeout(() => {
+          const p = this.pendingTrades.get(requestId);
+          if (p) {
+            this.pendingTrades.delete(requestId);
+            p.reject(new Error("Commission request timed out."));
+          }
+        }, 10_000);
+      });
+    }
+    return this.local.realtime.executeCommission(input);
   }
 
   // --- player ↔ player trading --------------------------------------------

@@ -16,6 +16,7 @@ import { MarketEditor } from "@/components/dm/MarketEditor";
 import { FactionEconomyEditor } from "@/components/dm/FactionEconomyEditor";
 import { EconomyEventsEditor } from "@/components/dm/EconomyEventsEditor";
 import { ServicesEditor } from "@/components/dm/ServicesEditor";
+import { CommissionsEditor } from "@/components/dm/CommissionsEditor";
 import type { Commodity, EconomyConfig, ResourceNode } from "@/lib/domain/types";
 
 const CATEGORIES = [
@@ -264,6 +265,11 @@ export function EconomyConsole() {
       {/* Services */}
       <Panel title="Services" eyebrow="Hire, don't haul">
         <ServicesEditor economy={economy} update={update} />
+      </Panel>
+
+      {/* Commissions */}
+      <Panel title="Commissions" eyebrow="Faction buy & sell orders">
+        <CommissionsEditor economy={economy} update={update} />
       </Panel>
 
       {/* Faction macro economy */}

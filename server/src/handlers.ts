@@ -32,6 +32,7 @@ import type {
   ServerMessage,
   TradeExecuteMessage,
   ServiceBuyMessage,
+  CommissionFulfillMessage,
   P2pTradeProposeMessage,
   P2pTradeOfferMessage,
   P2pTradeConfirmMessage,
@@ -39,8 +40,8 @@ import type {
 } from "../../shared/protocol";
 import { DM_ONLY_COLLECTIONS } from "../../shared/protocol";
 import type { CombatState, EconomyState } from "../../shared/domain";
-import { applyServicePurchase, applyTrade, isTradeError } from "../../shared/economy-trade";
-import { standingToRep } from "../../shared/economy-pricing";
+import { applyCommission, applyServicePurchase, applyTrade, isTradeError } from "../../shared/economy-trade";
+import { improveStanding, standingToRep } from "../../shared/economy-pricing";
 import type { TradeParty, TradeSession } from "../../shared/trade";
 import { applyP2PTrade, makeParty, touchSession } from "../../shared/trade";
 import type { Repositories } from "./repositories";
@@ -135,6 +136,8 @@ export class ClientSession {
         return this.onTradeExecute(msg);
       case "service:buy":
         return this.onServiceBuy(msg);
+      case "commission:fulfill":
+        return this.onCommissionFulfill(msg);
       case "p2ptrade:propose":
         return this.onP2pTradePropose(msg);
       case "p2ptrade:offer":
@@ -593,6 +596,69 @@ export class ClientSession {
       unitPrice: outcome.unitPrice,
       total: outcome.total,
     });
+  }
+
+  /** Fulfil a faction commission — moves goods/gold and may raise standing. */
+  private onCommissionFulfill(msg: CommissionFulfillMessage): void {
+    if (!this.requireCampaign()) return;
+    const cid = this.campaignId!;
+    const reply = (ok: boolean, extra: Record<string, unknown> = {}) =>
+      this.send({ type: "trade:result", requestId: msg.requestId, ok, ...extra });
+
+    const character = this.character(msg.characterId);
+    if (!character) return reply(false, { error: "Character not found." });
+    if (!this.mayActAs(character)) return reply(false, { error: "That isn't your character." });
+
+    const economy = this.repos.economy.get(cid) ?? emptyEconomy();
+    const com = (economy.commissions ?? []).find((c) => c.id === msg.commissionId);
+
+    let rep = 2;
+    if (com?.factionId) {
+      const faction = this.repos.entities.factions.get(cid, com.factionId) as Faction | null;
+      rep = standingToRep(faction?.standing);
+    }
+
+    const outcome = applyCommission(
+      economy,
+      character,
+      { commissionId: msg.commissionId, qty: msg.qty },
+      {
+        rep,
+        actorId: this.userId!,
+        actorName: msg.characterName || character.name,
+        isDM: this.role === "dm",
+        userId: this.userId!,
+      },
+    );
+    if (isTradeError(outcome)) return reply(false, { error: outcome.error });
+
+    const stamp = nowISO();
+    this.repos.economy.set(cid, outcome.economy);
+    this.repos.entities.characters.upsert(
+      cid,
+      { ...outcome.character, updatedAt: stamp },
+      outcome.character.ownerId ?? null,
+    );
+
+    const room = this.rooms.get(cid);
+    room.broadcast({ type: "economy:changed", state: outcome.economy });
+    this.broadcastCollection("characters");
+
+    // Completing a rep-bearing commission warms the party's standing.
+    if (outcome.completed && com?.repReward && outcome.factionId) {
+      const faction = this.repos.entities.factions.get(cid, outcome.factionId) as Faction | null;
+      if (faction) {
+        const warmed: Faction = {
+          ...faction,
+          standing: improveStanding(faction.standing),
+          updatedAt: stamp,
+        };
+        this.repos.entities.factions.upsert(cid, warmed, null);
+        this.broadcastCollection("factions");
+      }
+    }
+
+    reply(true, { transaction: outcome.transaction, total: outcome.total, unitPrice: outcome.transaction.unitPrice });
   }
 
   // --- player ↔ player trading (live, server-mediated swap) ----------------

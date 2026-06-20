@@ -588,6 +588,33 @@ export interface FactionPolicy {
   active?: boolean;
 }
 
+/**
+ * A standing order a faction posts at the market. `buy` = the faction wants to
+ * buy a commodity from the party (players sell to it); `sell` = the faction
+ * offers a commodity to the party at a fixed price. Capped by `qty`, tracked by
+ * `filled`. Fulfilling it can nudge the party's standing with the faction.
+ */
+export interface Commission {
+  id: ID;
+  factionId?: ID;
+  /** Optional market it's posted at (gates access + visibility). */
+  marketId?: ID;
+  kind: "buy" | "sell";
+  commodityId: ID;
+  /** Total units sought/offered. */
+  qty: number;
+  /** Units already fulfilled. */
+  filled?: number;
+  /** Fixed gp per unit. */
+  unitPrice: number;
+  /** Improve the faction's standing one step when fully filled. */
+  repReward?: boolean;
+  minRep?: number;
+  note?: string;
+  hidden?: boolean;
+  active?: boolean;
+}
+
 /** A daily snapshot of representative commodity prices (for trend charts). */
 export interface PriceSample {
   day: number;
@@ -624,6 +651,8 @@ export interface EconomyState {
   markets: Market[];
   /** Purchasable services offered at markets. */
   services?: Service[];
+  /** Faction buy/sell orders the party can fulfill. */
+  commissions?: Commission[];
   /** Map resource nodes that feed supply into markets each day. */
   nodes?: ResourceNode[];
   /** Faction reserves used to steady their markets. */
