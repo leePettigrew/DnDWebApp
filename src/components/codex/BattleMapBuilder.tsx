@@ -5,7 +5,7 @@ import type { PointerEvent as RPointerEvent, WheelEvent as RWheelEvent } from "r
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { CloseIcon } from "@/components/ui/icons";
-import { nowISO } from "@/lib/domain/ids";
+import { newId, nowISO } from "@/lib/domain/ids";
 import { useMaps } from "@/lib/data/hooks";
 import {
   MATERIAL_MAP,
@@ -14,7 +14,58 @@ import {
   THEME_MAP,
   emptyBattleBuild,
 } from "@/lib/battle/materials";
-import type { BattleBuild, BattleMap } from "@/lib/domain/types";
+import { PROPS, PROP_MAP } from "@/lib/battle/props";
+import type { PropDef } from "@/lib/battle/props";
+import type { BattleBuild, BattleMap, BattleProp } from "@/lib/domain/types";
+
+/** Draw a placed prop (shared by live canvas + flatten). */
+function drawProp(ctx: CanvasRenderingContext2D, p: BattleProp, cp: number) {
+  const def = PROP_MAP.get(p.kind);
+  if (!def) return;
+  const sc = p.scale ?? 1;
+  const cx = p.x * cp;
+  const cy = p.y * cp;
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + cp * 0.14 * sc, cp * 0.42 * sc, cp * 0.18 * sc, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(((p.rot ?? 0) * Math.PI) / 180);
+  ctx.scale(sc, sc);
+  def.draw(ctx, cp);
+  ctx.restore();
+}
+
+/** A small library thumbnail rendered from a prop's draw function. */
+function PropThumb({ def, selected, onClick }: { def: PropDef; selected: boolean; onClick: () => void }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current;
+    const ctx = cv?.getContext("2d");
+    if (!cv || !ctx) return;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.save();
+    ctx.translate(cv.width / 2, cv.height / 2 + 1);
+    def.draw(ctx, cv.width * 0.78);
+    ctx.restore();
+  }, [def]);
+  return (
+    <button
+      onClick={onClick}
+      title={def.name}
+      className={cn(
+        "grid h-9 w-9 place-items-center rounded-md border bg-parchment-50",
+        selected ? "border-brass ring-2 ring-brass/40" : "border-parchment-400 hover:border-brass/60",
+      )}
+    >
+      <canvas ref={ref} width={34} height={34} />
+    </button>
+  );
+}
 
 // --- procedural cell rendering (shared by live canvas + flatten) ------------
 
@@ -77,7 +128,16 @@ function drawCell(ctx: CanvasRenderingContext2D, c: number, r: number, cp: numbe
   }
 }
 
-type Tool = "paint" | "fill" | "erase" | "pan";
+type Tool = "paint" | "fill" | "erase" | "prop" | "select" | "pan";
+
+const PROP_CATS: { key: string; label: string }[] = [
+  { key: "dungeon", label: "Dungeon" },
+  { key: "furniture", label: "Furniture" },
+  { key: "nature", label: "Nature" },
+  { key: "town", label: "Town" },
+  { key: "arcane", label: "Arcane" },
+  { key: "hazard", label: "Hazard" },
+];
 
 const swatch =
   "h-7 w-7 rounded-md border-2 transition-transform hover:scale-110";
@@ -94,6 +154,9 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   const [brush, setBrush] = useState(1);
   const [showGrid, setShowGrid] = useState(true);
   const [dirty, setDirty] = useState(false);
+  const [propKind, setPropKind] = useState<string>("chest");
+  const [selectedPropId, setSelectedPropId] = useState<string | null>(null);
+  const [propCat, setPropCat] = useState("dungeon");
 
   const buildRef = useRef(build);
   buildRef.current = build;
@@ -105,6 +168,10 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   brushRef.current = brush;
   const gridRef = useRef(showGrid);
   gridRef.current = showGrid;
+  const propKindRef = useRef(propKind);
+  propKindRef.current = propKind;
+  const selPropRef = useRef(selectedPropId);
+  selPropRef.current = selectedPropId;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -112,12 +179,17 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   const hover = useRef<{ c: number; r: number } | null>(null);
   const renderScheduled = useRef(false);
 
-  // Undo / redo of tile snapshots.
-  const undoStack = useRef<string[][]>([]);
-  const redoStack = useRef<string[][]>([]);
+  // Undo / redo of terrain + prop snapshots.
+  type Snap = { tiles: string[]; props: BattleProp[] };
+  const undoStack = useRef<Snap[]>([]);
+  const redoStack = useRef<Snap[]>([]);
   const [histLen, setHistLen] = useState(0);
+  const snapshot = (): Snap => ({
+    tiles: buildRef.current.tiles.slice(),
+    props: (buildRef.current.props ?? []).map((p) => ({ ...p })),
+  });
   const pushUndo = () => {
-    undoStack.current.push(buildRef.current.tiles.slice());
+    undoStack.current.push(snapshot());
     if (undoStack.current.length > 40) undoStack.current.shift();
     redoStack.current = [];
     setHistLen(undoStack.current.length);
@@ -179,9 +251,20 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     ctx.lineWidth = 2 / zoom;
     ctx.strokeRect(0, 0, b.cols * cp, b.rows * cp);
 
+    // Props.
+    for (const p of b.props ?? []) {
+      drawProp(ctx, p, cp);
+      if (p.id === selPropRef.current) {
+        const sc = p.scale ?? 1;
+        ctx.strokeStyle = "rgba(230,199,114,0.95)";
+        ctx.lineWidth = 2 / zoom;
+        ctx.strokeRect(p.x * cp - cp * 0.5 * sc, p.y * cp - cp * 0.5 * sc, cp * sc, cp * sc);
+      }
+    }
+
     // Brush preview.
     const h = hover.current;
-    if (h && toolRef.current !== "pan") {
+    if (h && (toolRef.current === "paint" || toolRef.current === "erase" || toolRef.current === "fill")) {
       const sz = toolRef.current === "fill" ? 1 : brushRef.current;
       const off = Math.floor((sz - 1) / 2);
       ctx.strokeStyle = toolRef.current === "erase" ? "rgba(180,60,40,0.9)" : "rgba(230,199,114,0.95)";
@@ -226,6 +309,11 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Redraw the canvas whenever the build or selection changes.
+  useEffect(() => {
+    requestRender();
+  });
 
   // --- coordinate + paint helpers ---
   function cellAt(e: { clientX: number; clientY: number }): { c: number; r: number } | null {
@@ -287,14 +375,90 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     setDirty(true);
   }
 
+  // --- props ---
+  function worldPoint(e: { clientX: number; clientY: number }): { x: number; y: number } | null {
+    const cv = canvasRef.current;
+    if (!cv) return null;
+    const rect = cv.getBoundingClientRect();
+    const { zoom, panX, panY } = view.current;
+    const cp = buildRef.current.cellPx;
+    return {
+      x: (e.clientX - rect.left - panX) / zoom / cp,
+      y: (e.clientY - rect.top - panY) / zoom / cp,
+    };
+  }
+  function placeProp(x: number, y: number): string {
+    const b = buildRef.current;
+    const prop: BattleProp = { id: newId(), kind: propKindRef.current, x, y, rot: 0, scale: 1 };
+    setBuild({ ...b, props: [...(b.props ?? []), prop] });
+    setSelectedPropId(prop.id);
+    setDirty(true);
+    return prop.id;
+  }
+  function propAt(x: number, y: number): BattleProp | null {
+    const props = buildRef.current.props ?? [];
+    for (let i = props.length - 1; i >= 0; i--) {
+      const p = props[i];
+      const sc = p.scale ?? 1;
+      if (Math.abs(x - p.x) <= 0.55 * sc && Math.abs(y - p.y) <= 0.55 * sc) return p;
+    }
+    return null;
+  }
+  function moveProp(id: string, x: number, y: number) {
+    setBuild({
+      ...buildRef.current,
+      props: (buildRef.current.props ?? []).map((p) => (p.id === id ? { ...p, x, y } : p)),
+    });
+    setDirty(true);
+  }
+  function patchProp(id: string, patch: Partial<BattleProp>) {
+    pushUndo();
+    setBuild({
+      ...buildRef.current,
+      props: (buildRef.current.props ?? []).map((p) => (p.id === id ? { ...p, ...patch } : p)),
+    });
+    setDirty(true);
+  }
+  function deleteProp(id: string) {
+    pushUndo();
+    setBuild({
+      ...buildRef.current,
+      props: (buildRef.current.props ?? []).filter((p) => p.id !== id),
+    });
+    setSelectedPropId(null);
+    setDirty(true);
+  }
+
   // --- pointer handling ---
   const painting = useRef(false);
   const panning = useRef<{ x: number; y: number } | null>(null);
+  const dragProp = useRef<string | null>(null);
+  const dragUndo = useRef(false);
 
   function onPointerDown(e: RPointerEvent) {
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     if (tool === "pan" || e.button === 1 || e.button === 2) {
       panning.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    if (tool === "prop") {
+      const wp = worldPoint(e);
+      const b = buildRef.current;
+      if (!wp || wp.x < 0 || wp.y < 0 || wp.x >= b.cols || wp.y >= b.rows) return;
+      pushUndo();
+      dragProp.current = placeProp(wp.x, wp.y);
+      dragUndo.current = true;
+      requestRender();
+      return;
+    }
+    if (tool === "select") {
+      const wp = worldPoint(e);
+      if (!wp) return;
+      const p = propAt(wp.x, wp.y);
+      setSelectedPropId(p?.id ?? null);
+      dragProp.current = p?.id ?? null;
+      dragUndo.current = false;
+      requestRender();
       return;
     }
     const cell = cellAt(e);
@@ -319,6 +483,18 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       requestRender();
       return;
     }
+    if (dragProp.current) {
+      const wp = worldPoint(e);
+      if (wp) {
+        if (!dragUndo.current) {
+          pushUndo();
+          dragUndo.current = true;
+        }
+        moveProp(dragProp.current, wp.x, wp.y);
+      }
+      requestRender();
+      return;
+    }
     const cell = cellAt(e);
     hover.current = cell;
     if (painting.current && cell) paintAt(cell.c, cell.r);
@@ -328,6 +504,8 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   function onPointerUp() {
     painting.current = false;
     panning.current = null;
+    dragProp.current = null;
+    dragUndo.current = false;
   }
 
   function onWheel(e: RWheelEvent) {
@@ -349,16 +527,16 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   function undo() {
     const prev = undoStack.current.pop();
     if (!prev) return;
-    redoStack.current.push(buildRef.current.tiles.slice());
-    setBuild({ ...buildRef.current, tiles: prev });
+    redoStack.current.push(snapshot());
+    setBuild({ ...buildRef.current, tiles: prev.tiles, props: prev.props });
     setHistLen(undoStack.current.length);
     setDirty(true);
   }
   function redo() {
     const next = redoStack.current.pop();
     if (!next) return;
-    undoStack.current.push(buildRef.current.tiles.slice());
-    setBuild({ ...buildRef.current, tiles: next });
+    undoStack.current.push(snapshot());
+    setBuild({ ...buildRef.current, tiles: next.tiles, props: next.props });
     setHistLen(undoStack.current.length);
     setDirty(true);
   }
@@ -411,6 +589,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         if (id) drawCell(ctx, c, r, cp, id);
       }
     }
+    for (const p of b.props ?? []) drawProp(ctx, p, cp);
     return { dataUrl: off.toDataURL("image/png"), width: off.width, height: off.height };
   }
 
@@ -453,8 +632,8 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         <div className="w-56 shrink-0 space-y-3 overflow-y-auto border-r border-parchment-400/30 bg-parchment-100/95 p-3 text-sm">
           <div>
             <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Tools</p>
-            <div className="grid grid-cols-4 gap-1">
-              {([["paint", "Paint"], ["fill", "Fill"], ["erase", "Erase"], ["pan", "Pan"]] as [Tool, string][]).map(([t, label]) => (
+            <div className="grid grid-cols-3 gap-1">
+              {([["paint", "Paint"], ["fill", "Fill"], ["erase", "Erase"], ["prop", "Prop"], ["select", "Select"], ["pan", "Pan"]] as [Tool, string][]).map(([t, label]) => (
                 <button
                   key={t}
                   onClick={() => setTool(t)}
@@ -536,6 +715,53 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
               </div>
             </details>
           </div>
+
+          {tool === "prop" && (
+            <div className="border-t border-parchment-400/40 pt-2">
+              <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Props</p>
+              <div className="mb-1.5 flex flex-wrap gap-1">
+                {PROP_CATS.map((cat) => (
+                  <button
+                    key={cat.key}
+                    onClick={() => setPropCat(cat.key)}
+                    className={cn(
+                      "rounded px-1.5 py-0.5 text-[0.6rem] font-semibold",
+                      propCat === cat.key ? "bg-brass/20 text-brass-dark" : "text-ink-soft hover:bg-parchment-300/50",
+                    )}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {PROPS.filter((p) => p.category === propCat).map((def) => (
+                  <PropThumb key={def.id} def={def} selected={propKind === def.id} onClick={() => setPropKind(def.id)} />
+                ))}
+              </div>
+              <p className="mt-1 text-[0.65rem] text-ink-faint">
+                {PROP_MAP.get(propKind)?.name} — click the map to place
+              </p>
+            </div>
+          )}
+
+          {tool === "select" &&
+            selectedPropId &&
+            (() => {
+              const p = (build.props ?? []).find((x) => x.id === selectedPropId);
+              if (!p) return null;
+              return (
+                <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
+                  <p className="text-xs font-semibold text-ink">{PROP_MAP.get(p.kind)?.name}</p>
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="secondary" className="flex-1" title="Rotate left" onClick={() => patchProp(p.id, { rot: (p.rot ?? 0) - 15 })}>⟲</Button>
+                    <Button size="sm" variant="secondary" className="flex-1" title="Rotate right" onClick={() => patchProp(p.id, { rot: (p.rot ?? 0) + 15 })}>⟳</Button>
+                    <Button size="sm" variant="secondary" className="flex-1" title="Smaller" onClick={() => patchProp(p.id, { scale: Math.max(0.4, (p.scale ?? 1) - 0.2) })}>−</Button>
+                    <Button size="sm" variant="secondary" className="flex-1" title="Bigger" onClick={() => patchProp(p.id, { scale: Math.min(3, (p.scale ?? 1) + 0.2) })}>＋</Button>
+                  </div>
+                  <Button size="sm" variant="danger" className="w-full" onClick={() => deleteProp(p.id)}>Delete prop</Button>
+                </div>
+              );
+            })()}
 
           <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
             <div className="flex gap-1">
