@@ -1,6 +1,7 @@
 import type {
   BattleMap,
   Campaign,
+  Character,
   CombatState,
   EconomyState,
   Entity,
@@ -15,6 +16,8 @@ import { rollSpec } from "@/lib/domain/dice";
 import { emptyEconomy } from "@shared/economy";
 import { applyTrade, isTradeError } from "@shared/economy-trade";
 import { standingToRep } from "@shared/economy-pricing";
+import { applyP2PTrade, makeParty, touchSession } from "@shared/trade";
+import type { TradeSession } from "@shared/trade";
 import type {
   CampaignSummary,
   ChatMessage,
@@ -35,11 +38,15 @@ import type {
   MapPing,
   RealtimeController,
   RegisterInput,
+  ProposeTradeInput,
+  ProposeTradeResult,
   Repository,
   SessionController,
   SingletonRepository,
   TradeInput,
+  TradeItemRef,
   TradeOutcome,
+  TradeSide,
   Unsubscribe,
   UpdateInput,
 } from "./provider";
@@ -211,6 +218,8 @@ class LocalRealtimeController implements RealtimeController {
 
   private pingListeners = new Set<(p: MapPing) => void>();
   private handoutListeners = new Set<(h: Handout) => void>();
+  private activeTrade: TradeSession | null = null;
+  private tradeListeners = new Set<(s: TradeSession | null) => void>();
 
   constructor(
     private readonly campaigns: Repository<Campaign>,
@@ -218,6 +227,7 @@ class LocalRealtimeController implements RealtimeController {
     private readonly maps: Repository<BattleMap>,
     private readonly economy: SingletonRepository<EconomyState>,
     private readonly factions: Repository<Faction>,
+    private readonly characters: Repository<Character>,
   ) {
     // Mirror local campaigns as DM memberships for any UI that asks.
     this.campaigns.subscribe((items) => {
@@ -394,6 +404,112 @@ class LocalRealtimeController implements RealtimeController {
     };
   }
 
+  // --- player ↔ player trading (solo: between two of your characters) -------
+
+  private setTrade(s: TradeSession | null): void {
+    this.activeTrade = s;
+    this.tradeListeners.forEach((l) => l(s));
+  }
+  getActiveTrade(): TradeSession | null {
+    return this.activeTrade;
+  }
+  subscribeTrade(listener: (s: TradeSession | null) => void): Unsubscribe {
+    this.tradeListeners.add(listener);
+    listener(this.activeTrade);
+    return () => this.tradeListeners.delete(listener);
+  }
+  dismissTrade(): void {
+    if (this.activeTrade && this.activeTrade.status !== "open") this.setTrade(null);
+  }
+
+  async proposeTrade(input: ProposeTradeInput): Promise<ProposeTradeResult> {
+    if (input.fromCharacterId === input.toCharacterId) {
+      return { ok: false, error: "Pick two different characters." };
+    }
+    const from = await this.characters.get(input.fromCharacterId);
+    const to = await this.characters.get(input.toCharacterId);
+    if (!from || !to) return { ok: false, error: "Character not found." };
+    const session = touchSession({
+      id: newId(),
+      status: "open",
+      from: makeParty(LOCAL_USER.id, from),
+      to: makeParty(LOCAL_USER.id, to),
+    });
+    this.setTrade(session);
+    return { ok: true, sessionId: session.id };
+  }
+
+  updateTradeOffer(
+    sessionId: string,
+    gold: number,
+    items: TradeItemRef[],
+    side: TradeSide,
+  ): void {
+    const s = this.activeTrade;
+    if (!s || s.id !== sessionId || s.status !== "open") return;
+    const stake = { gold: Math.max(0, Math.floor(gold || 0)), items };
+    this.setTrade(
+      touchSession({
+        ...s,
+        from: { ...s.from, confirmed: false, ...(side === "from" ? { stake } : {}) },
+        to: { ...s.to, confirmed: false, ...(side === "to" ? { stake } : {}) },
+        error: undefined,
+      }),
+    );
+  }
+
+  confirmTrade(sessionId: string, side: TradeSide): void {
+    const s = this.activeTrade;
+    if (!s || s.id !== sessionId || s.status !== "open") return;
+    const next = touchSession({
+      ...s,
+      from: { ...s.from, confirmed: side === "from" ? true : s.from.confirmed },
+      to: { ...s.to, confirmed: side === "to" ? true : s.to.confirmed },
+      error: undefined,
+    });
+    if (next.from.confirmed && next.to.confirmed) {
+      void this.completeTrade(next);
+      return;
+    }
+    this.setTrade(next);
+  }
+
+  private async completeTrade(session: TradeSession): Promise<void> {
+    const a = await this.characters.get(session.from.characterId);
+    const b = await this.characters.get(session.to.characterId);
+    if (!a || !b) {
+      this.setTrade(touchSession({ ...session, status: "cancelled", error: "A character is gone." }));
+      return;
+    }
+    const result = applyP2PTrade(a, b, session);
+    if ("error" in result) {
+      this.setTrade(
+        touchSession({
+          ...session,
+          from: { ...session.from, confirmed: false },
+          to: { ...session.to, confirmed: false },
+          error: result.error,
+        }),
+      );
+      return;
+    }
+    await this.characters.update(result.a.id, {
+      inventory: result.a.inventory,
+      currency: result.a.currency,
+    });
+    await this.characters.update(result.b.id, {
+      inventory: result.b.inventory,
+      currency: result.b.currency,
+    });
+    this.setTrade(touchSession({ ...session, status: "completed" }));
+  }
+
+  cancelTrade(sessionId: string): void {
+    const s = this.activeTrade;
+    if (!s || s.id !== sessionId) return;
+    this.setTrade(touchSession({ ...s, status: "cancelled", error: undefined }));
+  }
+
   logPhysicalRoll(total: number, label?: string): void {
     void this.rollHistory.create({
       timestamp: nowISO(),
@@ -478,6 +594,7 @@ class LocalDataProvider implements DataProvider {
       this.maps,
       this.economy,
       this.factions,
+      this.characters,
     );
   }
 

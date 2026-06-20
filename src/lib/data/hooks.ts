@@ -17,9 +17,14 @@ import type {
   CurrentUser,
   Handout,
   MapPing,
+  ProposeTradeInput,
+  ProposeTradeResult,
   RealtimeController,
   Repository,
   SingletonRepository,
+  TradeItemRef,
+  TradeSession,
+  TradeSide,
   UpdateInput,
 } from "./provider";
 import { useDataProvider } from "./context";
@@ -118,6 +123,38 @@ export const useTimeline = () => useCollection(useDataProvider().timeline);
 export const useRollHistory = () => useCollection(useDataProvider().rollHistory);
 export const useCombat = () => useSingleton(useDataProvider().combat);
 export const useEconomy = () => useSingleton(useDataProvider().economy);
+
+export interface ActiveTradeApi {
+  session: TradeSession | null;
+  propose: (input: ProposeTradeInput) => Promise<ProposeTradeResult>;
+  offer: (
+    sessionId: string,
+    gold: number,
+    items: TradeItemRef[],
+    side: TradeSide,
+  ) => void;
+  confirm: (sessionId: string, side: TradeSide) => void;
+  cancel: (sessionId: string) => void;
+  dismiss: () => void;
+}
+
+/** The live player↔player trade this client is part of (null when none). */
+export function useActiveTrade(): ActiveTradeApi {
+  const provider = useDataProvider();
+  const [session, setSession] = useState<TradeSession | null>(() =>
+    provider.realtime.getActiveTrade(),
+  );
+  useEffect(() => provider.realtime.subscribeTrade(setSession), [provider]);
+  const r = provider.realtime;
+  return {
+    session,
+    propose: (input) => r.proposeTrade(input),
+    offer: (s, g, i, side) => r.updateTradeOffer(s, g, i, side),
+    confirm: (s, side) => r.confirmTrade(s, side),
+    cancel: (s) => r.cancelTrade(s),
+    dismiss: () => r.dismissTrade(),
+  };
+}
 
 /** The current user (a fixed local DM in Phase 1; real auth in Phase 2). */
 export function useCurrentUser(): CurrentUser | null {

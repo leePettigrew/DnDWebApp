@@ -45,11 +45,16 @@ import type {
   MapPing,
   RealtimeController,
   RegisterInput,
+  ProposeTradeInput,
+  ProposeTradeResult,
   Repository,
   SessionController,
   SingletonRepository,
   TradeInput,
+  TradeItemRef,
   TradeOutcome,
+  TradeSession,
+  TradeSide,
   Unsubscribe,
   UpdateInput,
 } from "./provider";
@@ -356,6 +361,9 @@ export class RealtimeDataProvider implements DataProvider {
     string,
     { resolve: (o: TradeOutcome) => void; reject: (e: Error) => void }
   >();
+  private pendingProposes = new Map<string, (r: ProposeTradeResult) => void>();
+  private activeTrade: TradeSession | null = null;
+  private tradeListeners = new Set<(s: TradeSession | null) => void>();
 
   constructor(wsUrl: string) {
     this.httpBase = toHttpBase(wsUrl);
@@ -511,6 +519,14 @@ export class RealtimeDataProvider implements DataProvider {
       },
       roll: (spec, opts) => this.roll(spec, opts),
       executeTrade: (input) => this.executeTrade(input),
+      proposeTrade: (input) => this.proposeTrade(input),
+      updateTradeOffer: (sid, gold, items, side) =>
+        this.updateTradeOffer(sid, gold, items, side),
+      confirmTrade: (sid, side) => this.confirmTrade(sid, side),
+      cancelTrade: (sid) => this.cancelTrade(sid),
+      dismissTrade: () => this.dismissTrade(),
+      getActiveTrade: () => this.activeTrade,
+      subscribeTrade: (l) => this.subscribeTrade(l),
       logPhysicalRoll: (total, label) => {
         if (this.activeCampaignId && this.conn.isOpen()) {
           this.conn.send({ type: "dice:physical", total, label });
@@ -523,6 +539,11 @@ export class RealtimeDataProvider implements DataProvider {
     this.conn.onStatus(() => this.emitStatus());
     this.conn.onOpen(() => this.handleOpen());
     this.conn.onMessage((m) => this.handleMessage(m));
+
+    // Mirror solo (offline) trades; the server drives them when connected.
+    this.local.realtime.subscribeTrade((s) => {
+      if (!this.tradeOnline()) this.setTrade(s);
+    });
   }
 
   async init(): Promise<void> {
@@ -578,6 +599,7 @@ export class RealtimeDataProvider implements DataProvider {
     this.activeListeners.forEach((fn) => fn(null, null));
     this.chat = [];
     this.chatListeners.forEach((fn) => fn([]));
+    if (this.activeTrade) this.setTrade(null);
   }
 
   // --- auth ----------------------------------------------------------------
@@ -716,6 +738,84 @@ export class RealtimeDataProvider implements DataProvider {
     return this.local.realtime.executeTrade(input);
   }
 
+  // --- player ↔ player trading --------------------------------------------
+
+  private tradeOnline(): boolean {
+    return Boolean(this.activeCampaignId) && this.conn.isOpen();
+  }
+  private setTrade(s: TradeSession | null): void {
+    this.activeTrade = s;
+    this.tradeListeners.forEach((l) => l(s));
+  }
+  private subscribeTrade(listener: (s: TradeSession | null) => void): Unsubscribe {
+    this.tradeListeners.add(listener);
+    listener(this.activeTrade);
+    return () => this.tradeListeners.delete(listener);
+  }
+
+  private proposeTrade(input: ProposeTradeInput): Promise<ProposeTradeResult> {
+    if (this.tradeOnline()) {
+      return new Promise<ProposeTradeResult>((resolve) => {
+        const requestId = newId();
+        this.pendingProposes.set(requestId, resolve);
+        const ok = this.conn.send({
+          type: "p2ptrade:propose",
+          requestId,
+          toUserId: input.toUserId,
+          fromCharacterId: input.fromCharacterId,
+          toCharacterId: input.toCharacterId,
+        });
+        if (!ok) {
+          this.pendingProposes.delete(requestId);
+          resolve({ ok: false, error: "Not connected." });
+          return;
+        }
+        setTimeout(() => {
+          const r = this.pendingProposes.get(requestId);
+          if (r) {
+            this.pendingProposes.delete(requestId);
+            r({ ok: false, error: "Trade request timed out." });
+          }
+        }, 10_000);
+      });
+    }
+    return this.local.realtime.proposeTrade(input);
+  }
+
+  private updateTradeOffer(
+    sessionId: string,
+    gold: number,
+    items: TradeItemRef[],
+    side: TradeSide,
+  ): void {
+    if (this.tradeOnline()) {
+      this.conn.send({ type: "p2ptrade:offer", sessionId, gold, items });
+    } else {
+      this.local.realtime.updateTradeOffer(sessionId, gold, items, side);
+    }
+  }
+
+  private confirmTrade(sessionId: string, side: TradeSide): void {
+    if (this.tradeOnline()) {
+      this.conn.send({ type: "p2ptrade:confirm", sessionId });
+    } else {
+      this.local.realtime.confirmTrade(sessionId, side);
+    }
+  }
+
+  private cancelTrade(sessionId: string): void {
+    if (this.tradeOnline()) {
+      this.conn.send({ type: "p2ptrade:cancel", sessionId });
+    } else {
+      this.local.realtime.cancelTrade(sessionId);
+    }
+  }
+
+  private dismissTrade(): void {
+    this.local.realtime.dismissTrade();
+    if (this.activeTrade && this.activeTrade.status !== "open") this.setTrade(null);
+  }
+
   private handleOpen(): void {
     if (this.token) this.conn.send({ type: "auth", token: this.token });
   }
@@ -755,6 +855,9 @@ export class RealtimeDataProvider implements DataProvider {
         } else if (msg.requestId && this.pendingTrades.has(msg.requestId)) {
           this.pendingTrades.get(msg.requestId)!.resolve({ ok: false, error: msg.message });
           this.pendingTrades.delete(msg.requestId);
+        } else if (msg.requestId && this.pendingProposes.has(msg.requestId)) {
+          this.pendingProposes.get(msg.requestId)!({ ok: false, error: msg.message });
+          this.pendingProposes.delete(msg.requestId);
         } else if (typeof console !== "undefined") {
           console.warn(`[server error] ${msg.code}: ${msg.message}`);
         }
@@ -816,6 +919,18 @@ export class RealtimeDataProvider implements DataProvider {
             total: msg.total,
           });
         }
+        break;
+      }
+      case "p2ptrade:result": {
+        const r = this.pendingProposes.get(msg.requestId);
+        if (r) {
+          this.pendingProposes.delete(msg.requestId);
+          r({ ok: msg.ok, error: msg.error, sessionId: msg.sessionId });
+        }
+        break;
+      }
+      case "p2ptrade:changed": {
+        this.setTrade(msg.session);
         break;
       }
       case "presence:state": {

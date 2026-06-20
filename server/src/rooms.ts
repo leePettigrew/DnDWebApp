@@ -6,6 +6,8 @@ import type {
   ScopedCollection,
   ServerMessage,
 } from "../../shared/protocol";
+import type { TradeSession } from "../../shared/trade";
+import { touchSession } from "../../shared/trade";
 import type { Repositories } from "./repositories";
 import { isVisible } from "./visibility";
 
@@ -24,6 +26,8 @@ export interface RoomMember {
  */
 export class CampaignRoom {
   private members = new Set<RoomMember>();
+  /** Live player↔player trade sessions, by id (ephemeral, never persisted). */
+  private trades = new Map<string, TradeSession>();
 
   constructor(
     public readonly campaignId: string,
@@ -91,6 +95,63 @@ export class CampaignRoom {
 
   broadcastPresence(): void {
     this.broadcast({ type: "presence:state", users: this.presence() });
+  }
+
+  // --- player↔player trade sessions ---------------------------------------
+
+  isOnline(userId: string): boolean {
+    for (const m of this.members) if (m.userId === userId) return true;
+    return false;
+  }
+
+  getTrade(id: string): TradeSession | undefined {
+    return this.trades.get(id);
+  }
+
+  /** An open session the user is currently part of (one at a time). */
+  openTradeFor(userId: string): TradeSession | undefined {
+    for (const t of this.trades.values()) {
+      if (
+        t.status === "open" &&
+        (t.from.userId === userId || t.to.userId === userId)
+      ) {
+        return t;
+      }
+    }
+    return undefined;
+  }
+
+  setTrade(session: TradeSession): void {
+    this.trades.set(session.id, session);
+  }
+  removeTrade(id: string): void {
+    this.trades.delete(id);
+  }
+
+  /** Push a trade's state to just its two participants. */
+  broadcastTrade(session: TradeSession): void {
+    this.broadcast(
+      { type: "p2ptrade:changed", session },
+      (m) => m.userId === session.from.userId || m.userId === session.to.userId,
+    );
+  }
+
+  /** Cancel any open trade involving a user (e.g. they disconnected). */
+  cancelTradesFor(userId: string): void {
+    for (const t of this.trades.values()) {
+      if (
+        t.status === "open" &&
+        (t.from.userId === userId || t.to.userId === userId)
+      ) {
+        const cancelled = touchSession({
+          ...t,
+          status: "cancelled",
+          error: "The other trader left.",
+        });
+        this.broadcastTrade(cancelled);
+        this.trades.delete(t.id);
+      }
+    }
   }
 }
 

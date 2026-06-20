@@ -3,6 +3,7 @@ import { newId, nowISO } from "../../shared/ids";
 import { rollSpec as computeRoll } from "../../shared/dice";
 import type {
   BattleMap,
+  Character,
   Entity,
   Faction,
   MapToken,
@@ -30,11 +31,17 @@ import type {
   ScopedCollection,
   ServerMessage,
   TradeExecuteMessage,
+  P2pTradeProposeMessage,
+  P2pTradeOfferMessage,
+  P2pTradeConfirmMessage,
+  P2pTradeCancelMessage,
 } from "../../shared/protocol";
 import { DM_ONLY_COLLECTIONS } from "../../shared/protocol";
 import type { CombatState, EconomyState } from "../../shared/domain";
 import { applyTrade, isTradeError } from "../../shared/economy-trade";
 import { standingToRep } from "../../shared/economy-pricing";
+import type { TradeParty, TradeSession } from "../../shared/trade";
+import { applyP2PTrade, makeParty, touchSession } from "../../shared/trade";
 import type { Repositories } from "./repositories";
 import type { RoomMember, RoomManager } from "./rooms";
 import { parseClientMessage } from "./validation";
@@ -125,6 +132,14 @@ export class ClientSession {
         return this.onEconomyUpdate(msg.patch);
       case "trade:execute":
         return this.onTradeExecute(msg);
+      case "p2ptrade:propose":
+        return this.onP2pTradePropose(msg);
+      case "p2ptrade:offer":
+        return this.onP2pTradeOffer(msg);
+      case "p2ptrade:confirm":
+        return this.onP2pTradeConfirm(msg);
+      case "p2ptrade:cancel":
+        return this.onP2pTradeCancel(msg);
       case "dice:roll":
         return this.onDiceRoll(msg);
       case "dice:physical":
@@ -274,6 +289,7 @@ export class ClientSession {
   private leaveRoom(): void {
     if (this.campaignId && this.member) {
       const room = this.rooms.get(this.campaignId);
+      if (this.userId) room.cancelTradesFor(this.userId);
       room.remove(this.member);
       room.broadcastPresence();
       this.rooms.drop(this.campaignId);
@@ -524,6 +540,146 @@ export class ClientSession {
       unitPrice: outcome.unitPrice,
       total: outcome.total,
     });
+  }
+
+  // --- player ↔ player trading (live, server-mediated swap) ----------------
+
+  private character(id: string): Character | null {
+    return this.repos.entities.characters.get(this.campaignId!, id) as
+      | Character
+      | null;
+  }
+  private mayActAs(character: Character): boolean {
+    return (
+      this.role === "dm" ||
+      !character.ownerId ||
+      character.ownerId === this.userId
+    );
+  }
+  private tradeParty(
+    session: TradeSession,
+  ): { side: "from" | "to"; party: TradeParty } | null {
+    if (session.from.userId === this.userId) return { side: "from", party: session.from };
+    if (session.to.userId === this.userId) return { side: "to", party: session.to };
+    return null;
+  }
+
+  private onP2pTradePropose(msg: P2pTradeProposeMessage): void {
+    if (!this.requireCampaign()) return;
+    const room = this.rooms.get(this.campaignId!);
+    const fail = (error: string) =>
+      this.send({ type: "p2ptrade:result", requestId: msg.requestId, ok: false, error });
+
+    if (msg.fromCharacterId === msg.toCharacterId) return fail("Pick two different characters.");
+    const fromChar = this.character(msg.fromCharacterId);
+    const toChar = this.character(msg.toCharacterId);
+    if (!fromChar || !toChar) return fail("Character not found.");
+    if (!this.mayActAs(fromChar)) return fail("That isn't your character.");
+    if (toChar.ownerId !== msg.toUserId) return fail("That character isn't theirs.");
+    if (!room.isOnline(msg.toUserId)) return fail("That player isn't online.");
+    if (room.openTradeFor(this.userId!)) return fail("You're already in a trade.");
+    if (room.openTradeFor(msg.toUserId)) return fail("They're already in a trade.");
+
+    const session = touchSession({
+      id: newId(),
+      status: "open" as const,
+      from: makeParty(this.userId!, fromChar),
+      to: makeParty(msg.toUserId, toChar),
+    });
+    room.setTrade(session);
+    room.broadcastTrade(session);
+    this.send({ type: "p2ptrade:result", requestId: msg.requestId, ok: true, sessionId: session.id });
+  }
+
+  private onP2pTradeOffer(msg: P2pTradeOfferMessage): void {
+    if (!this.requireCampaign()) return;
+    const room = this.rooms.get(this.campaignId!);
+    const session = room.getTrade(msg.sessionId);
+    if (!session || session.status !== "open") return;
+    const who = this.tradeParty(session);
+    if (!who) return this.error("forbidden", "Not your trade.");
+
+    const stake = { gold: Math.max(0, Math.floor(msg.gold || 0)), items: msg.items };
+    const next = touchSession({
+      ...session,
+      // Any change to either side voids both confirmations.
+      from: { ...session.from, confirmed: false, ...(who.side === "from" ? { stake } : {}) },
+      to: { ...session.to, confirmed: false, ...(who.side === "to" ? { stake } : {}) },
+      error: undefined,
+    });
+    room.setTrade(next);
+    room.broadcastTrade(next);
+  }
+
+  private onP2pTradeConfirm(msg: P2pTradeConfirmMessage): void {
+    if (!this.requireCampaign()) return;
+    const cid = this.campaignId!;
+    const room = this.rooms.get(cid);
+    const session = room.getTrade(msg.sessionId);
+    if (!session || session.status !== "open") return;
+    const who = this.tradeParty(session);
+    if (!who) return this.error("forbidden", "Not your trade.");
+
+    let next = touchSession({
+      ...session,
+      from: { ...session.from, confirmed: who.side === "from" ? true : session.from.confirmed },
+      to: { ...session.to, confirmed: who.side === "to" ? true : session.to.confirmed },
+      error: undefined,
+    });
+
+    if (next.from.confirmed && next.to.confirmed) {
+      const a = this.character(next.from.characterId);
+      const b = this.character(next.to.characterId);
+      if (!a || !b) {
+        next = touchSession({ ...next, status: "cancelled", error: "A character is gone." });
+        room.broadcastTrade(next);
+        room.removeTrade(next.id);
+        return;
+      }
+      const result = applyP2PTrade(a, b, next);
+      if ("error" in result) {
+        // Couldn't back the stake — void confirmations and report why.
+        next = touchSession({
+          ...next,
+          from: { ...next.from, confirmed: false },
+          to: { ...next.to, confirmed: false },
+          error: result.error,
+        });
+        room.setTrade(next);
+        room.broadcastTrade(next);
+        return;
+      }
+      const stamp = nowISO();
+      this.repos.entities.characters.upsert(
+        cid,
+        { ...result.a, updatedAt: stamp },
+        result.a.ownerId ?? null,
+      );
+      this.repos.entities.characters.upsert(
+        cid,
+        { ...result.b, updatedAt: stamp },
+        result.b.ownerId ?? null,
+      );
+      next = touchSession({ ...next, status: "completed" });
+      room.broadcastTrade(next);
+      room.removeTrade(next.id);
+      this.broadcastCollection("characters");
+      return;
+    }
+
+    room.setTrade(next);
+    room.broadcastTrade(next);
+  }
+
+  private onP2pTradeCancel(msg: P2pTradeCancelMessage): void {
+    if (!this.requireCampaign()) return;
+    const room = this.rooms.get(this.campaignId!);
+    const session = room.getTrade(msg.sessionId);
+    if (!session) return;
+    if (!this.tradeParty(session) && this.role !== "dm") return;
+    const next = touchSession({ ...session, status: "cancelled", error: undefined });
+    room.broadcastTrade(next);
+    room.removeTrade(next.id);
   }
 
   // --- dice (server-authoritative, hidden-aware) ---------------------------

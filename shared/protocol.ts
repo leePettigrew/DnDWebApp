@@ -17,6 +17,7 @@ import type {
   TimelineEvent,
 } from "./domain";
 import type { ID, ISODateString } from "./ids";
+import type { TradeItemRef, TradeSession } from "./trade";
 
 /**
  * ============================================================================
@@ -249,6 +250,29 @@ export interface TradeExecuteMessage {
   characterId?: ID;
   characterName?: string;
 }
+/** Propose a player↔player trade with another character at the table. */
+export interface P2pTradeProposeMessage {
+  type: "p2ptrade:propose";
+  requestId: string;
+  toUserId: ID;
+  fromCharacterId: ID;
+  toCharacterId: ID;
+}
+/** Set the caller's side of an open trade (resets both confirmations). */
+export interface P2pTradeOfferMessage {
+  type: "p2ptrade:offer";
+  sessionId: ID;
+  gold: number;
+  items: TradeItemRef[];
+}
+export interface P2pTradeConfirmMessage {
+  type: "p2ptrade:confirm";
+  sessionId: ID;
+}
+export interface P2pTradeCancelMessage {
+  type: "p2ptrade:cancel";
+  sessionId: ID;
+}
 export interface DiceRollMessage {
   type: "dice:roll";
   requestId: string;
@@ -320,6 +344,10 @@ export type ClientMessage =
   | EconomySetMessage
   | EconomyUpdateMessage
   | TradeExecuteMessage
+  | P2pTradeProposeMessage
+  | P2pTradeOfferMessage
+  | P2pTradeConfirmMessage
+  | P2pTradeCancelMessage
   | DiceRollMessage
   | DicePhysicalMessage
   | PresenceTypingMessage
@@ -392,6 +420,19 @@ export interface TradeResultMessage {
   unitPrice?: number;
   total?: number;
 }
+/** Reply to a trade proposer (the live session is broadcast to both parties). */
+export interface P2pTradeResultMessage {
+  type: "p2ptrade:result";
+  requestId: string;
+  ok: boolean;
+  error?: string;
+  sessionId?: ID;
+}
+/** The live state of a player↔player trade, pushed to its two participants. */
+export interface P2pTradeChangedMessage {
+  type: "p2ptrade:changed";
+  session: TradeSession;
+}
 export interface PresenceStateMessage {
   type: "presence:state";
   users: PresenceUser[];
@@ -439,6 +480,8 @@ export type ServerMessage =
   | EconomyChangedMessage
   | DiceRolledMessage
   | TradeResultMessage
+  | P2pTradeResultMessage
+  | P2pTradeChangedMessage
   | PresenceStateMessage
   | ChatMessageMessage
   | MapTokenMovedMessage

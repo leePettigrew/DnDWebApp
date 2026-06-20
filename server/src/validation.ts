@@ -126,6 +126,29 @@ const message = z.discriminatedUnion("type", [
     characterName: z.string().max(120).optional(),
   }),
   z.object({
+    type: z.literal("p2ptrade:propose"),
+    requestId: z.string().max(80),
+    toUserId: z.string().max(80),
+    fromCharacterId: z.string().max(80),
+    toCharacterId: z.string().max(80),
+  }),
+  z.object({
+    type: z.literal("p2ptrade:offer"),
+    sessionId: z.string().max(80),
+    gold: z.number().int().min(0).max(1_000_000),
+    items: z
+      .array(
+        z.object({
+          itemId: z.string().max(80),
+          name: z.string().max(200),
+          quantity: z.number().int().min(1).max(100000),
+        }),
+      )
+      .max(50),
+  }),
+  z.object({ type: z.literal("p2ptrade:confirm"), sessionId: z.string().max(80) }),
+  z.object({ type: z.literal("p2ptrade:cancel"), sessionId: z.string().max(80) }),
+  z.object({
     type: z.literal("dice:roll"),
     requestId: z.string().max(80),
     spec: rollSpec,

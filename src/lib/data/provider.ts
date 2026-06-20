@@ -26,6 +26,9 @@ import type {
   PresenceUser,
   Role,
 } from "@shared/protocol";
+import type { TradeItemRef, TradeSession } from "@shared/trade";
+
+export type { TradeItemRef, TradeSession };
 
 export type { Handout };
 
@@ -128,6 +131,20 @@ export interface TradeOutcome {
   transaction?: EconomyTransaction;
   unitPrice?: number;
   total?: number;
+}
+
+export type TradeSide = "from" | "to";
+
+export interface ProposeTradeInput {
+  toUserId: ID;
+  fromCharacterId: ID;
+  toCharacterId: ID;
+}
+
+export interface ProposeTradeResult {
+  ok: boolean;
+  error?: string;
+  sessionId?: ID;
 }
 
 /** A transient map ping delivered to subscribers. */
@@ -242,6 +259,31 @@ export interface RealtimeController {
    * coin/inventory is the caller's job (their own character).
    */
   executeTrade(input: TradeInput): Promise<TradeOutcome>;
+
+  /**
+   * Player ↔ player trading. Propose a live trade with another character; both
+   * sides stake gold/items and confirm, then the server swaps atomically. The
+   * active session is observed via `subscribeTrade`. In solo mode this trades
+   * between two of your own characters, applied locally.
+   */
+  proposeTrade(input: ProposeTradeInput): Promise<ProposeTradeResult>;
+  /**
+   * Set one side's stake. `side` is which party is editing; multiplayer ignores
+   * it (the server derives the side from auth), but solo mode needs it since one
+   * user drives both sides.
+   */
+  updateTradeOffer(
+    sessionId: ID,
+    gold: number,
+    items: TradeItemRef[],
+    side: TradeSide,
+  ): void;
+  confirmTrade(sessionId: ID, side: TradeSide): void;
+  cancelTrade(sessionId: ID): void;
+  /** Clear a finished (completed/cancelled) session from this client's view. */
+  dismissTrade(): void;
+  getActiveTrade(): TradeSession | null;
+  subscribeTrade(listener: (session: TradeSession | null) => void): Unsubscribe;
 
   /**
    * Log/share a hand-thrown d20 result (from the 3D dice arena) to the roll
