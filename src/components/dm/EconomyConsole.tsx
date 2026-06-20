@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -7,6 +8,7 @@ import { cn } from "@/components/ui/cn";
 import { PlusIcon, TrashIcon } from "@/components/ui/icons";
 import { newId } from "@/lib/domain/ids";
 import { useEconomy } from "@/lib/data/hooks";
+import { TransactionFeed } from "@/components/market/TransactionFeed";
 import { emptyEconomy } from "@shared/economy";
 import { revertTransaction } from "@shared/economy-trade";
 import { tickEconomy } from "@shared/economy-sim";
@@ -44,6 +46,7 @@ const CONFIG_FIELDS: { key: keyof EconomyConfig; label: string; hint: string; st
 
 export function EconomyConsole() {
   const { value: economy, update, set, loading } = useEconomy();
+  const [showLedger, setShowLedger] = useState(false);
 
   if (!economy) {
     return (
@@ -188,7 +191,13 @@ export function EconomyConsole() {
       <Panel
         title="The Ledger"
         eyebrow="Trade activity"
-        action={trades.length > 0 ? <Badge tone="brass">{trades.length}</Badge> : undefined}
+        action={
+          log.length > 0 ? (
+            <Button size="sm" variant="ghost" onClick={() => setShowLedger((v) => !v)}>
+              {showLedger ? "Hide" : `Show (${log.length})`}
+            </Button>
+          ) : undefined
+        }
       >
         {latest && (
           <div className="mb-3 rounded-lg border border-brass/40 bg-brass/10 px-3 py-2 text-sm text-ink">
@@ -198,72 +207,24 @@ export function EconomyConsole() {
             {latest.marketName} for {latest.total}gp.
           </div>
         )}
-        {trades.length === 0 ? (
+        {log.length === 0 ? (
           <p className="text-sm text-ink-faint">
-            No trades yet. Player buys and sells appear here — each one revertible.
+            No activity yet. Player buys, sells, and service hires appear here — each
+            one revertible.
           </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[40rem] text-xs">
-              <thead>
-                <tr className="text-left uppercase tracking-wide text-ink-faint">
-                  <th className="px-1 pb-1 font-semibold">When</th>
-                  <th className="px-1 pb-1 font-semibold">Who</th>
-                  <th className="px-1 pb-1 font-semibold">Action</th>
-                  <th className="px-1 pb-1 font-semibold">Good</th>
-                  <th className="px-1 pb-1 font-semibold">Market</th>
-                  <th className="px-1 pb-1 font-semibold">Total</th>
-                  <th className="pb-1" />
-                </tr>
-              </thead>
-              <tbody>
-                {log.slice(0, 60).map((t) => (
-                  <tr
-                    key={t.id}
-                    className={cn(
-                      "border-t border-parchment-400/40",
-                      t.action === "revert" && "text-ink-faint",
-                      t.reverted && "line-through opacity-60",
-                    )}
-                  >
-                    <td className="whitespace-nowrap px-1 py-1 text-ink-faint">
-                      {new Date(t.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </td>
-                    <td className="px-1 py-1">{t.actorName ?? "—"}</td>
-                    <td className="px-1 py-1">
-                      {t.action === "revert" ? (
-                        <span className="text-arcane">revert</span>
-                      ) : (
-                        <span className={t.action === "buy" ? "text-forest" : "text-oxblood"}>
-                          {t.action}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-1 py-1">
-                      {t.qty ?? ""} {t.goodName}
-                    </td>
-                    <td className="px-1 py-1 text-ink-soft">{t.marketName}</td>
-                    <td className="px-1 py-1 font-mono">{t.total}gp</td>
-                    <td className="px-1 py-1 text-right">
-                      {(t.action === "buy" || t.action === "sell") && !t.reverted && (
-                        <button
-                          type="button"
-                          onClick={() => revert(t.id)}
-                          className="rounded-md border border-oxblood/40 px-2 py-0.5 text-[0.7rem] font-semibold text-oxblood hover:bg-oxblood hover:text-parchment-50"
-                        >
-                          Revert
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        ) : showLedger ? (
+          <>
+            <TransactionFeed transactions={log} onRevert={revert} maxHeight="max-h-96" />
             <p className="mt-2 text-[0.65rem] text-ink-faint">
               Reverting restores the market&apos;s stock and flags the sale. Settle any
               coin or goods with the player on their sheet.
             </p>
-          </div>
+          </>
+        ) : (
+          <p className="text-xs text-ink-faint">
+            {trades.length} trade{trades.length === 1 ? "" : "s"} on record — open the
+            ledger to review or revert.
+          </p>
         )}
       </Panel>
 
