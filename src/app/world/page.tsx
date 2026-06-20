@@ -3,19 +3,21 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { cn } from "@/components/ui/cn";
-import { ScrollIcon, HelmIcon, MapIcon, ChevronRightIcon } from "@/components/ui/icons";
+import { ScrollIcon, HelmIcon, MapIcon, ChevronRightIcon, CoinIcon } from "@/components/ui/icons";
 import { QuestLog } from "@/components/world/QuestLog";
 import { FactionRoster } from "@/components/world/FactionRoster";
 import { Timeline } from "@/components/world/Timeline";
 import { WorldAtlas } from "@/components/world/WorldAtlas";
+import { WorldEconomyOverview } from "@/components/world/WorldEconomyOverview";
 
-type Tab = "quests" | "factions" | "timeline" | "atlas";
+type Tab = "quests" | "factions" | "timeline" | "atlas" | "economy";
 
 const TABS: { key: Tab; label: string; icon: typeof ScrollIcon }[] = [
   { key: "quests", label: "Quests", icon: ScrollIcon },
   { key: "factions", label: "Factions & NPCs", icon: HelmIcon },
   { key: "timeline", label: "Timeline", icon: ChevronRightIcon },
   { key: "atlas", label: "Atlas", icon: MapIcon },
+  { key: "economy", label: "Economy", icon: CoinIcon },
 ];
 
 export default function WorldPage() {
@@ -54,6 +56,7 @@ export default function WorldPage() {
       {tab === "factions" && <FactionRoster />}
       {tab === "timeline" && <Timeline />}
       {tab === "atlas" && <WorldAtlas />}
+      {tab === "economy" && <WorldEconomyOverview />}
     </div>
   );
 }
