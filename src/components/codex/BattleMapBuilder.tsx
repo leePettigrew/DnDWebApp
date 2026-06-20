@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { CloseIcon } from "@/components/ui/icons";
 import { newId, nowISO } from "@/lib/domain/ids";
-import { useMaps } from "@/lib/data/hooks";
+import { useCombat, useMaps } from "@/lib/data/hooks";
 import {
   MATERIAL_MAP,
   MATERIALS,
@@ -193,6 +193,7 @@ const swatch =
 
 export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: () => void }) {
   const { update } = useMaps();
+  const { update: updateCombat } = useCombat();
 
   const [build, setBuild] = useState<BattleBuild>(() => map.build ?? emptyBattleBuild());
   const [tool, setTool] = useState<Tool>("paint");
@@ -857,6 +858,12 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     setDirty(false);
   }
 
+  function sendToWarTable() {
+    save();
+    void updateCombat({ activeMapId: map.id });
+    onClose();
+  }
+
   return (
     <div ref={rootRef} className="fixed inset-0 z-[70] flex flex-col bg-ink">
       {/* Header */}
@@ -868,7 +875,10 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
             {isFs ? "⤡ Exit" : "⤢ Fullscreen"}
           </Button>
           <Button size="sm" variant="secondary" onClick={fit}>Fit</Button>
-          <Button size="sm" onClick={save}>Save map</Button>
+          <Button size="sm" variant="secondary" onClick={save}>Save map</Button>
+          <Button size="sm" onClick={sendToWarTable} title="Save and bring this map to the War Table">
+            Open in War Table
+          </Button>
           <button
             onClick={onClose}
             aria-label="Close builder"
