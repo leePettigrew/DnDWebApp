@@ -8,6 +8,7 @@ import { PlusIcon, TrashIcon } from "@/components/ui/icons";
 import { newId } from "@/lib/domain/ids";
 import { useEconomy } from "@/lib/data/hooks";
 import { emptyEconomy } from "@shared/economy";
+import { MarketEditor } from "@/components/dm/MarketEditor";
 import type { Commodity, EconomyConfig } from "@/lib/domain/types";
 
 const CATEGORIES = [
@@ -129,6 +130,16 @@ export function EconomyConsole() {
             </label>
           ))}
         </div>
+      </Panel>
+
+      {/* Markets */}
+      <Panel title="Markets" eyebrow="Where trade happens">
+        <p className="mb-3 text-xs text-ink-faint">
+          A global market sets the baseline; faction and location markets layer
+          their own buy/sell margins, stock, and reputation gates on top. Buy /
+          sell previews use each market&apos;s standing.
+        </p>
+        <MarketEditor economy={economy} update={update} />
       </Panel>
 
       {/* Commodity catalog */}
