@@ -2546,7 +2546,7 @@ export function WorldMapBuilder({
             g.add(w);
           }
         }
-        g.scale.setScalar(1.5);
+        g.scale.setScalar(0.15);
         return g;
       }
 
@@ -2581,6 +2581,43 @@ export function WorldMapBuilder({
         return (worldRef.current.pois ?? []).find((p) => p.id === id);
       }
 
+      const TRAVEL_KINDS = new Set(["road", "cobble", "route"]);
+      // Pick the drawn road/route whose ends best hug the two towns, and return
+      // a normalized polyline town → road → town. Falls back to a straight line.
+      function routePolyline(
+        fromP: { x: number; y: number },
+        toP: { x: number; y: number },
+      ): { x: number; y: number }[] {
+        const d = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
+        let best: { points: number[]; reversed: boolean } | null = null;
+        let bestScore = 0.2; // max normalized gap from a town to a road end
+        for (const p of worldRef.current.paths ?? []) {
+          if (!TRAVEL_KINDS.has(p.kind) || p.points.length < 4) continue;
+          const sx = p.points[0];
+          const sy = p.points[1];
+          const ex = p.points[p.points.length - 2];
+          const ey = p.points[p.points.length - 1];
+          const fwd = Math.max(d(sx, sy, fromP.x, fromP.y), d(ex, ey, toP.x, toP.y));
+          const rev = Math.max(d(sx, sy, toP.x, toP.y), d(ex, ey, fromP.x, fromP.y));
+          const score = Math.min(fwd, rev);
+          if (score < bestScore) {
+            bestScore = score;
+            best = { points: p.points, reversed: rev < fwd };
+          }
+        }
+        if (best) {
+          let line = samplePath(best.points);
+          if (best.reversed) line = line.slice().reverse();
+          return [{ x: fromP.x, y: fromP.y }, ...line, { x: toP.x, y: toP.y }];
+        }
+        const out: { x: number; y: number }[] = [];
+        for (let i = 0; i <= SEG; i++) {
+          const f = i / SEG;
+          out.push({ x: fromP.x + (toP.x - fromP.x) * f, y: fromP.y + (toP.y - fromP.y) * f });
+        }
+        return out;
+      }
+
       function buildRoutes() {
         clearRoutes();
         const e = economyRef.current;
@@ -2592,15 +2629,10 @@ export function WorldMapBuilder({
           const toP = poiById(marketPoi.get(r.toMarketId));
           if (!fromP || !toP) continue;
 
-          const pts: InstanceType<typeof THREE.Vector3>[] = [];
-          for (let i = 0; i <= SEG; i++) {
-            const f = i / SEG;
-            const nx = fromP.x + (toP.x - fromP.x) * f;
-            const ny = fromP.y + (toP.y - fromP.y) * f;
-            pts.push(
-              new THREE.Vector3((nx - 0.5) * W, heightAtNorm(nx, ny) * HEIGHT + 0.06, (ny - 0.5) * W),
-            );
-          }
+          const npts = routePolyline(fromP, toP);
+          const pts = npts.map(
+            (n) => new THREE.Vector3((n.x - 0.5) * W, heightAtNorm(n.x, n.y) * HEIGHT + 0.06, (n.y - 0.5) * W),
+          );
           const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), routeLineMat);
           line.computeLineDistances();
           routeGroup.add(line);
@@ -2646,6 +2678,12 @@ export function WorldMapBuilder({
           const a = pmap.get(mkt.get(r.fromMarketId) ?? "");
           const b = pmap.get(mkt.get(r.toMarketId) ?? "");
           if (a && b) s += `${r.id}:${a}>${b}:${r.volume};`;
+        }
+        // Re-route wagons when the drawn roads change.
+        for (const p of worldRef.current.paths ?? []) {
+          if (!TRAVEL_KINDS.has(p.kind)) continue;
+          const n = p.points.length;
+          if (n >= 4) s += `|${n}:${p.points[0].toFixed(2)},${p.points[1].toFixed(2)}-${p.points[n - 2].toFixed(2)},${p.points[n - 1].toFixed(2)}`;
         }
         return s;
       }
