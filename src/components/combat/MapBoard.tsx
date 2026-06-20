@@ -13,6 +13,7 @@ import { useMapPings, useMaps, useRealtime } from "@/lib/data/hooks";
 import type {
   BattleMap,
   CombatState,
+  MapLight,
   MapToken,
   Wall,
 } from "@/lib/domain/types";
@@ -32,7 +33,7 @@ import {
   paintFog,
 } from "@/lib/map/fog";
 
-type Tool = "select" | "pan" | "wall" | "draw" | "erase" | "ruler" | "ping";
+type Tool = "select" | "pan" | "wall" | "light" | "draw" | "erase" | "ruler" | "ping";
 
 const DRAW_COLOR = "#E6C772";
 
@@ -42,9 +43,17 @@ const ALL_TOOLS: { key: Tool; label: string; dm?: boolean }[] = [
   { key: "ruler", label: "Ruler" },
   { key: "ping", label: "Ping" },
   { key: "wall", label: "Wall", dm: true },
+  { key: "light", label: "Light", dm: true },
   { key: "draw", label: "Draw", dm: true },
   { key: "erase", label: "Erase", dm: true },
 ];
+
+function hexA(hex: string, a: number): string {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const n = parseInt(full, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
 
 function initials(name: string): string {
   const p = name.trim().split(/\s+/).filter(Boolean);
@@ -69,8 +78,10 @@ export function MapBoard({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const fogCanvasRef = useRef<HTMLCanvasElement>(null);
+  const glowCanvasRef = useRef<HTMLCanvasElement>(null);
   const maskRef = useRef<HTMLCanvasElement | null>(null);
   const tempRef = useRef<HTMLCanvasElement | null>(null);
+  const litRef = useRef<HTMLCanvasElement | null>(null);
   const exploredRef = useRef<HTMLCanvasElement | null>(null);
 
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
@@ -97,6 +108,8 @@ export function MapBoard({
   const grid = map.gridSize ?? 0;
   const feetPerCell = map.feetPerCell ?? 5;
   const fogEnabled = map.fogEnabled ?? false;
+  const lightLevel = map.lightLevel ?? "bright";
+  const lights = useMemo(() => map.lights ?? [], [map.lights]);
   const tokens = map.tokens ?? [];
   const walls = map.walls ?? [];
   const drawings = map.drawings ?? [];
@@ -128,6 +141,7 @@ export function MapBoard({
     };
     maskRef.current = mk();
     tempRef.current = mk();
+    litRef.current = mk();
     exploredRef.current = mk();
   }, [imgSize]);
 
@@ -157,7 +171,8 @@ export function MapBoard({
     const ectx = explored.getContext("2d");
     if (!fctx || !mctx || !tctx || !ectx) return;
 
-    const showFog = fogEnabled && (!isDM || dmPreview);
+    const dark = lightLevel !== "bright";
+    const showFog = (fogEnabled || dark) && (!isDM || dmPreview);
     if (!showFog) {
       fctx.clearRect(0, 0, imgSize.w, imgSize.h);
       return;
@@ -182,18 +197,56 @@ export function MapBoard({
 
     // Binary fog: areas not currently visible are fully dark (no dim "memory"
     // layer), so a wall always blocks to the same darkness whether or not the
-    // player had seen behind it before.
+    // player had seen behind it before. In dim/dark ambient, sight is gated by
+    // light + darkvision (see computeVisibilityMask).
     void ectx;
-    computeVisibilityMask(mctx, tctx, imgSize.w, imgSize.h, viewers, walls);
+    computeVisibilityMask(
+      mctx,
+      tctx,
+      imgSize.w,
+      imgSize.h,
+      viewers,
+      walls,
+      lights,
+      lightLevel,
+      litRef.current?.getContext("2d") ?? null,
+    );
     paintFog(fctx, imgSize.w, imgSize.h, mask, null, {
-      fogColor: "rgba(8,6,4,0.99)",
+      fogColor: dark ? "rgba(6,5,8,0.985)" : "rgba(8,6,4,0.99)",
       exploredDim: 0,
     });
-  }, [imgSize, fogEnabled, isDM, dmPreview, tokens, walls, drag, defaultVision]);
+  }, [imgSize, fogEnabled, isDM, dmPreview, tokens, walls, drag, defaultVision, lights, lightLevel]);
 
   useEffect(() => {
     renderFog();
   }, [renderFog]);
+
+  // Warm light pools (visual tint), under the fog.
+  const renderGlow = useCallback(() => {
+    const g = glowCanvasRef.current;
+    if (!g || !imgSize) return;
+    const ctx = g.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, imgSize.w, imgSize.h);
+    if (lightLevel === "bright" || lights.length === 0) return;
+    ctx.globalCompositeOperation = "lighter";
+    for (const L of lights) {
+      if (L.radius <= 0) continue;
+      const col = L.color ?? "#ffcf8a";
+      const grad = ctx.createRadialGradient(L.x, L.y, L.radius * 0.1, L.x, L.y, L.radius);
+      grad.addColorStop(0, hexA(col, 0.4 * (L.intensity ?? 1)));
+      grad.addColorStop(1, hexA(col, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(L.x, L.y, L.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }, [imgSize, lights, lightLevel]);
+
+  useEffect(() => {
+    renderGlow();
+  }, [renderGlow]);
 
   // Reset explored memory when the map changes.
   useEffect(() => {
@@ -281,6 +334,19 @@ export function MapBoard({
           setPending({ kind: "wall", from: p, to: p });
         }
         break;
+      case "light":
+        if (isDM) {
+          const pos = grid ? snapToCellCenter(p, grid) : p;
+          const light: MapLight = {
+            id: newId(),
+            x: Math.round(pos.x),
+            y: Math.round(pos.y),
+            radius: grid ? grid * 4 : 200,
+            color: "#ffcf8a",
+          };
+          void updateMap(map.id, { lights: [...lights, light] });
+        }
+        break;
       case "draw":
         if (isDM) {
           gesture.current = { mode: "draw" };
@@ -357,8 +423,13 @@ export function MapBoard({
   }
 
   function eraseAt(p: Pt) {
-    // Nearest wall within threshold first, else nearest drawing.
+    // Nearest light first, then wall, then drawing.
     const threshold = 14 / view.scale;
+    const lightHit = lights.find((L) => dist(p, { x: L.x, y: L.y }) < Math.max(threshold, grid * 0.4));
+    if (lightHit) {
+      void updateMap(map.id, { lights: lights.filter((L) => L.id !== lightHit.id) });
+      return;
+    }
     let bestWall: string | null = null;
     let bestWallD = threshold;
     for (const w of walls) {
@@ -454,6 +525,14 @@ export function MapBoard({
                 draggable={false}
               />
 
+              {/* warm light pools */}
+              <canvas
+                ref={glowCanvasRef}
+                width={imgSize.w}
+                height={imgSize.h}
+                className="pointer-events-none absolute left-0 top-0 mix-blend-screen"
+              />
+
               <svg
                 width={imgSize.w}
                 height={imgSize.h}
@@ -541,6 +620,15 @@ export function MapBoard({
                     )}
                   </g>
                 )}
+
+                {isDM &&
+                  lightLevel !== "bright" &&
+                  lights.map((L) => (
+                    <g key={L.id} transform={`translate(${L.x}, ${L.y})`}>
+                      <circle r={L.radius} fill="none" stroke={L.color ?? "#ffcf8a"} strokeWidth={1.5} strokeDasharray="6 8" opacity={0.35} />
+                      <circle r={grid ? grid * 0.2 : 10} fill={L.color ?? "#ffcf8a"} stroke="#5a4012" strokeWidth={2} />
+                    </g>
+                  ))}
 
                 {tokens.filter(tokenVisible).map((t) => {
                   const pos = drag && drag.id === t.id ? drag.pos : { x: t.x, y: t.y };

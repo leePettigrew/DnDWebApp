@@ -1063,9 +1063,25 @@ export interface MapToken {
   ownerId?: ID;
   /** Vision radius in map pixels. 0/undefined → no light (relies on others). */
   visionRadius?: number;
+  /** Darkvision radius in map px — sees in the dark without a light source. */
+  darkvision?: number;
+  /** Light this token emits (a carried torch), in map px. */
+  lightRadius?: number;
   /** DM-hidden token — never shown to players. */
   hidden?: boolean;
   portraitUrl?: string;
+}
+
+/** A placed light source on a battle map (map image px). */
+export interface MapLight {
+  id: ID;
+  x: number;
+  y: number;
+  /** Bright radius in map px. */
+  radius: number;
+  color?: string;
+  /** 0..1 glow strength (default 1). */
+  intensity?: number;
 }
 
 /** A labelled point of interest on an overworld map (percent coordinates). */
@@ -1225,6 +1241,8 @@ export interface BattleBuild {
   props?: BattleProp[];
   /** Walls (cell coords) — drawn on the map and exported to BattleMap.walls. */
   walls?: BattleWall[];
+  /** Light sources (cell coords) — exported to BattleMap.lights. */
+  lights?: { id: ID; x: number; y: number; radius: number; color?: string }[];
   /** Optional imported reference image (data URL) to trace over. */
   trace?: string;
   updatedAt: ISODateString;
@@ -1254,6 +1272,9 @@ export interface BattleMap extends Entity {
   showGrid?: boolean;
   /** Whether players' view is fogged by line of sight. */
   fogEnabled?: boolean;
+  /** Ambient light: bright (default, sight only) | dim | dark (need lights). */
+  lightLevel?: "bright" | "dim" | "dark";
+  lights?: MapLight[];
   walls?: Wall[];
   drawings?: MapDrawing[];
   tokens?: MapToken[];

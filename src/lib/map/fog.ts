@@ -1,5 +1,7 @@
-import type { MapToken, Wall } from "@/lib/domain/types";
+import type { MapLight, MapToken, Wall } from "@/lib/domain/types";
 import type { Pt } from "./geometry";
+
+export type LightLevel = "bright" | "dim" | "dark";
 
 /**
  * Dynamic line-of-sight fog by shadow-casting on canvases. All coordinates are
@@ -16,7 +18,54 @@ function projectAway(origin: Pt, point: Pt, far: number): Pt {
   return { x: point.x + (dx / len) * far, y: point.y + (dy / len) * far };
 }
 
-/** Draw the currently-visible alpha mask (white = visible) into `maskCtx`. */
+/** Draw one radial source (disc minus wall shadows) additively into `target`. */
+function drawSource(
+  target: CanvasRenderingContext2D,
+  temp: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  radius: number,
+  walls: Wall[],
+  far: number,
+): void {
+  temp.clearRect(0, 0, width, height);
+  temp.globalCompositeOperation = "source-over";
+  const grad = temp.createRadialGradient(x, y, Math.max(1, radius * 0.55), x, y, radius);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  temp.fillStyle = grad;
+  temp.beginPath();
+  temp.arc(x, y, radius, 0, Math.PI * 2);
+  temp.fill();
+
+  temp.globalCompositeOperation = "destination-out";
+  temp.fillStyle = "rgba(0,0,0,1)";
+  for (const w of walls) {
+    const a = projectAway({ x, y }, { x: w.x1, y: w.y1 }, far);
+    const b = projectAway({ x, y }, { x: w.x2, y: w.y2 }, far);
+    temp.beginPath();
+    temp.moveTo(w.x1, w.y1);
+    temp.lineTo(a.x, a.y);
+    temp.lineTo(b.x, b.y);
+    temp.lineTo(w.x2, w.y2);
+    temp.closePath();
+    temp.fill();
+  }
+  temp.globalCompositeOperation = "source-over";
+
+  target.globalCompositeOperation = "lighter";
+  target.drawImage(temp.canvas, 0, 0);
+  target.globalCompositeOperation = "source-over";
+}
+
+/**
+ * Draw the currently-visible alpha mask (white = visible). A token sees within
+ * its vision radius (minus wall shadows). In dim/dark ambient that sight is
+ * gated by light: visible = vision ∩ (lit ∪ darkvision), where lit = placed
+ * lights + carried torches (+ a dim ambient floor) — all shadow-cast by walls.
+ */
 export function computeVisibilityMask(
   maskCtx: CanvasRenderingContext2D,
   tempCtx: CanvasRenderingContext2D,
@@ -24,54 +73,39 @@ export function computeVisibilityMask(
   height: number,
   viewers: MapToken[],
   walls: Wall[],
+  lights: MapLight[] = [],
+  ambient: LightLevel = "bright",
+  litCtx: CanvasRenderingContext2D | null = null,
 ): void {
   maskCtx.clearRect(0, 0, width, height);
   const far = (width + height) * 2;
 
   for (const tk of viewers) {
     const radius = tk.visionRadius && tk.visionRadius > 0 ? tk.visionRadius : 0;
-    if (radius <= 0) continue;
-
-    tempCtx.clearRect(0, 0, width, height);
-    tempCtx.globalCompositeOperation = "source-over";
-
-    // Lit disc with a soft outer falloff.
-    const grad = tempCtx.createRadialGradient(
-      tk.x,
-      tk.y,
-      Math.max(1, radius * 0.55),
-      tk.x,
-      tk.y,
-      radius,
-    );
-    grad.addColorStop(0, "rgba(255,255,255,1)");
-    grad.addColorStop(1, "rgba(255,255,255,0)");
-    tempCtx.fillStyle = grad;
-    tempCtx.beginPath();
-    tempCtx.arc(tk.x, tk.y, radius, 0, Math.PI * 2);
-    tempCtx.fill();
-
-    // Punch each wall's shadow (region behind it from this token).
-    tempCtx.globalCompositeOperation = "destination-out";
-    tempCtx.fillStyle = "rgba(0,0,0,1)";
-    for (const w of walls) {
-      const a = projectAway({ x: tk.x, y: tk.y }, { x: w.x1, y: w.y1 }, far);
-      const b = projectAway({ x: tk.x, y: tk.y }, { x: w.x2, y: w.y2 }, far);
-      tempCtx.beginPath();
-      tempCtx.moveTo(w.x1, w.y1);
-      tempCtx.lineTo(a.x, a.y);
-      tempCtx.lineTo(b.x, b.y);
-      tempCtx.lineTo(w.x2, w.y2);
-      tempCtx.closePath();
-      tempCtx.fill();
-    }
-    tempCtx.globalCompositeOperation = "source-over";
-
-    // Additively accumulate into the mask.
-    maskCtx.globalCompositeOperation = "lighter";
-    maskCtx.drawImage(tempCtx.canvas, 0, 0);
+    if (radius > 0) drawSource(maskCtx, tempCtx, width, height, tk.x, tk.y, radius, walls, far);
   }
-  maskCtx.globalCompositeOperation = "source-over";
+
+  if (ambient !== "bright" && litCtx) {
+    litCtx.clearRect(0, 0, width, height);
+    litCtx.globalCompositeOperation = "source-over";
+    if (ambient === "dim") {
+      litCtx.fillStyle = "rgba(255,255,255,0.45)";
+      litCtx.fillRect(0, 0, width, height);
+    }
+    for (const L of lights) {
+      if (L.radius > 0) drawSource(litCtx, tempCtx, width, height, L.x, L.y, L.radius, walls, far);
+    }
+    for (const tk of viewers) {
+      if (tk.lightRadius && tk.lightRadius > 0)
+        drawSource(litCtx, tempCtx, width, height, tk.x, tk.y, tk.lightRadius, walls, far);
+      if (tk.darkvision && tk.darkvision > 0)
+        drawSource(litCtx, tempCtx, width, height, tk.x, tk.y, tk.darkvision, walls, far);
+    }
+    // Intersect: keep visible only where also lit / darkvision.
+    maskCtx.globalCompositeOperation = "destination-in";
+    maskCtx.drawImage(litCtx.canvas, 0, 0);
+    maskCtx.globalCompositeOperation = "source-over";
+  }
 }
 
 /** Accumulate the current mask into the explored canvas (persistent memory). */

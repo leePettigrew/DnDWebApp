@@ -201,6 +201,22 @@ export function MapPanel() {
                 />
                 Fog of war
               </label>
+              <label className="flex items-center gap-1.5">
+                Light
+                <select
+                  value={activeMap.lightLevel ?? "bright"}
+                  onChange={(e) =>
+                    updateMap(activeMap.id, {
+                      lightLevel: e.target.value as "bright" | "dim" | "dark",
+                    })
+                  }
+                  className="h-7 rounded border border-parchment-400 bg-parchment-50 px-1 text-sm"
+                >
+                  <option value="bright">Bright</option>
+                  <option value="dim">Dim</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </label>
               <div className="ml-auto flex flex-wrap gap-1.5">
                 <Button variant="secondary" size="sm" onClick={placeCombatants}>
                   Place combatants
@@ -217,6 +233,12 @@ export function MapPanel() {
                 >
                   Clear walls/ink
                 </button>
+                <button
+                  onClick={() => updateMap(activeMap.id, { lights: [] })}
+                  className="rounded-md px-2 py-1 text-xs font-semibold text-ink-faint hover:text-oxblood"
+                >
+                  Clear lights
+                </button>
               </div>
             </div>
           )}
@@ -230,7 +252,7 @@ export function MapPanel() {
 
           <p className="text-xs text-ink-faint">
             Scroll to zoom · drag empty space to pan · drag a token to move it
-            {isDM ? " · use the tools to draw walls (fog blockers), sketch, measure, or ping." : " · use Ruler to measure and Ping to point."}
+            {isDM ? " · draw walls (sight blockers), set the Light level to dim/dark and drop torches with the Light tool, sketch, measure, or ping." : " · use Ruler to measure and Ping to point."}
           </p>
         </div>
       )}
