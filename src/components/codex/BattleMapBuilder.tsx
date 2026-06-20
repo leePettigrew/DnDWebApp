@@ -113,6 +113,13 @@ function mulberry32(seed: number) {
 }
 const rngFor = (c: number, r: number) => mulberry32((c * 374761393 + r * 668265263) >>> 0);
 
+function hexA(hex: string, a: number): string {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const n = parseInt(full, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
 function paintGrain(ctx: CanvasRenderingContext2D, m: Material, id: string, col: number, row: number, cx: number, cy: number, cp: number) {
   const rnd = rngFor(col, row);
   const count = m.look === "smooth" ? 4 : m.look === "liquid" ? 6 : 12;
@@ -177,7 +184,7 @@ function drawCell(ctx: CanvasRenderingContext2D, grid: BattleGrid, col: number, 
   ctx.restore();
 }
 
-type Tool = "paint" | "fill" | "erase" | "room" | "wall" | "prop" | "select" | "pan";
+type Tool = "paint" | "fill" | "erase" | "room" | "wall" | "prop" | "light" | "select" | "pan";
 
 const PROP_CATS: { key: string; label: string }[] = [
   { key: "dungeon", label: "Dungeon" },
@@ -340,6 +347,51 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         ctx.strokeStyle = "rgba(230,199,114,0.95)";
         ctx.lineWidth = 2 / zoom;
         ctx.strokeRect(p.x * cp - cp * 0.5 * sc, p.y * cp - cp * 0.5 * sc, cp * sc, cp * sc);
+      }
+    }
+
+    // Light glow — warm pools from manual lights and light-emitting props, so the
+    // DM previews where the map will be lit in dim/dark combat.
+    const allLights: { x: number; y: number; radius: number; color: string }[] = [];
+    for (const L of b.lights ?? [])
+      allLights.push({ x: L.x, y: L.y, radius: L.radius, color: L.color ?? "#ffcf8a" });
+    for (const p of b.props ?? []) {
+      const def = PROP_MAP.get(p.kind);
+      if (def?.light) allLights.push({ x: p.x, y: p.y, radius: def.light * (p.scale ?? 1), color: def.lightColor ?? "#ffcf8a" });
+    }
+    if (allLights.length) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (const L of allLights) {
+        const g = ctx.createRadialGradient(L.x * cp, L.y * cp, L.radius * cp * 0.12, L.x * cp, L.y * cp, L.radius * cp);
+        g.addColorStop(0, hexA(L.color, 0.32));
+        g.addColorStop(1, hexA(L.color, 0));
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(L.x * cp, L.y * cp, L.radius * cp, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Manual light markers (dot + dashed radius ring) — only when the Light tool is active.
+    if (toolRef.current === "light") {
+      for (const L of b.lights ?? []) {
+        const col = L.color ?? "#ffcf8a";
+        ctx.strokeStyle = hexA(col, 0.6);
+        ctx.lineWidth = 1.5 / zoom;
+        ctx.setLineDash([6 / zoom, 8 / zoom]);
+        ctx.beginPath();
+        ctx.arc(L.x * cp, L.y * cp, L.radius * cp, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(L.x * cp, L.y * cp, cp * 0.16, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.5)";
+        ctx.lineWidth = 1 / zoom;
+        ctx.stroke();
       }
     }
 
@@ -616,6 +668,22 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       requestRender();
       return;
     }
+    if (tool === "light") {
+      const wp = worldPoint(e);
+      const b = buildRef.current;
+      if (!wp || wp.x < 0 || wp.y < 0 || wp.x >= b.cols || wp.y >= b.rows) return;
+      const lights = b.lights ?? [];
+      const hit = lights.find((L) => Math.hypot(L.x - wp.x, L.y - wp.y) < 0.5);
+      setBuild({
+        ...b,
+        lights: hit
+          ? lights.filter((L) => L.id !== hit.id)
+          : [...lights, { id: newId(), x: wp.x, y: wp.y, radius: 4, color: "#ffcf8a" }],
+      });
+      setDirty(true);
+      requestRender();
+      return;
+    }
     if (tool === "select") {
       const wp = worldPoint(e);
       if (!wp) return;
@@ -836,23 +904,47 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
 
   function save() {
     const b = buildRef.current;
+    const cp = b.cellPx;
     const { dataUrl, width, height } = flatten();
+    // Export lights (cell coords → image px) so dim/dark combat is pre-lit:
+    // manual Light-tool placements + every light-emitting prop (brazier, campfire…).
+    const lights = [
+      ...(b.lights ?? []).map((L) => ({
+        id: L.id,
+        x: L.x * cp,
+        y: L.y * cp,
+        radius: L.radius * cp,
+        color: L.color,
+      })),
+      ...(b.props ?? []).flatMap((p) => {
+        const def = PROP_MAP.get(p.kind);
+        if (!def?.light) return [];
+        return [{
+          id: `pl-${p.id}`,
+          x: p.x * cp,
+          y: p.y * cp,
+          radius: def.light * (p.scale ?? 1) * cp,
+          color: def.lightColor ?? "#ffcf8a",
+        }];
+      }),
+    ];
     void update(map.id, {
       imageUrl: dataUrl,
       width,
       height,
-      gridSize: b.cellPx,
+      gridSize: cp,
       // Square maps let the combat board draw the grid; hex bakes its own.
       showGrid: b.grid === "square",
       feetPerCell: map.feetPerCell ?? 5,
       // Export walls (cell coords → image px) so combat line-of-sight works.
       walls: (b.walls ?? []).map((w) => ({
         id: w.id,
-        x1: w.x1 * b.cellPx,
-        y1: w.y1 * b.cellPx,
-        x2: w.x2 * b.cellPx,
-        y2: w.y2 * b.cellPx,
+        x1: w.x1 * cp,
+        y1: w.y1 * cp,
+        x2: w.x2 * cp,
+        y2: w.y2 * cp,
       })),
+      lights,
       build: { ...b, updatedAt: nowISO() },
     });
     setDirty(false);
@@ -895,7 +987,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
           <div>
             <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Tools</p>
             <div className="grid grid-cols-3 gap-1">
-              {([["paint", "Paint"], ["fill", "Fill"], ["erase", "Erase"], ["prop", "Prop"], ["select", "Select"], ["pan", "Pan"]] as [Tool, string][]).map(([t, label]) => (
+              {([["paint", "Paint"], ["fill", "Fill"], ["erase", "Erase"], ["room", "Room"], ["wall", "Wall"], ["prop", "Prop"], ["light", "Light"], ["select", "Select"], ["pan", "Pan"]] as [Tool, string][]).map(([t, label]) => (
                 <button
                   key={t}
                   onClick={() => setTool(t)}
@@ -1032,6 +1124,26 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
               <p className="mt-1 text-[0.65rem] text-ink-faint">
                 {PROP_MAP.get(propKind)?.name} — click the map to place
               </p>
+            </div>
+          )}
+
+          {tool === "light" && (
+            <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Light sources</p>
+              <p className="text-[0.65rem] text-ink-faint">
+                Click to drop a warm light (radius ~4 cells); click an existing light to remove it. Braziers &amp;
+                campfires already glow. Lights only matter when the War Table is set to <em>Dim</em> or <em>Dark</em>.
+              </p>
+              {(build.lights ?? []).length > 0 && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => { setBuild({ ...build, lights: [] }); setDirty(true); }}
+                >
+                  Clear lights ({(build.lights ?? []).length})
+                </Button>
+              )}
             </div>
           )}
 

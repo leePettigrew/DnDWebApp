@@ -13,6 +13,9 @@ export interface PropDef {
   blocksMove?: boolean;
   blocksSight?: boolean;
   difficult?: boolean;
+  /** If set, this prop emits light of this radius (in cells) on the map. */
+  light?: number;
+  lightColor?: string;
   draw: (ctx: CanvasRenderingContext2D, s: number) => void;
 }
 
@@ -118,7 +121,7 @@ export const PROPS: PropDef[] = [
     },
   },
   {
-    id: "brazier", name: "Brazier", category: "dungeon",
+    id: "brazier", name: "Brazier", category: "dungeon", light: 4, lightColor: "#ffb347",
     draw: (ctx, s) => { disc(ctx, 0, 0, s * 0.26, C.metal); disc(ctx, 0, 0, s * 0.18, "#3a2a1a"); disc(ctx, 0, 0, s * 0.12, C.fire); disc(ctx, 0, 0, s * 0.06, C.fireCore); },
   },
   {
@@ -173,7 +176,7 @@ export const PROPS: PropDef[] = [
     draw: (ctx, s) => { disc(ctx, 0, -s * 0.04, s * 0.2, "#b23a3a"); disc(ctx, -s * 0.06, -s * 0.08, s * 0.04, "#f0e6d2"); disc(ctx, s * 0.07, 0, s * 0.035, "#f0e6d2"); ctx.fillStyle = "#e6dcc6"; ctx.fillRect(-s * 0.05, 0, s * 0.1, s * 0.16); },
   },
   {
-    id: "campfire", name: "Campfire", category: "nature",
+    id: "campfire", name: "Campfire", category: "nature", light: 4.5, lightColor: "#ff9a3a",
     draw: (ctx, s) => { ctx.strokeStyle = C.woodDark; ctx.lineWidth = s * 0.07; ctx.beginPath(); ctx.moveTo(-s * 0.2, s * 0.12); ctx.lineTo(s * 0.2, -s * 0.12); ctx.moveTo(s * 0.2, s * 0.12); ctx.lineTo(-s * 0.2, -s * 0.12); ctx.stroke(); disc(ctx, 0, 0, s * 0.13, C.fire); disc(ctx, 0, -s * 0.02, s * 0.07, C.fireCore); },
   },
   {
