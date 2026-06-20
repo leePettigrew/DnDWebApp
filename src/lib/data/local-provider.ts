@@ -2,7 +2,9 @@ import type {
   BattleMap,
   Campaign,
   CombatState,
+  EconomyState,
   Entity,
+  Faction,
   RollHistoryEntry,
   RollResult,
   RollSpec,
@@ -11,6 +13,8 @@ import { newId, nowISO } from "@/lib/domain/ids";
 import type { ID } from "@/lib/domain/ids";
 import { rollSpec } from "@/lib/domain/dice";
 import { emptyEconomy } from "@shared/economy";
+import { applyTrade, isTradeError } from "@shared/economy-trade";
+import { standingToRep } from "@shared/economy-pricing";
 import type {
   CampaignSummary,
   ChatMessage,
@@ -34,6 +38,8 @@ import type {
   Repository,
   SessionController,
   SingletonRepository,
+  TradeInput,
+  TradeOutcome,
   Unsubscribe,
   UpdateInput,
 } from "./provider";
@@ -210,6 +216,8 @@ class LocalRealtimeController implements RealtimeController {
     private readonly campaigns: Repository<Campaign>,
     private readonly rollHistory: Repository<RollHistoryEntry>,
     private readonly maps: Repository<BattleMap>,
+    private readonly economy: SingletonRepository<EconomyState>,
+    private readonly factions: Repository<Faction>,
   ) {
     // Mirror local campaigns as DM memberships for any UI that asks.
     this.campaigns.subscribe((items) => {
@@ -351,6 +359,41 @@ class LocalRealtimeController implements RealtimeController {
     return result;
   }
 
+  async executeTrade(input: TradeInput): Promise<TradeOutcome> {
+    const economy = await this.economy.get();
+    let rep = 2;
+    const market = (economy.markets ?? []).find((m) => m.id === input.marketId);
+    if (market?.factionId) {
+      const faction = await this.factions.get(market.factionId);
+      rep = standingToRep(faction?.standing);
+    }
+    const outcome = applyTrade(
+      economy,
+      {
+        marketId: input.marketId,
+        goodRef: input.goodRef,
+        action: input.action,
+        qty: input.qty,
+        haggleRoll: input.haggleRoll,
+      },
+      {
+        rep,
+        actorId: LOCAL_USER.id,
+        actorName: input.characterName || LOCAL_USER.name,
+        isDM: true,
+        userId: LOCAL_USER.id,
+      },
+    );
+    if (isTradeError(outcome)) return { ok: false, error: outcome.error };
+    await this.economy.set(outcome.economy);
+    return {
+      ok: true,
+      transaction: outcome.transaction,
+      unitPrice: outcome.unitPrice,
+      total: outcome.total,
+    };
+  }
+
   logPhysicalRoll(total: number, label?: string): void {
     void this.rollHistory.create({
       timestamp: nowISO(),
@@ -433,6 +476,8 @@ class LocalDataProvider implements DataProvider {
       this.campaigns,
       this.rollHistory,
       this.maps,
+      this.economy,
+      this.factions,
     );
   }
 

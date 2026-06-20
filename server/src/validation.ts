@@ -115,6 +115,17 @@ const message = z.discriminatedUnion("type", [
   z.object({ type: z.literal("economy:set"), state: z.record(z.unknown()) }),
   z.object({ type: z.literal("economy:update"), patch: z.record(z.unknown()) }),
   z.object({
+    type: z.literal("trade:execute"),
+    requestId: z.string().max(80),
+    marketId: z.string().max(80),
+    goodRef: z.string().max(80),
+    action: z.enum(["buy", "sell"]),
+    qty: z.number().int().min(1).max(100000),
+    haggleRoll: z.number().int().min(0).max(100).optional(),
+    characterId: z.string().max(80).optional(),
+    characterName: z.string().max(120).optional(),
+  }),
+  z.object({
     type: z.literal("dice:roll"),
     requestId: z.string().max(80),
     spec: rollSpec,

@@ -48,6 +48,8 @@ import type {
   Repository,
   SessionController,
   SingletonRepository,
+  TradeInput,
+  TradeOutcome,
   Unsubscribe,
   UpdateInput,
 } from "./provider";
@@ -350,6 +352,10 @@ export class RealtimeDataProvider implements DataProvider {
     string,
     { resolve: (r: RollResult) => void; reject: (e: Error) => void }
   >();
+  private pendingTrades = new Map<
+    string,
+    { resolve: (o: TradeOutcome) => void; reject: (e: Error) => void }
+  >();
 
   constructor(wsUrl: string) {
     this.httpBase = toHttpBase(wsUrl);
@@ -504,6 +510,7 @@ export class RealtimeDataProvider implements DataProvider {
         if (trimmed) this.conn.send({ type: "chat:send", body: trimmed });
       },
       roll: (spec, opts) => this.roll(spec, opts),
+      executeTrade: (input) => this.executeTrade(input),
       logPhysicalRoll: (total, label) => {
         if (this.activeCampaignId && this.conn.isOpen()) {
           this.conn.send({ type: "dice:physical", total, label });
@@ -675,6 +682,40 @@ export class RealtimeDataProvider implements DataProvider {
     return this.local.realtime.roll(spec, opts);
   }
 
+  private executeTrade(input: TradeInput): Promise<TradeOutcome> {
+    if (this.activeCampaignId && this.conn.isOpen()) {
+      return new Promise<TradeOutcome>((resolve, reject) => {
+        const requestId = newId();
+        this.pendingTrades.set(requestId, { resolve, reject });
+        const ok = this.conn.send({
+          type: "trade:execute",
+          requestId,
+          marketId: input.marketId,
+          goodRef: input.goodRef,
+          action: input.action,
+          qty: input.qty,
+          haggleRoll: input.haggleRoll,
+          characterId: input.characterId,
+          characterName: input.characterName,
+        });
+        if (!ok) {
+          this.pendingTrades.delete(requestId);
+          reject(new Error("Not connected."));
+          return;
+        }
+        setTimeout(() => {
+          const p = this.pendingTrades.get(requestId);
+          if (p) {
+            this.pendingTrades.delete(requestId);
+            p.reject(new Error("Trade timed out."));
+          }
+        }, 10_000);
+      });
+    }
+    // Solo / offline: apply locally.
+    return this.local.realtime.executeTrade(input);
+  }
+
   private handleOpen(): void {
     if (this.token) this.conn.send({ type: "auth", token: this.token });
   }
@@ -711,6 +752,9 @@ export class RealtimeDataProvider implements DataProvider {
         } else if (msg.requestId && this.pendingRolls.has(msg.requestId)) {
           this.pendingRolls.get(msg.requestId)!.reject(new Error(msg.message));
           this.pendingRolls.delete(msg.requestId);
+        } else if (msg.requestId && this.pendingTrades.has(msg.requestId)) {
+          this.pendingTrades.get(msg.requestId)!.resolve({ ok: false, error: msg.message });
+          this.pendingTrades.delete(msg.requestId);
         } else if (typeof console !== "undefined") {
           console.warn(`[server error] ${msg.code}: ${msg.message}`);
         }
@@ -757,6 +801,20 @@ export class RealtimeDataProvider implements DataProvider {
         if (msg.requestId && this.pendingRolls.has(msg.requestId)) {
           this.pendingRolls.get(msg.requestId)!.resolve(entryToResult(msg.entry));
           this.pendingRolls.delete(msg.requestId);
+        }
+        break;
+      }
+      case "trade:result": {
+        const p = this.pendingTrades.get(msg.requestId);
+        if (p) {
+          this.pendingTrades.delete(msg.requestId);
+          p.resolve({
+            ok: msg.ok,
+            error: msg.error,
+            transaction: msg.transaction,
+            unitPrice: msg.unitPrice,
+            total: msg.total,
+          });
         }
         break;
       }

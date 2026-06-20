@@ -4,6 +4,7 @@ import type {
   Character,
   CombatState,
   EconomyState,
+  EconomyTransaction,
   Encounter,
   Entity,
   Faction,
@@ -109,6 +110,26 @@ export interface SessionController {
   subscribe(listener: (user: CurrentUser | null) => void): Unsubscribe;
 }
 
+/** A player buying/selling at a market (resolved server-side in multiplayer). */
+export interface TradeInput {
+  marketId: ID;
+  goodRef: ID;
+  action: "buy" | "sell";
+  qty: number;
+  /** d20 total from a haggle skill check (discounts a buy). */
+  haggleRoll?: number;
+  characterId?: ID;
+  characterName?: string;
+}
+
+export interface TradeOutcome {
+  ok: boolean;
+  error?: string;
+  transaction?: EconomyTransaction;
+  unitPrice?: number;
+  total?: number;
+}
+
 /** A transient map ping delivered to subscribers. */
 export interface MapPing {
   id: ID;
@@ -212,6 +233,15 @@ export interface RealtimeController {
    * computed locally and appended to history.
    */
   roll(spec: RollSpec, opts?: { hidden?: boolean }): Promise<RollResult>;
+
+  /**
+   * Buy/sell at a market. In remote mode the SERVER validates access, stock,
+   * reputation, and price (anti-cheat), mutates the shared economy, and
+   * broadcasts the new state; the promise resolves with the outcome. In local
+   * mode it's applied directly to the local economy. Adjusting the actor's own
+   * coin/inventory is the caller's job (their own character).
+   */
+  executeTrade(input: TradeInput): Promise<TradeOutcome>;
 
   /**
    * Log/share a hand-thrown d20 result (from the 3D dice arena) to the roll

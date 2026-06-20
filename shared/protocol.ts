@@ -4,6 +4,7 @@ import type {
   Character,
   CombatState,
   EconomyState,
+  EconomyTransaction,
   Encounter,
   Faction,
   Note,
@@ -234,6 +235,20 @@ export interface EconomyUpdateMessage {
   type: "economy:update";
   patch: Partial<EconomyState>;
 }
+/** A player buying/selling at a market. Server-validated (anti-cheat). */
+export interface TradeExecuteMessage {
+  type: "trade:execute";
+  requestId: string;
+  marketId: ID;
+  goodRef: ID;
+  action: "buy" | "sell";
+  qty: number;
+  /** Optional haggle roll total (d20+mod) to discount a buy. */
+  haggleRoll?: number;
+  /** The character the trade is attributed to (display only). */
+  characterId?: ID;
+  characterName?: string;
+}
 export interface DiceRollMessage {
   type: "dice:roll";
   requestId: string;
@@ -304,6 +319,7 @@ export type ClientMessage =
   | CombatUpdateMessage
   | EconomySetMessage
   | EconomyUpdateMessage
+  | TradeExecuteMessage
   | DiceRollMessage
   | DicePhysicalMessage
   | PresenceTypingMessage
@@ -366,6 +382,16 @@ export interface DiceRolledMessage {
   requestId?: string;
   entry: RollHistoryEntry;
 }
+/** Reply to the trading client (the new stock state is broadcast separately). */
+export interface TradeResultMessage {
+  type: "trade:result";
+  requestId: string;
+  ok: boolean;
+  error?: string;
+  transaction?: EconomyTransaction;
+  unitPrice?: number;
+  total?: number;
+}
 export interface PresenceStateMessage {
   type: "presence:state";
   users: PresenceUser[];
@@ -412,6 +438,7 @@ export type ServerMessage =
   | CombatChangedMessage
   | EconomyChangedMessage
   | DiceRolledMessage
+  | TradeResultMessage
   | PresenceStateMessage
   | ChatMessageMessage
   | MapTokenMovedMessage

@@ -4,6 +4,7 @@ import { rollSpec as computeRoll } from "../../shared/dice";
 import type {
   BattleMap,
   Entity,
+  Faction,
   MapToken,
   RollHistoryEntry,
 } from "../../shared/domain";
@@ -28,9 +29,12 @@ import type {
   Role,
   ScopedCollection,
   ServerMessage,
+  TradeExecuteMessage,
 } from "../../shared/protocol";
 import { DM_ONLY_COLLECTIONS } from "../../shared/protocol";
 import type { CombatState, EconomyState } from "../../shared/domain";
+import { applyTrade, isTradeError } from "../../shared/economy-trade";
+import { standingToRep } from "../../shared/economy-pricing";
 import type { Repositories } from "./repositories";
 import type { RoomMember, RoomManager } from "./rooms";
 import { parseClientMessage } from "./validation";
@@ -119,6 +123,8 @@ export class ClientSession {
         return this.onEconomySet(msg.state);
       case "economy:update":
         return this.onEconomyUpdate(msg.patch);
+      case "trade:execute":
+        return this.onTradeExecute(msg);
       case "dice:roll":
         return this.onDiceRoll(msg);
       case "dice:physical":
@@ -461,6 +467,63 @@ export class ClientSession {
     };
     this.repos.economy.set(this.campaignId!, next);
     this.rooms.get(this.campaignId!).broadcast({ type: "economy:changed", state: next });
+  }
+
+  /** A player (or the DM) buying/selling at a market — server-validated. */
+  private onTradeExecute(msg: TradeExecuteMessage): void {
+    if (!this.requireCampaign()) return;
+    const cid = this.campaignId!;
+    const economy = this.repos.economy.get(cid) ?? emptyEconomy();
+
+    // Reputation comes from the owning faction's campaign standing.
+    let rep = 2;
+    const market = (economy.markets ?? []).find((m) => m.id === msg.marketId);
+    if (market?.factionId) {
+      const faction = this.repos.entities.factions.get(
+        cid,
+        market.factionId,
+      ) as Faction | null;
+      rep = standingToRep(faction?.standing);
+    }
+
+    const outcome = applyTrade(
+      economy,
+      {
+        marketId: msg.marketId,
+        goodRef: msg.goodRef,
+        action: msg.action,
+        qty: msg.qty,
+        haggleRoll: msg.haggleRoll,
+      },
+      {
+        rep,
+        actorId: this.userId!,
+        actorName: msg.characterName || this.displayName,
+        isDM: this.role === "dm",
+        userId: this.userId!,
+      },
+    );
+
+    if (isTradeError(outcome)) {
+      this.send({
+        type: "trade:result",
+        requestId: msg.requestId,
+        ok: false,
+        error: outcome.error,
+      });
+      return;
+    }
+
+    this.repos.economy.set(cid, outcome.economy);
+    this.rooms.get(cid).broadcast({ type: "economy:changed", state: outcome.economy });
+    this.send({
+      type: "trade:result",
+      requestId: msg.requestId,
+      ok: true,
+      transaction: outcome.transaction,
+      unitPrice: outcome.unitPrice,
+      total: outcome.total,
+    });
   }
 
   // --- dice (server-authoritative, hidden-aware) ---------------------------

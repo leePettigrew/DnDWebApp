@@ -65,6 +65,22 @@ export function commodityById(
   return economy.commodities.find((c) => c.id === ref);
 }
 
+/**
+ * Fraction knocked off a buy price by a haggle. Driven by the skill-check roll
+ * (a d20 total: 10 = no luck, 25 = masterful) and standing with the seller, and
+ * capped by `haggleMax` from the economy config.
+ */
+export function haggleDiscount(
+  roll: number,
+  rep: number,
+  haggleMax: number,
+): number {
+  if (!roll || roll <= 10) return 0;
+  const quality = clamp((roll - 10) / 15, 0, 1);
+  const repFactor = clamp(rep, 0, 5) / 5;
+  return clamp(haggleMax * quality * (0.5 + 0.5 * repFactor), 0, haggleMax);
+}
+
 /** Does an event apply to this good? scope: undefined/"all" | category | id. */
 export function eventApplies(
   ev: EconomyEvent,
