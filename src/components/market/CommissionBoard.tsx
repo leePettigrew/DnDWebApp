@@ -54,6 +54,18 @@ export function CommissionBoard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [economy, factions, isDM]);
 
+  const jobs = useMemo(() => {
+    if (!economy?.enabled) return [];
+    return (economy.jobs ?? []).filter(
+      (j) =>
+        j.active !== false &&
+        (isDM || !j.hidden) &&
+        (j.status ?? "open") !== "done" &&
+        ((j.status ?? "open") === "open" || j.takenBy === selected?.id),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [economy, isDM, selected?.id]);
+
   if (!economy?.enabled) {
     return (
       <Panel tone="flat">
@@ -66,18 +78,6 @@ export function CommissionBoard() {
   const ownedOf = (name: string) =>
     (selected?.inventory ?? []).filter((i) => i.name === name).reduce((n, i) => n + i.quantity, 0);
   const marketName = (id?: string) => economy.markets.find((m) => m.id === id)?.name ?? "—";
-
-  const jobs = useMemo(() => {
-    if (!economy?.enabled) return [];
-    return (economy.jobs ?? []).filter(
-      (j) =>
-        j.active !== false &&
-        (isDM || !j.hidden) &&
-        (j.status ?? "open") !== "done" &&
-        ((j.status ?? "open") === "open" || j.takenBy === selected?.id),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [economy, isDM, selected?.id]);
 
   const doJob = async (job: DeliveryJob, action: "accept" | "deliver") => {
     if (!selected || busy) return;
