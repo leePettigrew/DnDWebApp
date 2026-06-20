@@ -1,5 +1,6 @@
 import type {
   BattleMap,
+  CalendarState,
   Campaign,
   Character,
   CombatState,
@@ -379,6 +380,7 @@ export interface DataProvider {
   readonly rollHistory: Repository<RollHistoryEntry>;
   readonly combat: SingletonRepository<CombatState>;
   readonly economy: SingletonRepository<EconomyState>;
+  readonly calendar: SingletonRepository<CalendarState>;
 
   /** Current user. Kept for Phase 1 back-compat; `auth` is the superset. */
   readonly session: SessionController;

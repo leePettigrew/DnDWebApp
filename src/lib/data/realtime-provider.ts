@@ -1,5 +1,6 @@
 import type {
   BattleMap,
+  CalendarState,
   Campaign,
   Character,
   CombatState,
@@ -33,6 +34,7 @@ import type {
 import { SocketConnection } from "./realtime-connection";
 import { createLocalDataProvider, emptyCombatState } from "./local-provider";
 import { emptyEconomy } from "@shared/economy";
+import { emptyCalendar } from "@shared/calendar";
 import type {
   AuthController,
   ConnectionStatus,
@@ -330,6 +332,7 @@ export class RealtimeDataProvider implements DataProvider {
   readonly campaigns: SwitchableCollection<Campaign>;
   readonly combat: SwitchableSingleton<CombatState>;
   readonly economy: SwitchableSingleton<EconomyState>;
+  readonly calendar: SwitchableSingleton<CalendarState>;
 
   readonly session: SessionController;
   readonly auth: AuthController;
@@ -401,6 +404,13 @@ export class RealtimeDataProvider implements DataProvider {
       emptyEconomy(),
       "economy:set",
       "economy:update",
+    );
+    this.calendar = new SwitchableSingleton<CalendarState>(
+      this.local.calendar,
+      send,
+      emptyCalendar(),
+      "calendar:set",
+      "calendar:update",
     );
 
     this.session = {
@@ -599,6 +609,7 @@ export class RealtimeDataProvider implements DataProvider {
     this.rollHistory.setMode(mode);
     this.combat.setMode(mode);
     this.economy.setMode(mode);
+    this.calendar.setMode(mode);
   }
 
   private clearActiveCampaign(): void {
@@ -1055,6 +1066,10 @@ export class RealtimeDataProvider implements DataProvider {
         this.economy.setLive(msg.state);
         break;
       }
+      case "calendar:changed": {
+        this.calendar.setLive(msg.state);
+        break;
+      }
       case "combat:changed": {
         this.combat.setLive(msg.state);
         break;
@@ -1179,6 +1194,7 @@ export class RealtimeDataProvider implements DataProvider {
     this.rollHistory.setLive(snap.rollLog);
     this.combat.setLive(snap.combat);
     this.economy.setLive(snap.economy);
+    this.calendar.setLive(snap.calendar);
     this.presence = snap.presence;
     this.presenceListeners.forEach((fn) => fn(snap.presence));
     this.chat = snap.chat;

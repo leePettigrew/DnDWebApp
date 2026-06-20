@@ -723,6 +723,90 @@ export interface EconomyState {
   updatedAt: ISODateString;
 }
 
+// ---------------------------------------------------------------------------
+// Campaign calendar (singleton `calendar`). A configurable in-game calendar:
+// custom months/weekdays/moons, an absolute day counter, dated events, and the
+// downtime activities players bank between sessions.
+// ---------------------------------------------------------------------------
+
+export interface CalendarMonth {
+  name: string;
+  days: number;
+}
+
+export interface MoonConfig {
+  name: string;
+  /** Length of the lunar cycle in days. */
+  cycle: number;
+  /** Day offset so phases line up with your lore. */
+  offset?: number;
+  color?: string;
+}
+
+export interface CalendarSeason {
+  name: string;
+  /** Month index (0-based) the season begins. */
+  startMonth: number;
+}
+
+export interface CalendarConfig {
+  /** Suffix shown after the year number, e.g. "DR", "AE". */
+  yearLabel?: string;
+  months: CalendarMonth[];
+  /** Weekday names; the week length is this array's length. */
+  weekdays: string[];
+  moons?: MoonConfig[];
+  seasons?: CalendarSeason[];
+}
+
+/** A dated note/reminder on the calendar (festival, deadline, faction clock…). */
+export interface CalendarEvent {
+  id: ID;
+  /** Absolute day it falls on. */
+  day: number;
+  title: string;
+  note?: string;
+  color?: string;
+  /** DM-only until revealed. */
+  hidden?: boolean;
+}
+
+export type DowntimeKind =
+  | "craft"
+  | "train"
+  | "carouse"
+  | "recuperate"
+  | "trade"
+  | "research"
+  | "other";
+
+/** A logged downtime activity a character spent days on between sessions. */
+export interface DowntimeEntry {
+  id: ID;
+  day: number;
+  characterId?: ID;
+  characterName?: string;
+  kind: DowntimeKind;
+  days: number;
+  note?: string;
+  /** Optional gp cost/gain recorded for flavor. */
+  gp?: number;
+}
+
+export interface CalendarState {
+  id: "calendar"; // singleton key
+  enabled?: boolean;
+  /** Absolute day count from the epoch (day 1 = first day of year `year0`). */
+  day: number;
+  /** The year number the epoch sits in. */
+  year0?: number;
+  config: CalendarConfig;
+  events: CalendarEvent[];
+  /** Recent downtime log (capped). */
+  downtime: DowntimeEntry[];
+  updatedAt: ISODateString;
+}
+
 export interface Campaign extends Entity {
   name: string;
   description?: string;

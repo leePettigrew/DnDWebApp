@@ -123,6 +123,7 @@ export const useTimeline = () => useCollection(useDataProvider().timeline);
 export const useRollHistory = () => useCollection(useDataProvider().rollHistory);
 export const useCombat = () => useSingleton(useDataProvider().combat);
 export const useEconomy = () => useSingleton(useDataProvider().economy);
+export const useCalendar = () => useSingleton(useDataProvider().calendar);
 
 export interface ActiveTradeApi {
   session: TradeSession | null;

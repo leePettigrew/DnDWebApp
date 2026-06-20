@@ -42,7 +42,7 @@ import type {
   P2pTradeCancelMessage,
 } from "../../shared/protocol";
 import { DM_ONLY_COLLECTIONS } from "../../shared/protocol";
-import type { CombatState, EconomyState } from "../../shared/domain";
+import type { CalendarState, CombatState, EconomyState } from "../../shared/domain";
 import {
   applyCommission,
   applyConsignBuy,
@@ -62,7 +62,7 @@ import type { RoomMember, RoomManager } from "./rooms";
 import { parseClientMessage } from "./validation";
 import { isAdminUser, verifyToken } from "./auth";
 import { isVisible } from "./visibility";
-import { cryptoRng, emptyCombat, emptyEconomy, generateJoinCode } from "./util";
+import { cryptoRng, emptyCalendar, emptyCombat, emptyEconomy, generateJoinCode } from "./util";
 
 /** Collections only the DM may write. characters + rollPresets have own rules. */
 const DM_ONLY: ReadonlySet<ScopedCollection> = new Set<ScopedCollection>(
@@ -145,6 +145,10 @@ export class ClientSession {
         return this.onEconomySet(msg.state);
       case "economy:update":
         return this.onEconomyUpdate(msg.patch);
+      case "calendar:set":
+        return this.onCalendarSet(msg.state);
+      case "calendar:update":
+        return this.onCalendarUpdate(msg.patch);
       case "trade:execute":
         return this.onTradeExecute(msg);
       case "service:buy":
@@ -344,6 +348,7 @@ export class ClientSession {
       timeline: vis(e.timeline.list(cid)) as CampaignSnapshot["timeline"],
       combat: this.repos.combat.get(cid) ?? emptyCombat(),
       economy: this.repos.economy.get(cid) ?? emptyEconomy(),
+      calendar: this.repos.calendar.get(cid) ?? emptyCalendar(),
       rollLog: this.repos.rollLog.list(cid, { includeHidden: role === "dm" }),
       presence: this.rooms.get(cid).presence(),
       chat: this.repos.chat.list(cid),
@@ -508,6 +513,34 @@ export class ClientSession {
     };
     this.repos.economy.set(this.campaignId!, next);
     this.rooms.get(this.campaignId!).broadcast({ type: "economy:changed", state: next });
+  }
+
+  // --- calendar (DM only) --------------------------------------------------
+
+  private onCalendarSet(state: CalendarState): void {
+    if (!this.requireCampaign()) return;
+    if (this.role !== "dm") {
+      return this.error("forbidden", "Only the DM controls the calendar.");
+    }
+    const next: CalendarState = { ...state, id: "calendar", updatedAt: nowISO() };
+    this.repos.calendar.set(this.campaignId!, next);
+    this.rooms.get(this.campaignId!).broadcast({ type: "calendar:changed", state: next });
+  }
+
+  private onCalendarUpdate(patch: Partial<CalendarState>): void {
+    if (!this.requireCampaign()) return;
+    if (this.role !== "dm") {
+      return this.error("forbidden", "Only the DM controls the calendar.");
+    }
+    const current = this.repos.calendar.get(this.campaignId!) ?? emptyCalendar();
+    const next: CalendarState = {
+      ...current,
+      ...patch,
+      id: "calendar",
+      updatedAt: nowISO(),
+    };
+    this.repos.calendar.set(this.campaignId!, next);
+    this.rooms.get(this.campaignId!).broadcast({ type: "calendar:changed", state: next });
   }
 
   /** A player (or the DM) buying/selling at a market — server-validated. */

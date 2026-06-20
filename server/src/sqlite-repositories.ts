@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
+  CalendarState,
   CombatState,
   EconomyState,
   Entity,
@@ -16,6 +17,7 @@ import type {
   ContentRepository,
   CombatRepository,
   EconomyRepository,
+  CalendarRepository,
   EntityRepository,
   MembershipRecord,
   MembershipRepository,
@@ -241,6 +243,26 @@ function createEconomyRepository(db: DatabaseSync): EconomyRepository {
   };
 }
 
+function createCalendarRepository(db: DatabaseSync): CalendarRepository {
+  const getStmt = db.prepare(
+    `SELECT data FROM calendar_state WHERE campaign_id = ?`,
+  );
+  const setStmt = db.prepare(
+    `INSERT INTO calendar_state (campaign_id, data, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(campaign_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+  );
+  return {
+    get(campaignId) {
+      const r = getStmt.get(campaignId) as Row | undefined;
+      return r ? (JSON.parse(str(r.data)) as CalendarState) : null;
+    },
+    set(campaignId, state) {
+      setStmt.run(campaignId, JSON.stringify(state), state.updatedAt);
+    },
+  };
+}
+
 function createRollLogRepository(db: DatabaseSync): RollLogRepository {
   const insert = db.prepare(
     `INSERT INTO roll_log (id, campaign_id, rolled_by_user_id, hidden, data, created_at)
@@ -380,6 +402,7 @@ function createAdminRepository(db: DatabaseSync): AdminRepository {
   );
   const delCombat = db.prepare(`DELETE FROM combat_state WHERE campaign_id = ?`);
   const delEconomy = db.prepare(`DELETE FROM economy_state WHERE campaign_id = ?`);
+  const delCalendar = db.prepare(`DELETE FROM calendar_state WHERE campaign_id = ?`);
   const delRolls = db.prepare(`DELETE FROM roll_log WHERE campaign_id = ?`);
   const delChat = db.prepare(`DELETE FROM chat_messages WHERE campaign_id = ?`);
   const delMembersByCampaign = db.prepare(
@@ -410,6 +433,7 @@ function createAdminRepository(db: DatabaseSync): AdminRepository {
       for (const stmt of delScoped) stmt.run(id);
       delCombat.run(id);
       delEconomy.run(id);
+      delCalendar.run(id);
       delRolls.run(id);
       delChat.run(id);
       delMembersByCampaign.run(id);
@@ -440,6 +464,7 @@ export function createSqliteRepositories(db: DatabaseSync): Repositories {
     entities,
     combat: createCombatRepository(db),
     economy: createEconomyRepository(db),
+    calendar: createCalendarRepository(db),
     rollLog: createRollLogRepository(db),
     chat: createChatRepository(db),
     content: createContentRepository(db),

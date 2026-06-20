@@ -14,6 +14,7 @@ import { newId, nowISO } from "@/lib/domain/ids";
 import type { ID } from "@/lib/domain/ids";
 import { rollSpec } from "@/lib/domain/dice";
 import { emptyEconomy } from "@shared/economy";
+import { emptyCalendar } from "@shared/calendar";
 import {
   applyCommission,
   applyConsignBuy,
@@ -721,6 +722,7 @@ class LocalDataProvider implements DataProvider {
   readonly rollHistory;
   readonly combat;
   readonly economy;
+  readonly calendar;
   readonly session: SessionController;
   readonly auth: AuthController;
   readonly realtime: RealtimeController;
@@ -743,6 +745,7 @@ class LocalDataProvider implements DataProvider {
     this.rollHistory = new LocalCollection("rollHistory", persistence, []);
     this.combat = new LocalSingleton("combat", persistence, emptyCombatState);
     this.economy = new LocalSingleton("economy", persistence, emptyEconomy());
+    this.calendar = new LocalSingleton("calendar", persistence, emptyCalendar());
 
     const auth = new LocalAuthController();
     this.auth = auth;

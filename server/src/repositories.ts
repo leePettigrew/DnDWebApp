@@ -1,4 +1,5 @@
 import type {
+  CalendarState,
   CombatState,
   EconomyState,
   Entity,
@@ -79,6 +80,11 @@ export interface CombatRepository {
   set(campaignId: string, state: CombatState): void;
 }
 
+export interface CalendarRepository {
+  get(campaignId: string): CalendarState | null;
+  set(campaignId: string, state: CalendarState): void;
+}
+
 export interface EconomyRepository {
   get(campaignId: string): EconomyState | null;
   set(campaignId: string, state: EconomyState): void;
@@ -142,6 +148,7 @@ export interface Repositories {
   entities: Record<ScopedCollection, EntityRepository>;
   combat: CombatRepository;
   economy: EconomyRepository;
+  calendar: CalendarRepository;
   rollLog: RollLogRepository;
   chat: ChatRepository;
   content: ContentRepository;

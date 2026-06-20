@@ -2,6 +2,7 @@ import type {
   BattleMap,
   Campaign,
   Character,
+  CalendarState,
   CombatState,
   EconomyState,
   EconomyTransaction,
@@ -132,6 +133,7 @@ export interface CampaignSnapshot {
   timeline: TimelineEvent[];
   combat: CombatState;
   economy: EconomyState;
+  calendar: CalendarState;
   rollLog: RollHistoryEntry[];
   presence: PresenceUser[];
   chat: ChatMessage[];
@@ -235,6 +237,14 @@ export interface EconomySetMessage {
 export interface EconomyUpdateMessage {
   type: "economy:update";
   patch: Partial<EconomyState>;
+}
+export interface CalendarSetMessage {
+  type: "calendar:set";
+  state: CalendarState;
+}
+export interface CalendarUpdateMessage {
+  type: "calendar:update";
+  patch: Partial<CalendarState>;
 }
 /** A player buying/selling at a market. Server-validated (anti-cheat). */
 export interface TradeExecuteMessage {
@@ -391,6 +401,8 @@ export type ClientMessage =
   | CombatUpdateMessage
   | EconomySetMessage
   | EconomyUpdateMessage
+  | CalendarSetMessage
+  | CalendarUpdateMessage
   | TradeExecuteMessage
   | ServiceBuyMessage
   | CommissionFulfillMessage
@@ -456,6 +468,10 @@ export interface CombatChangedMessage {
 export interface EconomyChangedMessage {
   type: "economy:changed";
   state: EconomyState;
+}
+export interface CalendarChangedMessage {
+  type: "calendar:changed";
+  state: CalendarState;
 }
 export interface DiceRolledMessage {
   type: "dice:rolled";
@@ -531,6 +547,7 @@ export type ServerMessage =
   | EntityChangedMessage
   | CombatChangedMessage
   | EconomyChangedMessage
+  | CalendarChangedMessage
   | DiceRolledMessage
   | TradeResultMessage
   | P2pTradeResultMessage
