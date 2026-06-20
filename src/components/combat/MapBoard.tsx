@@ -11,6 +11,7 @@ import {
 import { cn } from "@/components/ui/cn";
 import { useMapPings, useMaps, useRealtime } from "@/lib/data/hooks";
 import type {
+  AoeTemplate,
   BattleMap,
   CombatState,
   MapLight,
@@ -33,7 +34,8 @@ import {
   paintFog,
 } from "@/lib/map/fog";
 
-type Tool = "select" | "pan" | "wall" | "light" | "draw" | "erase" | "ruler" | "ping";
+type Tool = "select" | "pan" | "wall" | "light" | "aoe" | "draw" | "erase" | "ruler" | "ping";
+type AoeShape = "circle" | "cone" | "line";
 
 const DRAW_COLOR = "#E6C772";
 
@@ -44,6 +46,7 @@ const ALL_TOOLS: { key: Tool; label: string; dm?: boolean }[] = [
   { key: "ping", label: "Ping" },
   { key: "wall", label: "Wall", dm: true },
   { key: "light", label: "Light", dm: true },
+  { key: "aoe", label: "AoE", dm: true },
   { key: "draw", label: "Draw", dm: true },
   { key: "erase", label: "Erase", dm: true },
 ];
@@ -60,6 +63,43 @@ function initials(name: string): string {
   if (!p.length) return "?";
   return (p.length === 1 ? p[0].slice(0, 2) : p[0][0] + p[p.length - 1][0]).toUpperCase();
 }
+
+/** SVG polygon points for a cone or line AoE template (D&D geometry). */
+function aoePolygon(t: AoeTemplate): string {
+  const ang = t.angle ?? 0;
+  const dx = Math.cos(ang);
+  const dy = Math.sin(ang);
+  const px = -dy;
+  const py = dx;
+  const fx = t.x + dx * t.size;
+  const fy = t.y + dy * t.size;
+  if (t.shape === "cone") {
+    const h = t.size / 2; // far edge width = length (5e cone)
+    return `${t.x},${t.y} ${fx + px * h},${fy + py * h} ${fx - px * h},${fy - py * h}`;
+  }
+  const w = (t.width ?? 0) / 2;
+  return `${t.x + px * w},${t.y + py * w} ${fx + px * w},${fy + py * w} ${fx - px * w},${fy - py * w} ${t.x - px * w},${t.y - py * w}`;
+}
+
+/** At-a-glance glyphs for the 5e conditions, drawn as badges above a token. */
+const CONDITION_ICON: Record<string, string> = {
+  blinded: "🙈",
+  charmed: "💗",
+  deafened: "🔇",
+  exhaustion: "😩",
+  frightened: "😱",
+  grappled: "🤼",
+  incapacitated: "💫",
+  invisible: "👻",
+  paralyzed: "🌀",
+  petrified: "🗿",
+  poisoned: "🤢",
+  prone: "⬇️",
+  restrained: "⛓️",
+  stunned: "⭐",
+  unconscious: "💤",
+  concentration: "🧠",
+};
 
 export function MapBoard({
   map,
@@ -95,6 +135,10 @@ export function MapBoard({
     | { kind: "draw"; points: number[] }
     | null
   >(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const [aoeShape, setAoeShape] = useState<AoeShape>("circle");
+  const [aoeFeet, setAoeFeet] = useState(20);
+  const [aoe, setAoe] = useState<AoeTemplate | null>(null);
 
   const gesture = useRef<
     | { mode: "pan"; lastX: number; lastY: number }
@@ -102,6 +146,7 @@ export function MapBoard({
     | { mode: "wall"; from: Pt }
     | { mode: "draw" }
     | { mode: "ruler"; from: Pt }
+    | { mode: "aoe"; origin: Pt }
     | null
   >(null);
 
@@ -111,8 +156,12 @@ export function MapBoard({
   const lightLevel = map.lightLevel ?? "bright";
   const lights = useMemo(() => map.lights ?? [], [map.lights]);
   const tokens = map.tokens ?? [];
+  const tokensRef = useRef(tokens);
+  tokensRef.current = tokens;
   const walls = map.walls ?? [];
   const drawings = map.drawings ?? [];
+  const templates = map.templates ?? [];
+  const pxPerFoot = grid > 0 ? grid / feetPerCell : 12;
 
   // Default vision for PC tokens so the map isn't pitch black if unset.
   const defaultVision = grid ? grid * 12 : imgSize ? Math.max(imgSize.w, imgSize.h) * 0.3 : 300;
@@ -156,6 +205,27 @@ export function MapBoard({
       offsetY: (r.height - imgSize.h * scale) / 2,
     });
   }, [imgSize, map.id]);
+
+  // Center + flash a token when its row is clicked in the initiative tracker.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const id = (e as CustomEvent<{ combatantId?: string }>).detail?.combatantId;
+      const cont = containerRef.current;
+      if (!id || !cont) return;
+      const tk = tokensRef.current.find((t) => t.combatantId === id);
+      if (!tk) return;
+      const r = cont.getBoundingClientRect();
+      setView((v) => ({
+        ...v,
+        offsetX: r.width / 2 - tk.x * v.scale,
+        offsetY: r.height / 2 - tk.y * v.scale,
+      }));
+      setFlashId(tk.id);
+      window.setTimeout(() => setFlashId((cur) => (cur === tk.id ? null : cur)), 1700);
+    };
+    window.addEventListener("dl:focus-combatant", onFocus);
+    return () => window.removeEventListener("dl:focus-combatant", onFocus);
+  }, []);
 
   // --- fog rendering -------------------------------------------------------
 
@@ -347,6 +417,23 @@ export function MapBoard({
           void updateMap(map.id, { lights: [...lights, light] });
         }
         break;
+      case "aoe":
+        if (isDM) {
+          const origin = grid ? snapToCellCenter(p, grid) : p;
+          const sizePx = Math.max(1, aoeFeet) * pxPerFoot;
+          gesture.current = { mode: "aoe", origin };
+          setAoe({
+            id: newId(),
+            shape: aoeShape,
+            x: origin.x,
+            y: origin.y,
+            size: sizePx,
+            angle: 0,
+            width: aoeShape === "line" ? Math.max(pxPerFoot * 5, grid || pxPerFoot * 5) : undefined,
+            color: "#C25A3D",
+          });
+        }
+        break;
       case "draw":
         if (isDM) {
           gesture.current = { mode: "draw" };
@@ -383,6 +470,15 @@ export function MapBoard({
           ? { kind: "draw", points: [...cur.points, p.x, p.y] }
           : cur,
       );
+    } else if (g.mode === "aoe") {
+      setAoe((cur) => {
+        if (!cur) return cur;
+        if (cur.shape === "circle") {
+          const c = grid ? snapToCellCenter(p, grid) : p;
+          return { ...cur, x: c.x, y: c.y };
+        }
+        return { ...cur, angle: Math.atan2(p.y - g.origin.y, p.x - g.origin.x) };
+      });
     }
   }
 
@@ -419,12 +515,24 @@ export function MapBoard({
         });
       }
       setPending(null);
+    } else if (g.mode === "aoe" && aoe) {
+      void updateMap(map.id, { templates: [...templates, aoe] });
+      setAoe(null);
     }
   }
 
   function eraseAt(p: Pt) {
-    // Nearest light first, then wall, then drawing.
+    // AoE template first (click its origin / inside a circle), then light, wall, drawing.
     const threshold = 14 / view.scale;
+    const tplHit = templates.find((t) =>
+      t.shape === "circle"
+        ? dist(p, { x: t.x, y: t.y }) <= t.size
+        : dist(p, { x: t.x, y: t.y }) <= Math.max(threshold, grid * 0.6),
+    );
+    if (tplHit) {
+      void updateMap(map.id, { templates: templates.filter((t) => t.id !== tplHit.id) });
+      return;
+    }
     const lightHit = lights.find((L) => dist(p, { x: L.x, y: L.y }) < Math.max(threshold, grid * 0.4));
     if (lightHit) {
       void updateMap(map.id, { lights: lights.filter((L) => L.id !== lightHit.id) });
@@ -604,6 +712,37 @@ export function MapBoard({
                 viewBox={`0 0 ${imgSize.w} ${imgSize.h}`}
                 className="pointer-events-none absolute left-0 top-0"
               >
+                {/* AoE spell templates — visible to everyone, above fog, under tokens */}
+                {[...templates, ...(aoe ? [aoe] : [])].map((t) => {
+                  const color = t.color ?? "#C25A3D";
+                  const feet = Math.round(t.size / pxPerFoot);
+                  const lx = t.shape === "circle" ? t.x : t.x + Math.cos(t.angle ?? 0) * t.size * 0.5;
+                  const ly = t.shape === "circle" ? t.y : t.y + Math.sin(t.angle ?? 0) * t.size * 0.5;
+                  return (
+                    <g key={t.id}>
+                      {t.shape === "circle" ? (
+                        <circle cx={t.x} cy={t.y} r={t.size} fill={hexA(color, 0.22)} stroke={color} strokeWidth={2.5} opacity={0.9} />
+                      ) : (
+                        <polygon points={aoePolygon(t)} fill={hexA(color, 0.22)} stroke={color} strokeWidth={2.5} opacity={0.9} />
+                      )}
+                      <text
+                        x={lx}
+                        y={ly}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={Math.max(12, grid * 0.3)}
+                        fontWeight={700}
+                        fill="#F5E9CF"
+                        stroke="#0E0A06"
+                        strokeWidth={Math.max(2, grid * 0.02)}
+                        paintOrder="stroke"
+                      >
+                        {feet} ft
+                      </text>
+                    </g>
+                  );
+                })}
+
                 {isDM && (
                   <g stroke="#C25A3D" strokeWidth={3} strokeLinecap="round" opacity={0.85}>
                     {walls.map((w) => (
@@ -640,6 +779,12 @@ export function MapBoard({
                       {active && (
                         <circle r={t.radius + 6} fill="none" stroke="#E6C772" strokeWidth={4} opacity={0.9} />
                       )}
+                      {flashId === t.id && (
+                        <circle r={t.radius + 8} fill="none" stroke="#F5E9CF" strokeWidth={5}>
+                          <animate attributeName="r" values={`${t.radius + 4};${t.radius + 30}`} dur="0.85s" repeatCount="2" />
+                          <animate attributeName="opacity" values="0.95;0" dur="0.85s" repeatCount="2" />
+                        </circle>
+                      )}
                       <circle
                         r={t.radius}
                         fill={t.isPC ? "#243524" : "#3a1c17"}
@@ -671,6 +816,40 @@ export function MapBoard({
                           hidden
                         </text>
                       )}
+                      {c && c.conditions.length > 0 && (() => {
+                        const conds = c.conditions.slice(0, 6);
+                        const n = conds.length;
+                        const size = Math.max(11, t.radius * 0.62);
+                        const gap = size * 1.04;
+                        const totalW = (n - 1) * gap + size;
+                        const cy = -(t.radius + size * 0.85);
+                        return (
+                          <g>
+                            <title>{conds.join(", ")}</title>
+                            <rect
+                              x={-totalW / 2 - 3}
+                              y={cy - size / 2 - 2}
+                              width={totalW + 6}
+                              height={size + 4}
+                              rx={(size + 4) / 2}
+                              fill="#0E0A06"
+                              opacity={0.6}
+                            />
+                            {conds.map((cond, i) => (
+                              <text
+                                key={cond}
+                                x={-totalW / 2 + size / 2 + i * gap}
+                                y={cy}
+                                textAnchor="middle"
+                                dominantBaseline="central"
+                                fontSize={size}
+                              >
+                                {CONDITION_ICON[cond] ?? "•"}
+                              </text>
+                            ))}
+                          </g>
+                        );
+                      })()}
                     </g>
                   );
                 })}
@@ -756,6 +935,46 @@ export function MapBoard({
             </button>
           )}
         </div>
+
+        {/* AoE template controls */}
+        {isDM && tool === "aoe" && (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            className="absolute bottom-2 left-2 flex flex-wrap items-center gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 text-xs backdrop-blur"
+          >
+            {(["circle", "cone", "line"] as AoeShape[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => setAoeShape(s)}
+                className={cn(
+                  "rounded-md px-2 py-1 font-semibold capitalize transition-colors",
+                  aoeShape === s ? "bg-oxblood text-parchment-50" : "text-ink-soft hover:bg-parchment-300/60",
+                )}
+              >
+                {s}
+              </button>
+            ))}
+            <label className="ml-1 flex items-center gap-1 text-ink-soft">
+              <input
+                type="number"
+                min={5}
+                step={5}
+                value={aoeFeet}
+                onChange={(e) => setAoeFeet(Math.max(5, Number(e.target.value) || 5))}
+                className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
+              />
+              ft
+            </label>
+            {templates.length > 0 && (
+              <button
+                onClick={() => void updateMap(map.id, { templates: [] })}
+                className="rounded-md px-2 py-1 font-semibold text-ink-soft hover:bg-parchment-300/60 hover:text-oxblood"
+              >
+                Clear ({templates.length})
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Zoom */}
         <div

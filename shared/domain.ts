@@ -1084,6 +1084,24 @@ export interface MapLight {
   intensity?: number;
 }
 
+/** A spell/area-of-effect measuring template laid on the battle map (all px). */
+export interface AoeTemplate {
+  id: ID;
+  shape: "circle" | "cone" | "line";
+  /** Origin: circle center, or cone/line apex. */
+  x: number;
+  y: number;
+  /** Radius (circle) or length (cone/line) in map px. */
+  size: number;
+  /** Aim direction in radians (cone/line only). */
+  angle?: number;
+  /** Line width in map px (line only). */
+  width?: number;
+  color?: string;
+  /** Optional label, e.g. "Fireball". */
+  label?: string;
+}
+
 /** A labelled point of interest on an overworld map (percent coordinates). */
 export interface MapLocation {
   id: ID;
@@ -1278,6 +1296,8 @@ export interface BattleMap extends Entity {
   walls?: Wall[];
   drawings?: MapDrawing[];
   tokens?: MapToken[];
+  /** Area-of-effect spell templates currently laid on the map. */
+  templates?: AoeTemplate[];
   /** Tile-painted build data (2D battle-map builder). */
   build?: BattleBuild;
 }

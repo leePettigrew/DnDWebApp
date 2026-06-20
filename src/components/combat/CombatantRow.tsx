@@ -10,6 +10,7 @@ import {
 import {
   ChevronRightIcon,
   HeartIcon,
+  MapIcon,
   ShieldIcon,
   TrashIcon,
 } from "@/components/ui/icons";
@@ -104,6 +105,19 @@ export function CombatantRow({
             >
               {c.isPC ? "PC" : "NPC"}
             </span>
+            <button
+              type="button"
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent("dl:focus-combatant", { detail: { combatantId: c.id } }),
+                )
+              }
+              title="Find this token on the battle map"
+              aria-label="Find on battle map"
+              className="shrink-0 rounded p-0.5 text-ink-faint hover:bg-parchment-300/60 hover:text-brass-dark"
+            >
+              <MapIcon className="h-3.5 w-3.5" />
+            </button>
           </div>
           {c.conditions.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
