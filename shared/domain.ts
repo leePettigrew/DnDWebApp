@@ -504,15 +504,40 @@ export interface EconomyTransaction {
   note?: string;
 }
 
+/** A place on the map that produces a commodity into a market each sim day. */
+export interface ResourceNode {
+  id: ID;
+  name: string;
+  /** Commodity this node produces. */
+  commodityId: ID;
+  /** Units produced per simulated day. */
+  rate: number;
+  /** Market it stocks. Empty → the global market. */
+  marketId?: ID;
+  /** Optional atlas placement (used by the world map integration). */
+  mapId?: ID;
+  poiId?: ID;
+  x?: number;
+  y?: number;
+  /** Free-text location label. */
+  location?: string;
+  /** Produce or sit idle without deleting it. Defaults to active. */
+  active?: boolean;
+}
+
 export interface EconomyState {
   id: "economy"; // singleton key
   enabled?: boolean;
   /** Simulation clock. */
   sim?: "live" | "paused";
   day?: number;
+  /** Real seconds per simulated day while "live". */
+  tickSeconds?: number;
   config: EconomyConfig;
   commodities: Commodity[];
   markets: Market[];
+  /** Map resource nodes that feed supply into markets each day. */
+  nodes?: ResourceNode[];
   events: EconomyEvent[];
   /** Recent transaction log (capped). */
   log: EconomyTransaction[];

@@ -9,8 +9,9 @@ import { newId } from "@/lib/domain/ids";
 import { useEconomy } from "@/lib/data/hooks";
 import { emptyEconomy } from "@shared/economy";
 import { revertTransaction } from "@shared/economy-trade";
+import { tickEconomy } from "@shared/economy-sim";
 import { MarketEditor } from "@/components/dm/MarketEditor";
-import type { Commodity, EconomyConfig } from "@/lib/domain/types";
+import type { Commodity, EconomyConfig, ResourceNode } from "@/lib/domain/types";
 
 const CATEGORIES = [
   "metal",
@@ -39,7 +40,7 @@ const CONFIG_FIELDS: { key: keyof EconomyConfig; label: string; hint: string; st
 ];
 
 export function EconomyConsole() {
-  const { value: economy, update, loading } = useEconomy();
+  const { value: economy, update, set, loading } = useEconomy();
 
   if (!economy) {
     return (
@@ -53,12 +54,31 @@ export function EconomyConsole() {
 
   const config = economy.config;
   const commodities = economy.commodities ?? [];
+  const markets = economy.markets ?? [];
+  const nodes = economy.nodes ?? [];
 
   const setCommodities = (next: Commodity[]) => void update({ commodities: next });
   const updateCommodity = (id: string, patch: Partial<Commodity>) =>
     setCommodities(commodities.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const setConfig = (patch: Partial<EconomyConfig>) =>
     void update({ config: { ...config, ...patch } });
+
+  const setNodes = (next: ResourceNode[]) => void update({ nodes: next });
+  const updateNode = (id: string, patch: Partial<ResourceNode>) =>
+    setNodes(nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)));
+  const addNode = () =>
+    setNodes([
+      ...nodes,
+      {
+        id: newId(),
+        name: "New node",
+        commodityId: commodities[0]?.id ?? "",
+        rate: 5,
+        active: true,
+      },
+    ]);
+
+  const step = () => void set(tickEconomy(economy));
 
   const addCommodity = () =>
     setCommodities([
@@ -117,6 +137,48 @@ export function EconomyConsole() {
             Disable
           </Button>
         </div>
+      </Panel>
+
+      {/* Simulation */}
+      <Panel title="Simulation" eyebrow="Play the market">
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge tone={economy.sim === "live" ? "forest" : "neutral"}>
+            {economy.sim === "live" ? "● Live" : "Paused"}
+          </Badge>
+          <span className="text-sm text-ink">
+            Day <span className="font-mono font-semibold">{economy.day ?? 1}</span>
+          </span>
+          {economy.sim === "live" ? (
+            <Button size="sm" variant="secondary" onClick={() => update({ sim: "paused" })}>
+              Pause
+            </Button>
+          ) : (
+            <Button size="sm" onClick={() => update({ sim: "live" })}>
+              Play
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={step}>
+            Step a day
+          </Button>
+          <label className="ml-auto flex items-center gap-1.5 text-xs text-ink-soft">
+            Seconds / day
+            <input
+              type="number"
+              min={2}
+              step={1}
+              defaultValue={economy.tickSeconds ?? 60}
+              key={`ts-${economy.tickSeconds}`}
+              onBlur={(e) =>
+                update({ tickSeconds: Math.max(2, Math.floor(Number(e.target.value) || 60)) })
+              }
+              className={cn(inputClass, "w-20")}
+            />
+          </label>
+        </div>
+        <p className="mt-2 text-[0.65rem] text-ink-faint">
+          Each day, markets restock toward their baseline and resource nodes add
+          production. “Live” advances automatically while your DM window is open.
+        </p>
       </Panel>
 
       {/* Ledger / activity */}
@@ -233,6 +295,119 @@ export function EconomyConsole() {
           sell previews use each market&apos;s standing.
         </p>
         <MarketEditor economy={economy} update={update} />
+      </Panel>
+
+      {/* Resource nodes */}
+      <Panel title="Resource nodes" eyebrow="Where supply is made">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs text-ink-faint">
+            Mines, farms, and forests that add a commodity to a market every
+            simulated day — the supply side of the world.
+          </p>
+          <Button size="sm" variant="secondary" onClick={addNode}>
+            <PlusIcon className="h-4 w-4" /> Add
+          </Button>
+        </div>
+        {nodes.length === 0 ? (
+          <p className="text-sm text-ink-faint">
+            No resource nodes yet. Add a mine or farm to feed a market.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[46rem] text-sm">
+              <thead>
+                <tr className="text-left text-[0.65rem] uppercase tracking-wide text-ink-faint">
+                  <th className="px-1 pb-1 font-semibold">Name</th>
+                  <th className="px-1 pb-1 font-semibold">Produces</th>
+                  <th className="px-1 pb-1 font-semibold">/ day</th>
+                  <th className="px-1 pb-1 font-semibold">Into market</th>
+                  <th className="px-1 pb-1 font-semibold">Location</th>
+                  <th className="px-1 pb-1 font-semibold">On</th>
+                  <th className="pb-1" />
+                </tr>
+              </thead>
+              <tbody>
+                {nodes.map((n) => (
+                  <tr key={n.id} className="border-t border-parchment-400/40">
+                    <td className="px-1 py-1">
+                      <input
+                        defaultValue={n.name}
+                        key={`nn-${n.id}`}
+                        onBlur={(e) => updateNode(n.id, { name: e.target.value })}
+                        className={cn(inputClass, "min-w-28 font-semibold")}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <select
+                        value={n.commodityId}
+                        onChange={(e) => updateNode(n.id, { commodityId: e.target.value })}
+                        className="h-8 rounded-md border border-parchment-400 bg-parchment-50 px-1 text-xs text-ink focus:border-brass focus:outline-none"
+                      >
+                        {commodities.length === 0 && <option value="">—</option>}
+                        {commodities.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        defaultValue={n.rate}
+                        key={`nr-${n.id}-${n.rate}`}
+                        onBlur={(e) => updateNode(n.id, { rate: Math.max(0, Number(e.target.value) || 0) })}
+                        className={cn(inputClass, "w-16")}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <select
+                        value={n.marketId ?? ""}
+                        onChange={(e) => updateNode(n.id, { marketId: e.target.value || undefined })}
+                        className="h-8 rounded-md border border-parchment-400 bg-parchment-50 px-1 text-xs text-ink focus:border-brass focus:outline-none"
+                      >
+                        <option value="">Global market</option>
+                        {markets.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        defaultValue={n.location ?? ""}
+                        key={`nl-${n.id}`}
+                        placeholder="e.g. Ironreach Hills"
+                        onBlur={(e) => updateNode(n.id, { location: e.target.value || undefined })}
+                        className={cn(inputClass, "min-w-28")}
+                      />
+                    </td>
+                    <td className="px-1 py-1 text-center">
+                      <input
+                        type="checkbox"
+                        checked={n.active !== false}
+                        onChange={(e) => updateNode(n.id, { active: e.target.checked })}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <button
+                        type="button"
+                        onClick={() => setNodes(nodes.filter((x) => x.id !== n.id))}
+                        aria-label="Remove node"
+                        className="rounded-md p-1.5 text-ink-faint hover:bg-oxblood hover:text-parchment-50"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
 
       {/* Commodity catalog */}
