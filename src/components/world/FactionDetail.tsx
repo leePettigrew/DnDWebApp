@@ -14,6 +14,7 @@ import { FactionMembers } from "./FactionMembers";
 import { FactionAgendas } from "./FactionAgendas";
 import { FactionQuestsHistory } from "./FactionQuestsHistory";
 import { FactionReadView } from "./FactionReadView";
+import { FactionEconomySummary } from "./FactionEconomySummary";
 import { usePermissions } from "@/lib/data/hooks";
 import {
   FACTION_STANDINGS,
@@ -236,6 +237,8 @@ export function FactionDetail({
       <FactionMembers faction={f} onUpdate={onUpdate} />
 
       <FactionRelationships faction={f} />
+
+      <FactionEconomySummary faction={f} />
 
       <FactionAgendas faction={f} onUpdate={onUpdate} />
 

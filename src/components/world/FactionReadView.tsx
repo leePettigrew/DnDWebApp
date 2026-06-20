@@ -14,6 +14,7 @@ import {
   type FactionRelationKind,
 } from "@/lib/domain/types";
 import { STANDING_TONE } from "./FactionDetail";
+import { FactionEconomySummary } from "./FactionEconomySummary";
 
 const REL_TONE: Record<
   FactionRelationKind,
@@ -195,6 +196,8 @@ export function FactionReadView({
           </div>
         </Panel>
       )}
+
+      <FactionEconomySummary faction={f} />
 
       {linkedQuests.length > 0 && (
         <Panel title="Quests">
