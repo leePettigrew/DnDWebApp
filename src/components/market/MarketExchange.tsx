@@ -8,6 +8,7 @@ import { CoinIcon } from "@/components/ui/icons";
 import { useEconomy, useFactions, usePermissions } from "@/lib/data/hooks";
 import { quoteCommodityGood, standingToRep } from "@shared/economy-pricing";
 import { canAccessMarket } from "@shared/economy-trade";
+import { PriceChart } from "./PriceChart";
 import type { Market } from "@/lib/domain/types";
 
 function Sparkline({ values }: { values: number[] }) {
@@ -46,6 +47,7 @@ export function MarketExchange({ onJump }: { onJump?: (marketId: string) => void
   const { isDM, userId, multiUser } = usePermissions();
   const [cat, setCat] = useState<string>("all");
   const [sort, setSort] = useState<Sort>("spread");
+  const [chartId, setChartId] = useState<string | null>(null);
 
   const repForMarket = (m: Market) =>
     m.kind === "faction"
@@ -147,6 +149,36 @@ export function MarketExchange({ onJump }: { onJump?: (marketId: string) => void
         <p className="text-sm text-ink-faint">No commodities trade in markets you can reach.</p>
       ) : (
         <>
+          {(() => {
+            const id = chartId ?? rows[0]?.c.id;
+            const row = rows.find((r) => r.c.id === id) ?? rows[0];
+            const pts = (economy.priceHistory ?? [])
+              .map((s) => ({ day: s.day, value: s.prices[id] }))
+              .filter((p): p is { day: number; value: number } => typeof p.value === "number");
+            return (
+              <div className="mb-4 rounded-lg border border-parchment-400/60 bg-parchment-50/50 p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="font-display font-semibold text-ink">{row?.c.name}</span>
+                  <span className="font-mono text-sm text-ink-soft">{row?.price} gp</span>
+                  <span className={cn("font-mono text-xs", row && row.change > 0 ? "text-forest" : row && row.change < 0 ? "text-oxblood" : "text-ink-faint")}>
+                    {row && row.change > 0 ? "▲" : row && row.change < 0 ? "▼" : ""}
+                    {row ? Math.abs(row.change * 100).toFixed(1) : "0"}%
+                  </span>
+                  <select
+                    value={id}
+                    onChange={(e) => setChartId(e.target.value)}
+                    className="ml-auto h-8 rounded-md border border-parchment-400 bg-parchment-50 px-1 text-xs text-ink focus:border-brass focus:outline-none"
+                  >
+                    {rows.map((r) => (
+                      <option key={r.c.id} value={r.c.id}>{r.c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <PriceChart points={pts} />
+              </div>
+            );
+          })()}
+
           <div className="mb-3 flex flex-wrap gap-1">
             {["all", ...cats].map((c) => (
               <button
@@ -180,7 +212,14 @@ export function MarketExchange({ onJump }: { onJump?: (marketId: string) => void
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.c.id} className="border-t border-parchment-400/40">
+                  <tr
+                    key={r.c.id}
+                    onClick={() => setChartId(r.c.id)}
+                    className={cn(
+                      "cursor-pointer border-t border-parchment-400/40 hover:bg-parchment-100/60",
+                      (chartId ?? rows[0]?.c.id) === r.c.id && "bg-brass/5",
+                    )}
+                  >
                     <td className="px-2 py-1.5 font-semibold text-ink">
                       {r.c.name}
                       <span className="ml-1 text-[0.65rem] font-normal text-ink-faint">{r.c.category}</span>
@@ -200,7 +239,10 @@ export function MarketExchange({ onJump }: { onJump?: (marketId: string) => void
                       {onJump ? (
                         <button
                           type="button"
-                          onClick={() => onJump(r.buyAtId)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onJump(r.buyAtId);
+                          }}
                           className="text-xs text-ink-faint underline decoration-dotted underline-offset-2 hover:text-brass-dark"
                           title={`Go to ${r.buyAt}`}
                         >
@@ -215,7 +257,10 @@ export function MarketExchange({ onJump }: { onJump?: (marketId: string) => void
                       {onJump ? (
                         <button
                           type="button"
-                          onClick={() => onJump(r.sellAtId)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onJump(r.sellAtId);
+                          }}
                           className="text-xs text-ink-faint underline decoration-dotted underline-offset-2 hover:text-brass-dark"
                           title={`Go to ${r.sellAt}`}
                         >

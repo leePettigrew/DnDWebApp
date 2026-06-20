@@ -32,6 +32,9 @@ export function CalendarView() {
   const { items: characters } = useCharacters();
 
   const [advN, setAdvN] = useState(1);
+  const [sdYear, setSdYear] = useState<number | null>(null);
+  const [sdMonth, setSdMonth] = useState<number | null>(null);
+  const [sdDom, setSdDom] = useState<number | null>(null);
   const [evTitle, setEvTitle] = useState("");
   const [evIn, setEvIn] = useState(1);
   const [dtChar, setDtChar] = useState("");
@@ -48,14 +51,14 @@ export function CalendarView() {
     );
   }
 
-  if (!cal.enabled) {
+  if (!cal.enabled || (cal.hidden && !isDM)) {
     return (
       <Panel title="Campaign Calendar" eyebrow="The turning of days">
         <p className="text-sm text-ink-soft">
           Track the date, seasons, and moons of your world — and the downtime your
           party spends between sessions.
         </p>
-        {isDM ? (
+        {isDM && !cal.enabled ? (
           <Button className="mt-4" onClick={() => set({ ...emptyCalendar(), enabled: true })}>
             Start the calendar
           </Button>
@@ -75,11 +78,21 @@ export function CalendarView() {
     if (!isDM || n === 0) return;
     const day = Math.max(1, (cal.day ?? 1) + n);
     update({ day });
-    if (n > 0 && economy?.enabled) {
+    // Keep the market clock locked to the calendar: simulate forward days
+    // (capped), then pin economy.day to the calendar's day either way.
+    if (economy?.enabled) {
       let e = economy;
-      for (let i = 0; i < Math.min(n, MAX_ECON_TICKS); i++) e = tickEconomy(e);
-      void setEconomy(e);
+      if (n > 0) for (let i = 0; i < Math.min(n, MAX_ECON_TICKS); i++) e = tickEconomy(e);
+      void setEconomy({ ...e, day });
     }
+  };
+
+  const setDate = (year: number, monthIndex: number, dom: number) => {
+    if (!isDM) return;
+    const daysBefore = config.months.slice(0, monthIndex).reduce((n, m) => n + Math.max(1, m.days), 0);
+    const day = daysBefore + Math.max(1, dom);
+    update({ year0: year, day });
+    if (economy?.enabled) void setEconomy({ ...economy, day });
   };
 
   const addEvent = () => {
@@ -161,6 +174,16 @@ export function CalendarView() {
 
           {isDM && (
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              {economy?.enabled && (
+                <Button
+                  size="sm"
+                  variant={economy.sim === "live" ? "secondary" : "primary"}
+                  onClick={() => void setEconomy({ ...economy, sim: economy.sim === "live" ? "paused" : "live" })}
+                  title="Run the world clock"
+                >
+                  {economy.sim === "live" ? "⏸ Pause" : "▶ Live"}
+                </Button>
+              )}
               <Button size="sm" variant="ghost" onClick={() => advance(-1)} title="Back a day">−1d</Button>
               <Button size="sm" variant="secondary" onClick={() => advance(1)}>+1 day</Button>
               <Button size="sm" variant="secondary" onClick={() => advance(weekLen)}>+1 week</Button>
@@ -184,6 +207,62 @@ export function CalendarView() {
           </p>
         )}
       </Panel>
+
+      {/* Set the date (where to start) */}
+      {isDM && (
+        <Panel title="Set the date" eyebrow="Where the story begins">
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs text-ink-soft">
+              <span className="mb-1 block font-semibold text-ink">Day</span>
+              <input
+                type="number"
+                min={1}
+                max={config.months[(sdMonth ?? date.monthIndex)]?.days ?? 30}
+                value={sdDom ?? date.dayOfMonth}
+                onChange={(e) => setSdDom(Math.max(1, Number(e.target.value) || 1))}
+                className={cn(inputClass, "w-16")}
+              />
+            </label>
+            <label className="text-xs text-ink-soft">
+              <span className="mb-1 block font-semibold text-ink">Month</span>
+              <select
+                value={sdMonth ?? date.monthIndex}
+                onChange={(e) => setSdMonth(Number(e.target.value))}
+                className={cn(inputClass, "h-9")}
+              >
+                {config.months.map((m, i) => (
+                  <option key={i} value={i}>{m.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-ink-soft">
+              <span className="mb-1 block font-semibold text-ink">Year</span>
+              <input
+                type="number"
+                value={sdYear ?? date.year}
+                onChange={(e) => setSdYear(Number(e.target.value) || date.year)}
+                className={cn(inputClass, "w-24")}
+              />
+            </label>
+            {config.yearLabel && <span className="pb-2 text-xs text-ink-faint">{config.yearLabel}</span>}
+            <Button
+              size="sm"
+              onClick={() => {
+                setDate(sdYear ?? date.year, sdMonth ?? date.monthIndex, sdDom ?? date.dayOfMonth);
+                setSdYear(null);
+                setSdMonth(null);
+                setSdDom(null);
+              }}
+            >
+              Set date
+            </Button>
+          </div>
+          <p className="mt-2 text-[0.65rem] text-ink-faint">
+            Choose where your campaign begins. The market clock follows — advancing
+            days from here ticks the economy in step.
+          </p>
+        </Panel>
+      )}
 
       {/* Month grid */}
       <Panel title={`${date.monthName}, ${date.year}${config.yearLabel ? " " + config.yearLabel : ""}`} eyebrow="The month">
@@ -317,6 +396,23 @@ export function CalendarView() {
           eyebrow="The shape of the year"
           action={<Button size="sm" variant="ghost" onClick={() => setShowConfig((v) => !v)}>{showConfig ? "Hide" : "Edit"}</Button>}
         >
+          <div className="mb-3 flex flex-wrap items-center gap-3 border-b border-parchment-400/40 pb-3">
+            <label className="flex items-center gap-1.5 text-sm text-ink-soft">
+              <input type="checkbox" checked={!!cal.hidden} onChange={(e) => update({ hidden: e.target.checked })} />
+              Hidden from players
+            </label>
+            {cal.hidden && <Badge tone="oxblood">DM-only</Badge>}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="ml-auto"
+              onClick={() => {
+                if (confirm("Close the calendar? (settings are kept)")) update({ enabled: false });
+              }}
+            >
+              Close calendar
+            </Button>
+          </div>
           {!showConfig ? (
             <p className="text-sm text-ink-faint">
               {config.months.length} months · {weekLen}-day weeks · {config.moons?.length ?? 0} moon{(config.moons?.length ?? 0) === 1 ? "" : "s"}.

@@ -16,7 +16,7 @@ export function WorldEconomyOverview() {
   const { items: factions } = useFactions();
   const { isDM } = usePermissions();
 
-  if (!economy?.enabled) {
+  if (!economy?.enabled || (economy.hidden && !isDM)) {
     return (
       <Panel tone="flat">
         <EmptyState

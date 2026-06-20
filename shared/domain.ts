@@ -691,6 +691,8 @@ export interface Service {
 export interface EconomyState {
   id: "economy"; // singleton key
   enabled?: boolean;
+  /** When set, players see no markets/exchange/board — DM-only. */
+  hidden?: boolean;
   /** Simulation clock. */
   sim?: "live" | "paused";
   day?: number;
@@ -796,6 +798,8 @@ export interface DowntimeEntry {
 export interface CalendarState {
   id: "calendar"; // singleton key
   enabled?: boolean;
+  /** When set, players can't see the calendar — DM-only. */
+  hidden?: boolean;
   /** Absolute day count from the epoch (day 1 = first day of year `year0`). */
   day: number;
   /** The year number the epoch sits in. */

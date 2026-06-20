@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { cn } from "@/components/ui/cn";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { CoinIcon, SparkIcon, ChatIcon, ScrollIcon, HelmIcon } from "@/components/ui/icons";
-import { useEconomy } from "@/lib/data/hooks";
+import { useEconomy, usePermissions } from "@/lib/data/hooks";
 import { PlayerTradePanel } from "./PlayerTradePanel";
 import { MarketBrowser } from "./MarketBrowser";
 import { MarketExchange } from "./MarketExchange";
@@ -27,6 +28,7 @@ export function MarketTabs() {
   const [focusMarketId, setFocusMarketId] = useState<string | null>(null);
   const [focusKey, setFocusKey] = useState(0);
   const { value: economy } = useEconomy();
+  const { isDM } = usePermissions();
   const log = economy?.log ?? [];
 
   const jumpToMarket = (id: string) => {
@@ -34,6 +36,18 @@ export function MarketTabs() {
     setFocusKey((k) => k + 1);
     setTab("shops");
   };
+
+  if (economy?.hidden && !isDM) {
+    return (
+      <Panel tone="flat">
+        <EmptyState
+          icon={<CoinIcon />}
+          title="The markets are shuttered"
+          description="Trade is closed to you for now — your DM will open the markets when the time is right."
+        />
+      </Panel>
+    );
+  }
 
   return (
     <div className="space-y-5">

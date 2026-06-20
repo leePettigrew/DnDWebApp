@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
 import { PlusIcon, TrashIcon } from "@/components/ui/icons";
 import { newId } from "@/lib/domain/ids";
-import { useEconomy } from "@/lib/data/hooks";
+import { useCalendar, useEconomy } from "@/lib/data/hooks";
 import { TransactionFeed } from "@/components/market/TransactionFeed";
 import { emptyEconomy } from "@shared/economy";
 import { revertTransaction } from "@shared/economy-trade";
@@ -48,6 +48,7 @@ const CONFIG_FIELDS: { key: keyof EconomyConfig; label: string; hint: string; st
 
 export function EconomyConsole() {
   const { value: economy, update, set, loading } = useEconomy();
+  const { value: calendar, update: updateCalendar } = useCalendar();
   const [showLedger, setShowLedger] = useState(false);
 
   if (!economy) {
@@ -86,7 +87,11 @@ export function EconomyConsole() {
       },
     ]);
 
-  const step = () => void set(tickEconomy(economy));
+  const step = () => {
+    const next = tickEconomy(economy);
+    void set(next);
+    if (calendar?.enabled && calendar.day !== next.day) updateCalendar({ day: next.day });
+  };
 
   const addCommodity = () =>
     setCommodities([
@@ -131,13 +136,21 @@ export function EconomyConsole() {
       <Panel title="Trading Economy" eyebrow="The Ledger">
         <div className="flex flex-wrap items-center gap-3">
           <Badge tone="forest">Enabled</Badge>
+          {economy.hidden && <Badge tone="oxblood">Hidden</Badge>}
           <span className="text-xs text-ink-faint">
             Day {economy.day ?? 1} · sim {economy.sim ?? "paused"}
           </span>
+          <label className="ml-auto flex items-center gap-1.5 text-xs text-ink-soft">
+            <input
+              type="checkbox"
+              checked={!!economy.hidden}
+              onChange={(e) => update({ hidden: e.target.checked })}
+            />
+            Hidden from players
+          </label>
           <Button
             size="sm"
             variant="ghost"
-            className="ml-auto"
             onClick={() => {
               if (confirm("Turn the economy off? (config is kept)")) update({ enabled: false });
             }}
@@ -145,6 +158,10 @@ export function EconomyConsole() {
             Disable
           </Button>
         </div>
+        <p className="mt-1 text-[0.65rem] text-ink-faint">
+          When hidden, players see no markets, exchange, board, or stalls — useful
+          while you set things up.
+        </p>
       </Panel>
 
       {/* Simulation */}
