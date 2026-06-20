@@ -12,6 +12,7 @@ import { revertTransaction } from "@shared/economy-trade";
 import { tickEconomy } from "@shared/economy-sim";
 import { MarketEditor } from "@/components/dm/MarketEditor";
 import { FactionEconomyEditor } from "@/components/dm/FactionEconomyEditor";
+import { EconomyEventsEditor } from "@/components/dm/EconomyEventsEditor";
 import type { Commodity, EconomyConfig, ResourceNode } from "@/lib/domain/types";
 
 const CATEGORIES = [
@@ -306,6 +307,15 @@ export function EconomyConsole() {
           embargoes that bend prices along faction lines.
         </p>
         <FactionEconomyEditor economy={economy} update={update} />
+      </Panel>
+
+      {/* Event levers */}
+      <Panel title="Events" eyebrow="Shock the market">
+        <p className="mb-3 text-xs text-ink-faint">
+          One-click shocks that bend prices for a span of days — famine, war,
+          boom, bust. They feed straight into every affected price.
+        </p>
+        <EconomyEventsEditor economy={economy} update={update} />
       </Panel>
 
       {/* Resource nodes */}
