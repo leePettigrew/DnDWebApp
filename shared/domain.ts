@@ -525,6 +525,61 @@ export interface ResourceNode {
   active?: boolean;
 }
 
+// --- faction macro economy -------------------------------------------------
+
+/** A line of strategic reserve a faction holds. */
+export interface FactionStock {
+  commodityId: ID;
+  qty: number;
+}
+
+/** A faction as an economic agent: reserves it uses to steady its markets. */
+export interface FactionEconomy {
+  factionId: ID;
+  /** Reserves the faction skims surplus into and draws on in shortage. */
+  stockpile: FactionStock[];
+  /** Coin reserve (gp) — flavor / future use. */
+  treasury?: number;
+  /** Fraction of a market surplus/deficit moved to/from reserves per day (0..1). */
+  bufferRate?: number;
+}
+
+/** A recurring caravan moving a commodity between two markets each sim day. */
+export interface TradeRoute {
+  id: ID;
+  name?: string;
+  commodityId: ID;
+  fromMarketId: ID;
+  toMarketId: ID;
+  /** Units shipped per simulated day (capped by source stock). */
+  volume: number;
+  /** Ship or sit idle without deleting it. Defaults to active. */
+  active?: boolean;
+}
+
+export type FactionPolicyKind = "pact" | "tariff" | "embargo";
+
+/**
+ * A standing economic relationship attached to a faction's markets:
+ *  - pact: a price break (priceMul < 1) and open routes,
+ *  - tariff: a surcharge (priceMul > 1) on scope goods,
+ *  - embargo: blocks routes with the target faction + a scarcity bump.
+ */
+export interface FactionPolicy {
+  id: ID;
+  kind: FactionPolicyKind;
+  /** The faction whose markets this policy affects. */
+  factionId: ID;
+  /** The other faction involved (route gating + narrative). */
+  targetFactionId?: ID;
+  /** Goods affected: "all" | a category | a commodityId. */
+  scope?: string;
+  /** Price multiplier at factionId's markets on scope goods. */
+  priceMul?: number;
+  note?: string;
+  active?: boolean;
+}
+
 export interface EconomyState {
   id: "economy"; // singleton key
   enabled?: boolean;
@@ -538,6 +593,12 @@ export interface EconomyState {
   markets: Market[];
   /** Map resource nodes that feed supply into markets each day. */
   nodes?: ResourceNode[];
+  /** Faction reserves used to steady their markets. */
+  stockpiles?: FactionEconomy[];
+  /** Caravans moving goods between markets each day. */
+  routes?: TradeRoute[];
+  /** Pacts, tariffs, and embargoes attached to faction markets. */
+  policies?: FactionPolicy[];
   events: EconomyEvent[];
   /** Recent transaction log (capped). */
   log: EconomyTransaction[];

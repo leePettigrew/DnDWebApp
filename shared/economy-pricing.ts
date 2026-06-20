@@ -107,6 +107,29 @@ export function eventMultiplier(
 }
 
 /**
+ * Price effect of faction policies (pacts/tariffs/embargoes) at a market — the
+ * product of every active policy whose faction owns this market and whose scope
+ * covers the good. Non-faction markets are unaffected.
+ */
+export function factionPolicyMultiplier(
+  economy: EconomyState,
+  market: Market,
+  ref: string,
+  category?: string,
+): number {
+  if (!market.factionId) return 1;
+  let mul = 1;
+  for (const p of economy.policies ?? []) {
+    if (p.active === false || !p.priceMul) continue;
+    if (p.factionId !== market.factionId) continue;
+    if (eventApplies({ scope: p.scope } as EconomyEvent, ref, category)) {
+      mul *= p.priceMul;
+    }
+  }
+  return mul;
+}
+
+/**
  * Quote a good's price from explicit inputs (so item-backed goods work without
  * a commodity record). `rep` is 0..5 standing with the market's owner.
  */
@@ -132,8 +155,9 @@ export function quotePrice(opts: {
   );
   const supplyMul = 1 + dev;
   const eventMul = eventMultiplier(economy, good.ref, opts.category);
+  const policyMul = factionPolicyMultiplier(economy, market, good.ref, opts.category);
 
-  const mid = base * supplyMul * eventMul * (good.priceMul ?? 1);
+  const mid = base * supplyMul * eventMul * policyMul * (good.priceMul ?? 1);
 
   // Reputation: a discount when buying, a small bonus when selling.
   const repBuy = 1 - cfg.repDiscount * (rep / 5);

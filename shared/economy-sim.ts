@@ -1,6 +1,7 @@
 import { nowISO } from "./ids";
 import type {
   EconomyState,
+  FactionEconomy,
   Market,
   MarketGood,
   ResourceNode,
@@ -65,6 +66,104 @@ function produce(markets: Market[], node: ResourceNode): Market[] {
   return markets.map((mm, i) => (i === idx ? { ...mm, goods } : mm));
 }
 
+/** Is trade between two factions blocked by an active embargo (either way)? */
+function isEmbargoed(
+  economy: EconomyState,
+  fa: string | undefined,
+  fb: string | undefined,
+): boolean {
+  if (!fa || !fb) return false;
+  return (economy.policies ?? []).some(
+    (p) =>
+      p.kind === "embargo" &&
+      p.active !== false &&
+      ((p.factionId === fa && p.targetFactionId === fb) ||
+        (p.factionId === fb && p.targetFactionId === fa)),
+  );
+}
+
+function stockOf(stockpile: { commodityId: string; qty: number }[], ref: string): number {
+  return stockpile.find((s) => s.commodityId === ref)?.qty ?? 0;
+}
+function addToStock(
+  stockpile: { commodityId: string; qty: number }[],
+  ref: string,
+  delta: number,
+): void {
+  const line = stockpile.find((s) => s.commodityId === ref);
+  if (line) line.qty = Math.max(0, line.qty + delta);
+  else if (delta > 0) stockpile.push({ commodityId: ref, qty: delta });
+}
+
+/** Move route volumes between markets (respecting embargoes). Mutates `markets`. */
+function runRoutes(economy: EconomyState, markets: Market[]): void {
+  for (const r of economy.routes ?? []) {
+    if (r.active === false || r.volume <= 0 || !r.commodityId) continue;
+    const fi = markets.findIndex((m) => m.id === r.fromMarketId);
+    const ti = markets.findIndex((m) => m.id === r.toMarketId);
+    if (fi < 0 || ti < 0 || fi === ti) continue;
+    if (isEmbargoed(economy, markets[fi].factionId, markets[ti].factionId)) continue;
+
+    const fromGood = markets[fi].goods.find((g) => g.ref === r.commodityId);
+    const move = Math.min(r.volume, fromGood?.stock ?? 0);
+    if (move <= 0) continue;
+
+    markets[fi] = {
+      ...markets[fi],
+      goods: markets[fi].goods.map((g) =>
+        g.ref === r.commodityId ? { ...g, stock: g.stock - move } : g,
+      ),
+    };
+    const toGood = markets[ti].goods.find((g) => g.ref === r.commodityId);
+    markets[ti] = {
+      ...markets[ti],
+      goods: toGood
+        ? markets[ti].goods.map((g) =>
+            g.ref === r.commodityId ? { ...g, stock: g.stock + move } : g,
+          )
+        : [
+            ...markets[ti].goods,
+            { ref: r.commodityId, kind: "commodity" as const, stock: move, baseStock: move * 5 },
+          ],
+    };
+  }
+}
+
+/** Factions skim market surplus into reserves and release them in shortage. */
+function runStockpiles(
+  economy: EconomyState,
+  markets: Market[],
+): FactionEconomy[] {
+  const stockpiles = (economy.stockpiles ?? []).map((fe) => ({
+    ...fe,
+    stockpile: fe.stockpile.map((s) => ({ ...s })),
+  }));
+  for (const fe of stockpiles) {
+    const rate = fe.bufferRate ?? 0.25;
+    if (rate <= 0) continue;
+    for (let i = 0; i < markets.length; i++) {
+      if (markets[i].factionId !== fe.factionId) continue;
+      const goods = markets[i].goods.map((g) => {
+        const base = g.baseStock ?? g.stock;
+        const move = Math.round((g.stock - base) * rate);
+        if (move > 0) {
+          addToStock(fe.stockpile, g.ref, move);
+          return { ...g, stock: g.stock - move };
+        }
+        if (move < 0) {
+          const give = Math.min(-move, stockOf(fe.stockpile, g.ref));
+          if (give <= 0) return g;
+          addToStock(fe.stockpile, g.ref, -give);
+          return { ...g, stock: g.stock + give };
+        }
+        return g;
+      });
+      markets[i] = { ...markets[i], goods };
+    }
+  }
+  return stockpiles;
+}
+
 export function tickEconomy(
   economy: EconomyState,
   opts: TickOptions = {},
@@ -84,10 +183,16 @@ export function tickEconomy(
     markets = produce(markets, node);
   }
 
-  // 3. Timed events expire.
+  // 3. Caravans redistribute supply between markets.
+  runRoutes(economy, markets);
+
+  // 4. Factions buffer their markets with strategic reserves.
+  const stockpiles = runStockpiles(economy, markets);
+
+  // 5. Timed events expire.
   const events = (economy.events ?? []).filter(
     (e) => e.until == null || e.until > day,
   );
 
-  return { ...economy, day, markets, events, updatedAt: nowISO() };
+  return { ...economy, day, markets, stockpiles, events, updatedAt: nowISO() };
 }
