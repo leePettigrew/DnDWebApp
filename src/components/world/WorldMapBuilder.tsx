@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { CloseIcon, TrashIcon } from "@/components/ui/icons";
 import {
   useCharacters,
+  useEconomy,
   useFactions,
   useMaps,
   useQuests,
@@ -149,6 +150,7 @@ export function WorldMapBuilder({
   const { items: statBlocks } = useStatBlocks();
   const { items: characters } = useCharacters();
   const { items: allMaps } = useMaps();
+  const { value: economy, update: updateEconomy } = useEconomy();
   const battleMaps = allMaps.filter((m) => !m.world && m.id !== map.id);
 
   // --- POIs ---
@@ -3718,6 +3720,66 @@ export function WorldMapBuilder({
               </div>
             );
           })()}
+
+          {/* Economy: markets & resource nodes at this place */}
+          {economy?.enabled &&
+            (() => {
+              const boundMarkets = (economy.markets ?? []).filter((m) => m.poiId === selPoi.id);
+              const boundNodes = (economy.nodes ?? []).filter((n) => n.poiId === selPoi.id);
+              const unbound = (economy.markets ?? []).filter((m) => m.poiId !== selPoi.id);
+              if (!boundMarkets.length && !boundNodes.length && !canEdit) return null;
+              const bindMarket = (id: string, poiId: string | undefined) =>
+                updateEconomy({
+                  markets: (economy.markets ?? []).map((m) =>
+                    m.id === id ? { ...m, poiId, mapId: poiId ? map.id : m.mapId } : m,
+                  ),
+                });
+              return (
+                <div className="mt-3 space-y-1.5 border-t border-parchment-400/50 pt-2 text-xs">
+                  {boundMarkets.map((m) => (
+                    <div key={m.id} className="flex items-center gap-1.5">
+                      <Link href="/market" className="flex items-center gap-1.5 font-semibold text-brass-dark hover:underline">
+                        🪙 {m.name} →
+                      </Link>
+                      <span className="text-ink-faint">({m.goods.length} goods)</span>
+                      {canEdit && (
+                        <button
+                          onClick={() => bindMarket(m.id, undefined)}
+                          className="ml-auto text-ink-faint hover:text-oxblood"
+                          aria-label="Unbind market"
+                          title="Unbind from this place"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {boundNodes.map((n) => (
+                    <div key={n.id} className="flex items-center gap-1.5 text-ink-soft">
+                      ⛏ {n.name}
+                      <span className="text-ink-faint">
+                        +{n.rate}/day{" "}
+                        {economy.commodities.find((c) => c.id === n.commodityId)?.name ?? ""}
+                      </span>
+                    </div>
+                  ))}
+                  {canEdit && unbound.length > 0 && (
+                    <select
+                      value=""
+                      onChange={(e) => e.target.value && bindMarket(e.target.value, selPoi.id)}
+                      className="h-7 w-full rounded border border-parchment-400 bg-parchment-50 px-1 text-[0.65rem] text-ink"
+                    >
+                      <option value="">＋ place a market here…</option>
+                      {unbound.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              );
+            })()}
         </div>
       )}
     </div>
