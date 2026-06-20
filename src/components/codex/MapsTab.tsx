@@ -9,6 +9,8 @@ import { TextArea, TextField } from "@/components/ui/Field";
 import { EditIcon, MapIcon, PlusIcon, TrashIcon } from "@/components/ui/icons";
 import { useMaps, usePermissions } from "@/lib/data/hooks";
 import { newMapInput } from "@/lib/domain/factories";
+import { emptyBattleBuild } from "@/lib/battle/materials";
+import { BattleMapBuilder } from "./BattleMapBuilder";
 import type { BattleMap } from "@/lib/domain/types";
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -28,10 +30,23 @@ export function MapsTab({ campaignId }: { campaignId?: string }) {
   const [editing, setEditing] = useState<BattleMap | null>(null);
   const [viewing, setViewing] = useState<BattleMap | null>(null);
   const [deleting, setDeleting] = useState<BattleMap | null>(null);
+  const [building, setBuilding] = useState<BattleMap | null>(null);
 
   async function createMap() {
     const created = await create(newMapInput(campaignId));
     setEditing(created);
+  }
+
+  async function buildNewMap() {
+    const created = await create({
+      ...newMapInput(campaignId),
+      name: "New Battle Map",
+      build: emptyBattleBuild(),
+    });
+    setBuilding(created);
+  }
+  function openBuilder(m: BattleMap) {
+    setBuilding(m.build ? m : { ...m, build: emptyBattleBuild() });
   }
 
   function save() {
@@ -53,9 +68,12 @@ export function MapsTab({ campaignId }: { campaignId?: string }) {
   return (
     <div>
       {canManage && (
-        <div className="mb-4 flex justify-end">
+        <div className="mb-4 flex justify-end gap-2">
           <Button variant="secondary" size="sm" onClick={createMap}>
             <PlusIcon className="h-4 w-4" /> New Map
+          </Button>
+          <Button size="sm" onClick={buildNewMap}>
+            <MapIcon className="h-4 w-4" /> Build a map
           </Button>
         </div>
       )}
@@ -109,6 +127,14 @@ export function MapsTab({ campaignId }: { campaignId?: string }) {
                 </div>
                 {canManage && (
                   <div className="flex shrink-0 gap-1">
+                    <button
+                      onClick={() => openBuilder(m)}
+                      aria-label={`Build ${m.name}`}
+                      title="Open in the battle builder"
+                      className="rounded-md p-1.5 text-ink-faint hover:bg-brass/20 hover:text-brass-dark"
+                    >
+                      <MapIcon className="h-4 w-4" />
+                    </button>
                     <button
                       onClick={() => setEditing(m)}
                       aria-label={`Edit ${m.name}`}
@@ -227,6 +253,10 @@ export function MapsTab({ campaignId }: { campaignId?: string }) {
           </>
         }
       />
+
+      {building && (
+        <BattleMapBuilder map={building} onClose={() => setBuilding(null)} />
+      )}
     </div>
   );
 }

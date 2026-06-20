@@ -1179,6 +1179,46 @@ export interface WorldMap {
   travelSpeed?: number;
 }
 
+// ---------------------------------------------------------------------------
+// 2D battle-map builder. A tile-painted tactical map: terrain cells, props, and
+// a theme. Lives on `BattleMap.build` (opaque to the tactical layer, like
+// `world`). On save it's flattened to `imageUrl` + grid + walls so the combat
+// board renders it with no changes.
+// ---------------------------------------------------------------------------
+
+export type BattleGrid = "square" | "hex";
+
+/** A placed object/furniture stamp on a battle map. */
+export interface BattleProp {
+  id: ID;
+  /** Stamp id from the prop library. */
+  kind: string;
+  /** Position in cell units (fractional allowed for free placement). */
+  x: number;
+  y: number;
+  /** Rotation in degrees. */
+  rot?: number;
+  /** Scale multiplier (1 = one cell). */
+  scale?: number;
+  tint?: string;
+}
+
+export interface BattleBuild {
+  grid: BattleGrid;
+  cols: number;
+  rows: number;
+  /** Pixels per cell when flattening to the image. */
+  cellPx: number;
+  /** Theme id (palette of materials + props). */
+  theme?: string;
+  /** Terrain material id per cell, row-major (length cols*rows). "" = void. */
+  tiles: string[];
+  props?: BattleProp[];
+  /** Optional imported reference image (data URL) to trace over. */
+  trace?: string;
+  updatedAt: ISODateString;
+}
+
 export interface BattleMap extends Entity {
   campaignId?: ID;
   name: string;
@@ -1206,6 +1246,8 @@ export interface BattleMap extends Entity {
   walls?: Wall[];
   drawings?: MapDrawing[];
   tokens?: MapToken[];
+  /** Tile-painted build data (2D battle-map builder). */
+  build?: BattleBuild;
 }
 
 // ---------------------------------------------------------------------------
