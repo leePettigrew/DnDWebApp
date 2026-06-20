@@ -151,6 +151,8 @@ export function WorldMapBuilder({
   const { items: characters } = useCharacters();
   const { items: allMaps } = useMaps();
   const { value: economy, update: updateEconomy } = useEconomy();
+  const economyRef = useRef(economy);
+  economyRef.current = economy;
   const battleMaps = allMaps.filter((m) => !m.world && m.id !== map.id);
 
   // --- POIs ---
@@ -280,6 +282,9 @@ export function WorldMapBuilder({
   const [showRegions, setShowRegions] = useState(false);
   const showRegionsRef = useRef(showRegions);
   showRegionsRef.current = showRegions;
+  const [showRoutes, setShowRoutes] = useState(true);
+  const showRoutesRef = useRef(showRoutes);
+  showRoutesRef.current = showRoutes;
 
   /** Persist world fields, preserving in-memory terrain edits. */
   const saveWorld = (patch: Partial<WorldMap>) => {
@@ -2507,6 +2512,144 @@ export function WorldMapBuilder({
       dom.addEventListener("pointerup", onUp);
       dom.addEventListener("pointercancel", onUp);
 
+      // --- trade-route caravans -------------------------------------------
+      const routeGroup = new THREE.Group();
+      scene.add(routeGroup);
+      const routeLineMat = new THREE.LineDashedMaterial({
+        color: 0x6b4a2b,
+        dashSize: 0.34,
+        gapSize: 0.22,
+        transparent: true,
+        opacity: 0.75,
+      });
+      const wagonWood = new THREE.MeshStandardMaterial({ color: 0x6b4327, roughness: 0.85 });
+      const wagonCanvas = new THREE.MeshStandardMaterial({ color: 0xe8dcc0, roughness: 0.95 });
+      const wagonWheel = new THREE.MeshStandardMaterial({ color: 0x2c1e14, roughness: 0.7 });
+      const bedGeo = new THREE.BoxGeometry(0.32, 0.12, 0.5);
+      const canopyGeo = new THREE.CylinderGeometry(0.17, 0.17, 0.46, 12);
+      const wheelGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.04, 10);
+      function makeWagon() {
+        const g = new THREE.Group();
+        const bed = new THREE.Mesh(bedGeo, wagonWood);
+        bed.position.y = 0.17;
+        g.add(bed);
+        const canopy = new THREE.Mesh(canopyGeo, wagonCanvas);
+        canopy.rotation.x = Math.PI / 2; // tube runs along the wagon (Z)
+        canopy.position.y = 0.3;
+        canopy.scale.y = 0.92;
+        g.add(canopy);
+        for (const sx of [-1, 1]) {
+          for (const sz of [-1, 1]) {
+            const w = new THREE.Mesh(wheelGeo, wagonWheel);
+            w.rotation.z = Math.PI / 2; // axle along X so it rolls forward
+            w.position.set(sx * 0.17, 0.1, sz * 0.18);
+            g.add(w);
+          }
+        }
+        g.scale.setScalar(1.5);
+        return g;
+      }
+
+      interface Wagon {
+        mesh: InstanceType<typeof THREE.Group>;
+        pts: InstanceType<typeof THREE.Vector3>[];
+        cum: number[];
+        len: number;
+        phase: number;
+        speed: number;
+        bob: number;
+      }
+      let routeWagons: Wagon[] = [];
+      let routeSig = "";
+      const SEG = 28;
+
+      function clearRoutes() {
+        for (const c of routeGroup.children.slice()) {
+          routeGroup.remove(c);
+          c.traverse((o) => {
+            const m = o as InstanceType<typeof THREE.Mesh>;
+            if (m.geometry && m.geometry !== bedGeo && m.geometry !== canopyGeo && m.geometry !== wheelGeo) {
+              m.geometry.dispose();
+            }
+          });
+        }
+        routeWagons = [];
+      }
+
+      function poiById(id: string | undefined) {
+        if (!id) return undefined;
+        return (worldRef.current.pois ?? []).find((p) => p.id === id);
+      }
+
+      function buildRoutes() {
+        clearRoutes();
+        const e = economyRef.current;
+        if (!e?.enabled) return;
+        const marketPoi = new Map((e.markets ?? []).map((m) => [m.id, m.poiId]));
+        for (const r of e.routes ?? []) {
+          if (r.active === false) continue;
+          const fromP = poiById(marketPoi.get(r.fromMarketId));
+          const toP = poiById(marketPoi.get(r.toMarketId));
+          if (!fromP || !toP) continue;
+
+          const pts: InstanceType<typeof THREE.Vector3>[] = [];
+          for (let i = 0; i <= SEG; i++) {
+            const f = i / SEG;
+            const nx = fromP.x + (toP.x - fromP.x) * f;
+            const ny = fromP.y + (toP.y - fromP.y) * f;
+            pts.push(
+              new THREE.Vector3((nx - 0.5) * W, heightAtNorm(nx, ny) * HEIGHT + 0.06, (ny - 0.5) * W),
+            );
+          }
+          const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), routeLineMat);
+          line.computeLineDistances();
+          routeGroup.add(line);
+
+          const cum = [0];
+          let len = 0;
+          for (let i = 1; i < pts.length; i++) {
+            len += pts[i].distanceTo(pts[i - 1]);
+            cum.push(len);
+          }
+          const wagon = makeWagon();
+          routeGroup.add(wagon);
+          routeWagons.push({
+            mesh: wagon,
+            pts,
+            cum,
+            len,
+            phase: Math.random() * 2,
+            speed: 0.1 + Math.min(0.3, (r.volume ?? 5) * 0.008),
+            bob: Math.random() * 6,
+          });
+        }
+      }
+
+      function wagonAt(wg: Wagon, t: number) {
+        const d = Math.max(0, Math.min(1, t)) * wg.len;
+        let i = 0;
+        while (i < wg.cum.length - 2 && wg.cum[i + 1] < d) i++;
+        const seg = wg.cum[i + 1] - wg.cum[i] || 1;
+        const f = Math.max(0, Math.min(1, (d - wg.cum[i]) / seg));
+        return wg.pts[i].clone().lerp(wg.pts[i + 1], f);
+      }
+
+      function routeSignature() {
+        const e = economyRef.current;
+        if (!e?.enabled) return "off";
+        const pois = worldRef.current.pois ?? [];
+        const pmap = new Map(pois.map((p) => [p.id, `${p.x.toFixed(3)},${p.y.toFixed(3)}`]));
+        const mkt = new Map((e.markets ?? []).map((m) => [m.id, m.poiId]));
+        let s = "";
+        for (const r of e.routes ?? []) {
+          if (r.active === false) continue;
+          const a = pmap.get(mkt.get(r.fromMarketId) ?? "");
+          const b = pmap.get(mkt.get(r.toMarketId) ?? "");
+          if (a && b) s += `${r.id}:${a}>${b}:${r.volume};`;
+        }
+        return s;
+      }
+
       let raf = 0;
       let lastT = performance.now();
       const tick = () => {
@@ -2573,6 +2716,39 @@ export function WorldMapBuilder({
         if (flash > 0) {
           flash = Math.max(0, flash - dt * 6);
           ambient.intensity = baseAmbient + flash;
+        }
+
+        // Trade-route caravans: rebuild on change, then trundle the wagons.
+        const rsig = routeSignature();
+        if (rsig !== routeSig) {
+          routeSig = rsig;
+          buildRoutes();
+        }
+        const eco = economyRef.current;
+        const routesVisible =
+          showRoutesRef.current && !!eco?.enabled && (canEdit || !eco?.hidden);
+        routeGroup.visible = routesVisible;
+        if (routesVisible) {
+          for (const wg of routeWagons) {
+            if (wg.len <= 0) continue;
+            wg.phase += wg.speed * dt;
+            const cyc = wg.phase % 2;
+            const asc = cyc < 1;
+            const t = asc ? cyc : 2 - cyc;
+            const pos = wagonAt(wg, t);
+            const ahead = wagonAt(wg, asc ? Math.min(1, t + 0.03) : Math.max(0, t - 0.03));
+            const nx = pos.x / W + 0.5;
+            const ny = pos.z / W + 0.5;
+            const gy = heightAtNorm(nx, ny) * HEIGHT;
+            wg.mesh.position.set(
+              pos.x,
+              gy + 0.04 + Math.sin(now * 0.004 + wg.bob) * 0.012,
+              pos.z,
+            );
+            const dx = ahead.x - pos.x;
+            const dz = ahead.z - pos.z;
+            if (dx || dz) wg.mesh.rotation.y = Math.atan2(dx, dz);
+          }
         }
 
         renderer.render(scene, camera);
@@ -2933,6 +3109,18 @@ export function WorldMapBuilder({
           )}
         >
           Regions
+        </button>
+        <button
+          onClick={() => setShowRoutes((s) => !s)}
+          title="Show trade routes & caravans between pinned markets"
+          className={cn(
+            segBtn,
+            showRoutes
+              ? "bg-brass text-parchment-50"
+              : "text-ink-soft hover:bg-parchment-300/60",
+          )}
+        >
+          Routes
         </button>
         <button
           onClick={toggleFullscreen}
