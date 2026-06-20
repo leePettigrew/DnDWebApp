@@ -553,6 +553,14 @@ export interface TradeRoute {
   toMarketId: ID;
   /** Units shipped per simulated day (capped by source stock). */
   volume: number;
+  /**
+   * Payment per unit delivered (gp). The destination faction pays the source
+   * faction; if the buyer's treasury can't cover the full load, fewer units
+   * ship that day. Needs both ends to be tracked faction treasuries.
+   */
+  goldPerUnit?: number;
+  /** Flat gp moved from the destination faction to the source faction per day. */
+  goldPerDay?: number;
   /** Ship or sit idle without deleting it. Defaults to active. */
   active?: boolean;
 }

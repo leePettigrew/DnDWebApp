@@ -112,6 +112,8 @@ export function FactionEconomyEditor({
                   <th className="px-1 pb-1 font-semibold">From</th>
                   <th className="px-1 pb-1 font-semibold">To</th>
                   <th className="px-1 pb-1 font-semibold">/ day</th>
+                  <th className="px-1 pb-1 font-semibold" title="gp the buyer pays the seller per unit delivered">Pay/unit</th>
+                  <th className="px-1 pb-1 font-semibold" title="flat gp/day from buyer to seller">Flat/day</th>
                   <th className="px-1 pb-1 font-semibold">On</th>
                   <th className="pb-1" />
                 </tr>
@@ -156,6 +158,28 @@ export function FactionEconomyEditor({
                         defaultValue={r.volume}
                         key={`rv-${r.id}-${r.volume}`}
                         onBlur={(e) => updateRoute(r.id, { volume: Math.max(0, Number(e.target.value) || 0) })}
+                        className={cn(inputClass, "w-16")}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.5}
+                        defaultValue={r.goldPerUnit ?? 0}
+                        key={`rgu-${r.id}-${r.goldPerUnit}`}
+                        onBlur={(e) => updateRoute(r.id, { goldPerUnit: Math.max(0, Number(e.target.value) || 0) || undefined })}
+                        className={cn(inputClass, "w-16")}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        defaultValue={r.goldPerDay ?? 0}
+                        key={`rgd-${r.id}-${r.goldPerDay}`}
+                        onBlur={(e) => updateRoute(r.id, { goldPerDay: Math.max(0, Number(e.target.value) || 0) || undefined })}
                         className={cn(inputClass, "w-16")}
                       />
                     </td>

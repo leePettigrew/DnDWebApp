@@ -95,8 +95,27 @@ function addToStock(
   else if (delta > 0) stockpile.push({ commodityId: ref, qty: delta });
 }
 
-/** Move route volumes between markets (respecting embargoes). Mutates `markets`. */
-function runRoutes(economy: EconomyState, markets: Market[]): void {
+function cloneStockpiles(economy: EconomyState): FactionEconomy[] {
+  return (economy.stockpiles ?? []).map((fe) => ({
+    ...fe,
+    stockpile: fe.stockpile.map((s) => ({ ...s })),
+  }));
+}
+
+function feFor(stockpiles: FactionEconomy[], factionId?: string): FactionEconomy | undefined {
+  return factionId ? stockpiles.find((fe) => fe.factionId === factionId) : undefined;
+}
+
+/**
+ * Move route volumes between markets (respecting embargoes) and settle the gold:
+ * the destination faction pays the source per unit + a flat daily fee, throttled
+ * by what the buyer's treasury can afford. Mutates `markets` and `stockpiles`.
+ */
+function runRoutes(
+  economy: EconomyState,
+  markets: Market[],
+  stockpiles: FactionEconomy[],
+): void {
   for (const r of economy.routes ?? []) {
     if (r.active === false || r.volume <= 0 || !r.commodityId) continue;
     const fi = markets.findIndex((m) => m.id === r.fromMarketId);
@@ -104,8 +123,17 @@ function runRoutes(economy: EconomyState, markets: Market[]): void {
     if (fi < 0 || ti < 0 || fi === ti) continue;
     if (isEmbargoed(economy, markets[fi].factionId, markets[ti].factionId)) continue;
 
+    const seller = feFor(stockpiles, markets[fi].factionId); // ships goods, gets paid
+    const buyer = feFor(stockpiles, markets[ti].factionId); // receives goods, pays
+
     const fromGood = markets[fi].goods.find((g) => g.ref === r.commodityId);
-    const move = Math.min(r.volume, fromGood?.stock ?? 0);
+    let move = Math.min(r.volume, fromGood?.stock ?? 0);
+
+    // The buyer can only pay for so many units.
+    const perUnit = r.goldPerUnit ?? 0;
+    if (perUnit > 0 && buyer) {
+      move = Math.min(move, Math.floor((buyer.treasury ?? 0) / perUnit));
+    }
     if (move <= 0) continue;
 
     markets[fi] = {
@@ -126,6 +154,16 @@ function runRoutes(economy: EconomyState, markets: Market[]): void {
             { ref: r.commodityId, kind: "commodity" as const, stock: move, baseStock: move * 5 },
           ],
     };
+
+    // Settle gold: buyer (destination) → seller (source).
+    let pay = perUnit * move;
+    if (r.goldPerDay && r.goldPerDay > 0) {
+      pay += buyer ? Math.min(r.goldPerDay, (buyer.treasury ?? 0) - pay) : r.goldPerDay;
+    }
+    if (pay > 0) {
+      if (buyer) buyer.treasury = Math.max(0, (buyer.treasury ?? 0) - pay);
+      if (seller) seller.treasury = (seller.treasury ?? 0) + pay;
+    }
   }
 }
 
@@ -133,11 +171,8 @@ function runRoutes(economy: EconomyState, markets: Market[]): void {
 function runStockpiles(
   economy: EconomyState,
   markets: Market[],
-): FactionEconomy[] {
-  const stockpiles = (economy.stockpiles ?? []).map((fe) => ({
-    ...fe,
-    stockpile: fe.stockpile.map((s) => ({ ...s })),
-  }));
+  stockpiles: FactionEconomy[],
+): void {
   for (const fe of stockpiles) {
     const rate = fe.bufferRate ?? 0.25;
     if (rate <= 0) continue;
@@ -161,7 +196,6 @@ function runStockpiles(
       markets[i] = { ...markets[i], goods };
     }
   }
-  return stockpiles;
 }
 
 export function tickEconomy(
@@ -170,6 +204,7 @@ export function tickEconomy(
 ): EconomyState {
   const rng = opts.rng ?? Math.random;
   const day = (economy.day ?? 1) + 1;
+  const stockpiles = cloneStockpiles(economy);
 
   // 1. Markets restock toward baseline (+ drift).
   let markets = (economy.markets ?? []).map((m) => ({
@@ -183,11 +218,11 @@ export function tickEconomy(
     markets = produce(markets, node);
   }
 
-  // 3. Caravans redistribute supply between markets.
-  runRoutes(economy, markets);
+  // 3. Caravans redistribute supply between markets and settle gold.
+  runRoutes(economy, markets, stockpiles);
 
   // 4. Factions buffer their markets with strategic reserves.
-  const stockpiles = runStockpiles(economy, markets);
+  runStockpiles(economy, markets, stockpiles);
 
   // 5. Timed events expire.
   const events = (economy.events ?? []).filter(
