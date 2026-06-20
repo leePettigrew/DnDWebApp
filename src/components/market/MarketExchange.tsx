@@ -40,7 +40,7 @@ function Sparkline({ values }: { values: number[] }) {
 
 type Sort = "spread" | "name" | "gain" | "loss";
 
-export function MarketExchange() {
+export function MarketExchange({ onJump }: { onJump?: (marketId: string) => void }) {
   const { value: economy } = useEconomy();
   const { items: factions } = useFactions();
   const { isDM, userId, multiUser } = usePermissions();
@@ -91,8 +91,10 @@ export function MarketExchange() {
           change,
           buy: bestBuy.q.buy,
           buyAt: bestBuy.market.name,
+          buyAtId: bestBuy.market.id,
           sell: bestSell.q.sell,
           sellAt: bestSell.market.name,
+          sellAtId: bestSell.market.id,
           spread: Math.round((bestSell.q.sell - bestBuy.q.buy) * 100) / 100,
           series,
         };
@@ -194,12 +196,34 @@ export function MarketExchange() {
                       {Math.abs(r.change * 100).toFixed(1)}%
                     </td>
                     <td className="px-2 py-1.5">
-                      <span className="font-mono text-forest">{r.buy}</span>
-                      <span className="ml-1 text-xs text-ink-faint">{r.buyAt}</span>
+                      <span className="font-mono text-forest">{r.buy}</span>{" "}
+                      {onJump ? (
+                        <button
+                          type="button"
+                          onClick={() => onJump(r.buyAtId)}
+                          className="text-xs text-ink-faint underline decoration-dotted underline-offset-2 hover:text-brass-dark"
+                          title={`Go to ${r.buyAt}`}
+                        >
+                          {r.buyAt}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-ink-faint">{r.buyAt}</span>
+                      )}
                     </td>
                     <td className="px-2 py-1.5">
-                      <span className="font-mono text-oxblood">{r.sell}</span>
-                      <span className="ml-1 text-xs text-ink-faint">{r.sellAt}</span>
+                      <span className="font-mono text-oxblood">{r.sell}</span>{" "}
+                      {onJump ? (
+                        <button
+                          type="button"
+                          onClick={() => onJump(r.sellAtId)}
+                          className="text-xs text-ink-faint underline decoration-dotted underline-offset-2 hover:text-brass-dark"
+                          title={`Go to ${r.sellAt}`}
+                        >
+                          {r.sellAt}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-ink-faint">{r.sellAt}</span>
+                      )}
                     </td>
                     <td className="px-2 py-1.5 font-mono text-brass-dark">{r.spread}</td>
                     <td className="px-2 py-1.5">

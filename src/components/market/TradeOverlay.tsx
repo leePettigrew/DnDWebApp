@@ -44,6 +44,18 @@ function itemMeta(it: InventoryItem): string {
   return bits.join(" · ");
 }
 
+/** Hover tooltip with the item's full detail. */
+function itemTitle(it: InventoryItem): string {
+  return [
+    it.name,
+    it.properties,
+    it.value ? `${it.value} gp each` : "",
+    it.weight ? `${it.weight} lb each` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 /** Estimated gp value of a side: gold + each item's value × qty. */
 function stakeValue(gold: number, items: TradeItemRef[], inv: InventoryItem[]): number {
   return items.reduce(
@@ -97,6 +109,7 @@ function StakeView({ party, character }: { party: TradeParty; character: Charact
               return (
                 <li
                   key={ref.itemId}
+                  title={it ? itemTitle(it) : ref.name}
                   className={cn(
                     "flex items-center gap-2 rounded-md border border-l-4 border-parchment-400/60 bg-parchment-50 px-2 py-1",
                     accent(it?.rarity),
@@ -235,6 +248,7 @@ function TradeSidePanel({
                 return (
                   <div
                     key={it.id}
+                    title={itemTitle(it)}
                     onClick={() => setQty(it, on ? 0 : 1)}
                     role="button"
                     tabIndex={0}
@@ -323,6 +337,45 @@ function TradeSidePanel({
   );
 }
 
+/** A balance bar comparing the two sides' estimated value. */
+function FairnessBar({
+  fromName,
+  fromVal,
+  toName,
+  toVal,
+}: {
+  fromName: string;
+  fromVal: number;
+  toName: string;
+  toVal: number;
+}) {
+  const total = fromVal + toVal;
+  const fromPct = total > 0 ? (fromVal / total) * 100 : 50;
+  const diff = Math.abs(fromVal - toVal);
+  const even = diff <= Math.max(1, total * 0.05);
+  const richer = fromVal > toVal ? fromName : toName;
+
+  return (
+    <div className="mt-3">
+      <div className="flex h-2 overflow-hidden rounded-full border border-parchment-400/60">
+        <div className="bg-arcane/70" style={{ width: `${fromPct}%` }} />
+        <div className="bg-brass/70" style={{ width: `${100 - fromPct}%` }} />
+      </div>
+      <p className="mt-1 text-center text-[0.7rem] text-ink-faint">
+        {even ? (
+          <span className="font-semibold text-forest">Even trade</span>
+        ) : (
+          <>
+            <span className="font-semibold text-ink">{richer}</span> is giving ≈{diff} gp
+            more value
+          </>
+        )}{" "}
+        ({fromName} {fromVal} · {toName} {toVal})
+      </p>
+    </div>
+  );
+}
+
 /**
  * Global overlay for a live player↔player trade. Mounted once in the app shell
  * so it pops for both traders on any page.
@@ -401,6 +454,21 @@ export function TradeOverlay() {
               onConfirm={() => confirm(session.id, "to")}
             />
           </div>
+
+          <FairnessBar
+            fromName={session.from.characterName}
+            fromVal={stakeValue(
+              session.from.stake.gold,
+              session.from.stake.items,
+              charById(session.from.characterId)?.inventory ?? [],
+            )}
+            toName={session.to.characterName}
+            toVal={stakeValue(
+              session.to.stake.gold,
+              session.to.stake.items,
+              charById(session.to.characterId)?.inventory ?? [],
+            )}
+          />
 
           <p className="mt-3 text-[0.7rem] text-ink-faint">
             Changing either offer clears both confirmations. The swap happens only

@@ -20,8 +20,16 @@ const TABS: { key: Tab; label: string; icon: typeof CoinIcon }[] = [
 
 export function MarketTabs() {
   const [tab, setTab] = useState<Tab>("shops");
+  const [focusMarketId, setFocusMarketId] = useState<string | null>(null);
+  const [focusKey, setFocusKey] = useState(0);
   const { value: economy } = useEconomy();
   const log = economy?.log ?? [];
+
+  const jumpToMarket = (id: string) => {
+    setFocusMarketId(id);
+    setFocusKey((k) => k + 1);
+    setTab("shops");
+  };
 
   return (
     <div className="space-y-5">
@@ -49,10 +57,10 @@ export function MarketTabs() {
       {tab === "shops" && (
         <div className="space-y-5">
           <PlayerTradePanel />
-          <MarketBrowser />
+          <MarketBrowser focusMarketId={focusMarketId} focusKey={focusKey} />
         </div>
       )}
-      {tab === "exchange" && <MarketExchange />}
+      {tab === "exchange" && <MarketExchange onJump={jumpToMarket} />}
       {tab === "activity" && (
         <Panel title="Market activity" eyebrow="Who's trading what">
           <TransactionFeed transactions={log} maxHeight="max-h-[32rem]" />

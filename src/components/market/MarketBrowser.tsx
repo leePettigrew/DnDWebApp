@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -32,12 +32,31 @@ const PERSUASION = SKILLS.find((s) => s.key === "persuasion")!;
 
 type Feedback = { kind: "ok" | "err"; text: string } | null;
 
-export function MarketBrowser() {
+export function MarketBrowser({
+  focusMarketId,
+  focusKey,
+}: {
+  focusMarketId?: string | null;
+  focusKey?: number;
+} = {}) {
   const { value: economy } = useEconomy();
   const { items: factions } = useFactions();
   const { items: characters, update: updateCharacter } = useCharacters();
   const { isDM, userId, canEdit } = usePermissions();
   const realtime = useRealtime();
+
+  // Scroll to + briefly highlight a market when jumped to from the Exchange.
+  const panelRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [highlight, setHighlight] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusMarketId) return;
+    const el = panelRefs.current[focusMarketId];
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlight(focusMarketId);
+    const t = setTimeout(() => setHighlight(null), 2200);
+    return () => clearTimeout(t);
+  }, [focusMarketId, focusKey]);
 
   // Characters this user may spend from (their own; all of them in solo).
   const mine = useMemo(
@@ -282,8 +301,17 @@ export function MarketBrowser() {
             (s) => s.marketId === m.id && !s.hidden && rep >= (s.minRep ?? 0),
           );
           return (
-            <Panel
+            <div
               key={m.id}
+              ref={(el) => {
+                panelRefs.current[m.id] = el;
+              }}
+              className={cn(
+                "rounded-card transition-shadow",
+                highlight === m.id && "ring-2 ring-brass ring-offset-2 ring-offset-parchment-100",
+              )}
+            >
+            <Panel
               title={m.name}
               eyebrow={
                 m.kind === "faction"
@@ -411,6 +439,7 @@ export function MarketBrowser() {
                 </div>
               )}
             </Panel>
+            </div>
           );
         })
       )}
