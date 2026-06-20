@@ -8,6 +8,7 @@ import { PlusIcon, TrashIcon } from "@/components/ui/icons";
 import { newId } from "@/lib/domain/ids";
 import { useEconomy } from "@/lib/data/hooks";
 import { emptyEconomy } from "@shared/economy";
+import { revertTransaction } from "@shared/economy-trade";
 import { MarketEditor } from "@/components/dm/MarketEditor";
 import type { Commodity, EconomyConfig } from "@/lib/domain/types";
 
@@ -65,6 +66,15 @@ export function EconomyConsole() {
       { id: newId(), name: "New commodity", category: "good", baseValue: 1, tier: 1, volatility: 0.5 },
     ]);
 
+  const log = economy.log ?? [];
+  const trades = log.filter((t) => t.action === "buy" || t.action === "sell");
+  const latest = trades.find((t) => !t.reverted);
+  const revert = (txId: string) => {
+    const next = revertTransaction(economy, txId, { actorName: "the DM" });
+    if ("error" in next) return;
+    update({ markets: next.markets, log: next.log });
+  };
+
   if (!economy.enabled) {
     return (
       <Panel title="Trading Economy" eyebrow="The Ledger">
@@ -107,6 +117,89 @@ export function EconomyConsole() {
             Disable
           </Button>
         </div>
+      </Panel>
+
+      {/* Ledger / activity */}
+      <Panel
+        title="The Ledger"
+        eyebrow="Trade activity"
+        action={trades.length > 0 ? <Badge tone="brass">{trades.length}</Badge> : undefined}
+      >
+        {latest && (
+          <div className="mb-3 rounded-lg border border-brass/40 bg-brass/10 px-3 py-2 text-sm text-ink">
+            <span className="font-semibold">Latest:</span>{" "}
+            {latest.actorName ?? "Someone"} {latest.action === "buy" ? "bought" : "sold"}{" "}
+            {latest.qty} {latest.goodName} {latest.action === "buy" ? "from" : "to"}{" "}
+            {latest.marketName} for {latest.total}gp.
+          </div>
+        )}
+        {trades.length === 0 ? (
+          <p className="text-sm text-ink-faint">
+            No trades yet. Player buys and sells appear here — each one revertible.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[40rem] text-xs">
+              <thead>
+                <tr className="text-left uppercase tracking-wide text-ink-faint">
+                  <th className="px-1 pb-1 font-semibold">When</th>
+                  <th className="px-1 pb-1 font-semibold">Who</th>
+                  <th className="px-1 pb-1 font-semibold">Action</th>
+                  <th className="px-1 pb-1 font-semibold">Good</th>
+                  <th className="px-1 pb-1 font-semibold">Market</th>
+                  <th className="px-1 pb-1 font-semibold">Total</th>
+                  <th className="pb-1" />
+                </tr>
+              </thead>
+              <tbody>
+                {log.slice(0, 60).map((t) => (
+                  <tr
+                    key={t.id}
+                    className={cn(
+                      "border-t border-parchment-400/40",
+                      t.action === "revert" && "text-ink-faint",
+                      t.reverted && "line-through opacity-60",
+                    )}
+                  >
+                    <td className="whitespace-nowrap px-1 py-1 text-ink-faint">
+                      {new Date(t.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </td>
+                    <td className="px-1 py-1">{t.actorName ?? "—"}</td>
+                    <td className="px-1 py-1">
+                      {t.action === "revert" ? (
+                        <span className="text-arcane">revert</span>
+                      ) : (
+                        <span className={t.action === "buy" ? "text-forest" : "text-oxblood"}>
+                          {t.action}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-1 py-1">
+                      {t.qty ?? ""} {t.goodName}
+                    </td>
+                    <td className="px-1 py-1 text-ink-soft">{t.marketName}</td>
+                    <td className="px-1 py-1 font-mono">{t.total}gp</td>
+                    <td className="px-1 py-1 text-right">
+                      {(t.action === "buy" || t.action === "sell") && !t.reverted && (
+                        <button
+                          type="button"
+                          onClick={() => revert(t.id)}
+                          className="rounded-md border border-oxblood/40 px-2 py-0.5 text-[0.7rem] font-semibold text-oxblood hover:bg-oxblood hover:text-parchment-50"
+                        >
+                          Revert
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-2 text-[0.65rem] text-ink-faint">
+              Reverting restores the market&apos;s stock and flags the sale. Settle any
+              coin or goods with the player on their sheet.
+            </p>
+          </div>
+        )}
       </Panel>
 
       {/* Global knobs */}

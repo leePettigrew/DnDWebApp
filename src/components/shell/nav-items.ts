@@ -2,6 +2,7 @@ import type { ComponentType, SVGProps } from "react";
 import {
   BookIcon,
   ClawIcon,
+  CoinIcon,
   D20Icon,
   FeatherIcon,
   HelmIcon,
@@ -35,6 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/combat", label: "War Table", icon: BookIcon, blurb: "Initiative & combat tracker" },
   { href: "/dm", label: "DM Tools", icon: SparkIcon, blurb: "Loot, NPCs & a DM screen", dmOnly: true },
   { href: "/world", label: "World", icon: MapIcon, blurb: "Quests, factions, timeline & atlas" },
+  { href: "/market", label: "Market", icon: CoinIcon, blurb: "Buy, sell & haggle at the markets" },
   { href: "/codex", label: "Codex", icon: ScrollIcon, blurb: "Notes, maps & session logs" },
   { href: "/admin", label: "Admin", icon: ShieldIcon, blurb: "Server-wide control", adminOnly: true },
 ];
