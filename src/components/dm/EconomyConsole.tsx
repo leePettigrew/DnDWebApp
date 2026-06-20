@@ -11,6 +11,7 @@ import { emptyEconomy } from "@shared/economy";
 import { revertTransaction } from "@shared/economy-trade";
 import { tickEconomy } from "@shared/economy-sim";
 import { MarketEditor } from "@/components/dm/MarketEditor";
+import { FactionEconomyEditor } from "@/components/dm/FactionEconomyEditor";
 import type { Commodity, EconomyConfig, ResourceNode } from "@/lib/domain/types";
 
 const CATEGORIES = [
@@ -295,6 +296,16 @@ export function EconomyConsole() {
           sell previews use each market&apos;s standing.
         </p>
         <MarketEditor economy={economy} update={update} />
+      </Panel>
+
+      {/* Faction macro economy */}
+      <Panel title="Faction economy" eyebrow="Stockpiles, routes & politics">
+        <p className="mb-3 text-xs text-ink-faint">
+          The macro layer: caravans that move goods between markets, faction
+          reserves that smooth their own markets, and pacts, tariffs &amp;
+          embargoes that bend prices along faction lines.
+        </p>
+        <FactionEconomyEditor economy={economy} update={update} />
       </Panel>
 
       {/* Resource nodes */}
