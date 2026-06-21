@@ -321,6 +321,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   const [brush, setBrush] = useState(1);
   const [wallKind, setWallKind] = useState<WallKind>("solid");
   const [hazardKind, setHazardKind] = useState<string>("lava");
+  const [roomShape, setRoomShape] = useState<"rect" | "ellipse" | "diamond" | "octagon">("rect");
   const [showGrid, setShowGrid] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [propKind, setPropKind] = useState<string>("chest");
@@ -342,6 +343,8 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   wallKindRef.current = wallKind;
   const hazardKindRef = useRef(hazardKind);
   hazardKindRef.current = hazardKind;
+  const roomShapeRef = useRef(roomShape);
+  roomShapeRef.current = roomShape;
   const gridRef = useRef(showGrid);
   gridRef.current = showGrid;
   const propKindRef = useRef(propKind);
@@ -930,23 +933,78 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       const b = buildRef.current;
       if (toolRef.current === "room" && cMax - cMin > 0.1 && rMax - rMin > 0.1) {
         pushUndo();
-        const cp = b.cellPx;
         const tiles = b.tiles.slice();
-        // Paint every cell whose centre falls inside the dragged rectangle.
-        for (let r = 0; r < b.rows; r++) {
-          for (let c = 0; c < b.cols; c++) {
-            const ctr = cellCenter(b.grid, c, r, cp);
-            if (ctr.x >= cMin * cp && ctr.x <= cMax * cp && ctr.y >= rMin * cp && ctr.y <= rMax * cp) {
-              tiles[r * b.cols + c] = matRef.current;
+        // Hex always uses a plain rectangle; square supports shaped rooms.
+        const shape = b.grid === "square" ? roomShapeRef.current : "rect";
+        const c0 = Math.round(cMin);
+        const c1 = Math.round(cMax);
+        const r0 = Math.round(rMin);
+        const r1 = Math.round(rMax);
+        const midX = (c0 + c1) / 2;
+        const midY = (r0 + r1) / 2;
+        const halfW = Math.max(0.5, (c1 - c0) / 2);
+        const halfH = Math.max(0.5, (r1 - r0) / 2);
+        const inShape = (c: number, r: number) => {
+          if (shape === "rect") return true;
+          const nx = (c + 0.5 - midX) / halfW;
+          const ny = (r + 0.5 - midY) / halfH;
+          if (shape === "ellipse") return nx * nx + ny * ny <= 1.02;
+          if (shape === "diamond") return Math.abs(nx) + Math.abs(ny) <= 1.02;
+          return Math.abs(nx) <= 1 && Math.abs(ny) <= 1 && Math.abs(nx) + Math.abs(ny) <= 1.4;
+        };
+        const inSet = new Set<number>();
+        if (shape === "rect" && b.grid !== "square") {
+          // Original hex/center-in-rect fill.
+          const cp = b.cellPx;
+          for (let r = 0; r < b.rows; r++)
+            for (let c = 0; c < b.cols; c++) {
+              const ctr = cellCenter(b.grid, c, r, cp);
+              if (ctr.x >= cMin * cp && ctr.x <= cMax * cp && ctr.y >= rMin * cp && ctr.y <= rMax * cp)
+                tiles[r * b.cols + c] = matRef.current;
             }
-          }
+        } else {
+          for (let r = r0; r < r1; r++)
+            for (let c = c0; c < c1; c++) {
+              if (c < 0 || r < 0 || c >= b.cols || r >= b.rows) continue;
+              if (inShape(c, r)) {
+                tiles[r * b.cols + c] = matRef.current;
+                inSet.add(r * b.cols + c);
+              }
+            }
         }
-        const add: BattleWall[] = [
-          { id: newId(), x1: cMin, y1: rMin, x2: cMax, y2: rMin },
-          { id: newId(), x1: cMin, y1: rMax, x2: cMax, y2: rMax },
-          { id: newId(), x1: cMin, y1: rMin, x2: cMin, y2: rMax },
-          { id: newId(), x1: cMax, y1: rMin, x2: cMax, y2: rMax },
-        ];
+        let add: BattleWall[];
+        if (shape === "rect") {
+          add = [
+            { id: newId(), x1: cMin, y1: rMin, x2: cMax, y2: rMin },
+            { id: newId(), x1: cMin, y1: rMax, x2: cMax, y2: rMax },
+            { id: newId(), x1: cMin, y1: rMin, x2: cMin, y2: rMax },
+            { id: newId(), x1: cMax, y1: rMin, x2: cMax, y2: rMax },
+          ];
+        } else {
+          // Trace the shape's boundary into solid walls.
+          add = [];
+          const has = (c: number, r: number) => inSet.has(r * b.cols + c);
+          const keyOf = (x1: number, y1: number, x2: number, y2: number) => {
+            const a = `${x1},${y1}`;
+            const d = `${x2},${y2}`;
+            return a < d ? `${a}|${d}` : `${d}|${a}`;
+          };
+          const seen = new Set((b.walls ?? []).map((w) => keyOf(w.x1, w.y1, w.x2, w.y2)));
+          const edge = (x1: number, y1: number, x2: number, y2: number) => {
+            const k = keyOf(x1, y1, x2, y2);
+            if (seen.has(k)) return;
+            seen.add(k);
+            add.push({ id: newId(), x1, y1, x2, y2, kind: "solid" });
+          };
+          for (let r = r0; r < r1; r++)
+            for (let c = c0; c < c1; c++) {
+              if (!has(c, r)) continue;
+              if (!has(c + 1, r)) edge(c + 1, r, c + 1, r + 1);
+              if (!has(c - 1, r)) edge(c, r, c, r + 1);
+              if (!has(c, r - 1)) edge(c, r, c + 1, r);
+              if (!has(c, r + 1)) edge(c, r + 1, c + 1, r + 1);
+            }
+        }
         setBuild({ ...b, tiles, walls: [...(b.walls ?? []), ...add] });
         setDirty(true);
       } else if (toolRef.current === "wall" && (ds.sx !== ds.cx || ds.sy !== ds.cy)) {
@@ -1323,6 +1381,27 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
               </div>
             </details>
           </div>
+
+          {tool === "room" && build.grid === "square" && (
+            <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Room shape</p>
+              <div className="grid grid-cols-2 gap-1">
+                {([["rect", "▭ Rectangle"], ["ellipse", "⬭ Ellipse"], ["diamond", "◇ Diamond"], ["octagon", "⬡ Octagon"]] as ["rect" | "ellipse" | "diamond" | "octagon", string][]).map(([s, label]) => (
+                  <button
+                    key={s}
+                    onClick={() => setRoomShape(s)}
+                    className={cn(
+                      "rounded-md px-2 py-1 text-xs font-semibold transition-colors",
+                      roomShape === s ? "bg-oxblood text-parchment-50" : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[0.6rem] text-ink-faint">Drag to set the bounds — floor fills the shape and walls trace its edge.</p>
+            </div>
+          )}
 
           {tool === "wall" && (
             <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
