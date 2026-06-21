@@ -16,6 +16,8 @@ import {
 } from "@/lib/battle/materials";
 import { PROPS, PROP_MAP } from "@/lib/battle/props";
 import type { PropDef } from "@/lib/battle/props";
+import { HAZARDS, HAZARD_MAP } from "@/lib/battle/hazards";
+import type { HazardDef } from "@/lib/battle/hazards";
 import {
   brushCells,
   cellCenter,
@@ -235,7 +237,64 @@ function drawCell(ctx: CanvasRenderingContext2D, grid: BattleGrid, col: number, 
   ctx.restore();
 }
 
-type Tool = "paint" | "fill" | "erase" | "room" | "wall" | "prop" | "light" | "select" | "pan";
+/** Draw a hazard/liquid overlay in one cell (shared by live canvas + flatten). */
+function drawHazardCell(ctx: CanvasRenderingContext2D, grid: BattleGrid, col: number, row: number, cp: number, def: HazardDef) {
+  const ctr = cellCenter(grid, col, row, cp);
+  const poly = cellPolygon(grid, col, row, cp);
+  ctx.save();
+  ctx.beginPath();
+  poly.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.closePath();
+  ctx.clip();
+  ctx.globalAlpha = def.look === "ice" ? 0.5 : def.look === "web" ? 0.55 : 0.62;
+  ctx.fillStyle = def.color;
+  ctx.fillRect(ctr.x - cp, ctr.y - cp, cp * 2, cp * 2);
+  ctx.globalAlpha = 1;
+  const rng = rngFor(col, row);
+  if (def.look === "liquid") {
+    ctx.strokeStyle = def.glow ? hexA(def.glow, 0.75) : hexA("#ffffff", 0.2);
+    ctx.lineWidth = cp * (def.glow ? 0.06 : 0.04);
+    for (let k = 0; k < 2; k++) {
+      const yy = ctr.y + (rng() - 0.5) * cp * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(ctr.x - cp * 0.42, yy);
+      ctx.lineTo(ctr.x + cp * 0.42, yy + (rng() - 0.5) * cp * 0.2);
+      ctx.stroke();
+    }
+  } else if (def.look === "gas") {
+    for (let k = 0; k < 4; k++) {
+      ctx.fillStyle = hexA(def.color, 0.4);
+      ctx.beginPath();
+      ctx.arc(ctr.x + (rng() - 0.5) * cp * 0.7, ctr.y + (rng() - 0.5) * cp * 0.7, cp * (0.12 + rng() * 0.12), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (def.look === "web") {
+    ctx.strokeStyle = hexA("#ffffff", 0.5);
+    ctx.lineWidth = cp * 0.02;
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(ctr.x - Math.cos(a) * cp * 0.5, ctr.y - Math.sin(a) * cp * 0.5);
+      ctx.lineTo(ctr.x + Math.cos(a) * cp * 0.5, ctr.y + Math.sin(a) * cp * 0.5);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(ctr.x, ctr.y, cp * 0.26, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (def.look === "ice") {
+    ctx.strokeStyle = hexA("#ffffff", 0.6);
+    ctx.lineWidth = cp * 0.025;
+    for (let k = 0; k < 3; k++) {
+      ctx.beginPath();
+      ctx.moveTo(ctr.x + (rng() - 0.5) * cp * 0.7, ctr.y + (rng() - 0.5) * cp * 0.7);
+      ctx.lineTo(ctr.x + (rng() - 0.5) * cp * 0.7, ctr.y + (rng() - 0.5) * cp * 0.7);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+type Tool = "paint" | "fill" | "erase" | "room" | "wall" | "prop" | "light" | "hazard" | "select" | "pan";
 
 const PROP_CATS: { key: string; label: string }[] = [
   { key: "dungeon", label: "Dungeon" },
@@ -261,6 +320,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   });
   const [brush, setBrush] = useState(1);
   const [wallKind, setWallKind] = useState<WallKind>("solid");
+  const [hazardKind, setHazardKind] = useState<string>("lava");
   const [showGrid, setShowGrid] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [propKind, setPropKind] = useState<string>("chest");
@@ -280,6 +340,8 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   brushRef.current = brush;
   const wallKindRef = useRef(wallKind);
   wallKindRef.current = wallKind;
+  const hazardKindRef = useRef(hazardKind);
+  hazardKindRef.current = hazardKind;
   const gridRef = useRef(showGrid);
   gridRef.current = showGrid;
   const propKindRef = useRef(propKind);
@@ -300,13 +362,14 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   const renderScheduled = useRef(false);
 
   // Undo / redo of terrain + prop snapshots.
-  type Snap = { tiles: string[]; props: BattleProp[] };
+  type Snap = { tiles: string[]; props: BattleProp[]; hazards?: string[] };
   const undoStack = useRef<Snap[]>([]);
   const redoStack = useRef<Snap[]>([]);
   const [histLen, setHistLen] = useState(0);
   const snapshot = (): Snap => ({
     tiles: buildRef.current.tiles.slice(),
     props: (buildRef.current.props ?? []).map((p) => ({ ...p })),
+    hazards: buildRef.current.hazards ? buildRef.current.hazards.slice() : undefined,
   });
   const pushUndo = () => {
     undoStack.current.push(snapshot());
@@ -357,6 +420,16 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       for (let c = 0; c < b.cols; c++) {
         const id = b.tiles[r * b.cols + c];
         if (id) drawCell(ctx, b.grid, c, r, cp, id);
+      }
+    }
+
+    if (b.hazards) {
+      for (let r = 0; r < b.rows; r++) {
+        for (let c = 0; c < b.cols; c++) {
+          const hid = b.hazards[r * b.cols + c];
+          const def = hid ? HAZARD_MAP.get(hid) : undefined;
+          if (def) drawHazardCell(ctx, b.grid, c, r, cp, def);
+        }
       }
     }
 
@@ -451,7 +524,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
 
     // Brush preview.
     const h = hover.current;
-    if (h && (toolRef.current === "paint" || toolRef.current === "erase" || toolRef.current === "fill")) {
+    if (h && (toolRef.current === "paint" || toolRef.current === "erase" || toolRef.current === "fill" || toolRef.current === "hazard")) {
       const sz = toolRef.current === "fill" ? 1 : brushRef.current;
       const cells = brushCells(b.grid, h.c, h.r, sz, b.cols, b.rows);
       ctx.strokeStyle = toolRef.current === "erase" ? "rgba(180,60,40,0.9)" : "rgba(230,199,114,0.95)";
@@ -585,9 +658,29 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
 
   function paintAt(c: number, r: number) {
     const b = buildRef.current;
-    const id = toolRef.current === "erase" ? "" : matRef.current;
     const sz = brushRef.current;
     const cells = brushCells(b.grid, c, r, sz, b.cols, b.rows);
+
+    // Hazard tool paints the parallel hazard layer (selected id, "" = clear).
+    if (toolRef.current === "hazard") {
+      const hid = hazardKindRef.current;
+      const hazards = (b.hazards ?? new Array(b.cols * b.rows).fill("")).slice();
+      let hChanged = false;
+      for (const [cc, rr] of cells) {
+        const idx = rr * b.cols + cc;
+        if (hazards[idx] !== hid) {
+          hazards[idx] = hid;
+          hChanged = true;
+        }
+      }
+      if (hChanged) {
+        setBuild({ ...b, hazards });
+        setDirty(true);
+      }
+      return;
+    }
+
+    const id = toolRef.current === "erase" ? "" : matRef.current;
     const tiles = b.tiles;
     let changed = false;
     for (const [cc, rr] of cells) {
@@ -596,6 +689,20 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         tiles[idx] = id;
         changed = true;
       }
+    }
+    // Erasing also wipes any hazard painted in those cells.
+    let hazards = b.hazards;
+    let hazardsChanged = false;
+    if (id === "" && b.hazards?.some((h) => h)) {
+      const next = b.hazards.slice();
+      for (const [cc, rr] of cells) {
+        const idx = rr * b.cols + cc;
+        if (next[idx]) {
+          next[idx] = "";
+          hazardsChanged = true;
+        }
+      }
+      if (hazardsChanged) hazards = next;
     }
     // Erasing also clears walls whose midpoint cell is under the brush.
     let walls = b.walls;
@@ -613,8 +720,13 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         wallsChanged = true;
       }
     }
-    if (changed || wallsChanged) {
-      setBuild({ ...b, tiles, ...(wallsChanged ? { walls } : {}) });
+    if (changed || wallsChanged || hazardsChanged) {
+      setBuild({
+        ...b,
+        tiles,
+        ...(wallsChanged ? { walls } : {}),
+        ...(hazardsChanged ? { hazards } : {}),
+      });
       setDirty(true);
     }
   }
@@ -872,7 +984,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     const prev = undoStack.current.pop();
     if (!prev) return;
     redoStack.current.push(snapshot());
-    setBuild({ ...buildRef.current, tiles: prev.tiles, props: prev.props });
+    setBuild({ ...buildRef.current, tiles: prev.tiles, props: prev.props, hazards: prev.hazards });
     setHistLen(undoStack.current.length);
     setDirty(true);
   }
@@ -880,7 +992,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     const next = redoStack.current.pop();
     if (!next) return;
     undoStack.current.push(snapshot());
-    setBuild({ ...buildRef.current, tiles: next.tiles, props: next.props });
+    setBuild({ ...buildRef.current, tiles: next.tiles, props: next.props, hazards: next.hazards });
     setHistLen(undoStack.current.length);
     setDirty(true);
   }
@@ -899,6 +1011,43 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     pushUndo();
     setBuild({ ...build, walls: [] });
     setDirty(true);
+  }
+
+  /** Trace the floor↔void boundary and lay solid walls along every exposed
+   *  edge. Square grids only; skips edges that already carry a wall (so doors
+   *  and windows survive, and re-running never doubles up). */
+  function autoWall() {
+    const b = buildRef.current;
+    if (b.grid !== "square") return;
+    const painted = (i: number) => i >= 0 && i < b.tiles.length && !!b.tiles[i];
+    const keyOf = (x1: number, y1: number, x2: number, y2: number) => {
+      const a = `${x1},${y1}`;
+      const c = `${x2},${y2}`;
+      return a < c ? `${a}|${c}` : `${c}|${a}`;
+    };
+    const existing = b.walls ?? [];
+    const seen = new Set(existing.map((w) => keyOf(w.x1, w.y1, w.x2, w.y2)));
+    const add: BattleWall[] = [];
+    const edge = (x1: number, y1: number, x2: number, y2: number) => {
+      const k = keyOf(x1, y1, x2, y2);
+      if (seen.has(k)) return;
+      seen.add(k);
+      add.push({ id: newId(), x1, y1, x2, y2, kind: "solid" });
+    };
+    for (let r = 0; r < b.rows; r++) {
+      for (let c = 0; c < b.cols; c++) {
+        const i = r * b.cols + c;
+        if (!painted(i)) continue;
+        if (c === b.cols - 1 || !painted(i + 1)) edge(c + 1, r, c + 1, r + 1);
+        if (c === 0 || !painted(i - 1)) edge(c, r, c, r + 1);
+        if (r === 0 || !painted(i - b.cols)) edge(c, r, c + 1, r);
+        if (r === b.rows - 1 || !painted(i + b.cols)) edge(c, r + 1, c + 1, r + 1);
+      }
+    }
+    if (!add.length) return;
+    setBuild({ ...b, walls: [...existing, ...add] });
+    setDirty(true);
+    requestRender();
   }
 
   function resize(cols: number, rows: number) {
@@ -938,6 +1087,15 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       for (let c = 0; c < b.cols; c++) {
         const id = b.tiles[r * b.cols + c];
         if (id) drawCell(ctx, b.grid, c, r, cp, id);
+      }
+    }
+    if (b.hazards) {
+      for (let r = 0; r < b.rows; r++) {
+        for (let c = 0; c < b.cols; c++) {
+          const hid = b.hazards[r * b.cols + c];
+          const def = hid ? HAZARD_MAP.get(hid) : undefined;
+          if (def) drawHazardCell(ctx, b.grid, c, r, cp, def);
+        }
       }
     }
     // Bake the hex grid into the image (the combat board only draws square grids).
@@ -1054,7 +1212,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
           <div>
             <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Tools</p>
             <div className="grid grid-cols-3 gap-1">
-              {([["paint", "Paint"], ["fill", "Fill"], ["erase", "Erase"], ["room", "Room"], ["wall", "Wall"], ["prop", "Prop"], ["light", "Light"], ["select", "Select"], ["pan", "Pan"]] as [Tool, string][]).map(([t, label]) => (
+              {([["paint", "Paint"], ["fill", "Fill"], ["erase", "Erase"], ["room", "Room"], ["wall", "Wall"], ["prop", "Prop"], ["light", "Light"], ["hazard", "Hazard"], ["select", "Select"], ["pan", "Pan"]] as [Tool, string][]).map(([t, label]) => (
                 <button
                   key={t}
                   onClick={() => setTool(t)}
@@ -1193,6 +1351,47 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
             </div>
           )}
 
+          {tool === "hazard" && (
+            <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Hazards & liquids</p>
+              <div className="grid grid-cols-3 gap-1">
+                {HAZARDS.map((h) => (
+                  <button
+                    key={h.id}
+                    onClick={() => setHazardKind(h.id)}
+                    title={[h.name, h.damage, h.difficult ? "difficult terrain" : ""].filter(Boolean).join(" · ")}
+                    className={cn(
+                      "h-7 rounded border",
+                      hazardKind === h.id ? "border-brass ring-2 ring-brass/40" : "border-ink/20",
+                    )}
+                    style={{ background: h.color }}
+                  />
+                ))}
+              </div>
+              <button
+                onClick={() => setHazardKind("")}
+                className={cn(
+                  "w-full rounded-md border px-2 py-1 text-[0.6rem] font-semibold",
+                  hazardKind === ""
+                    ? "border-brass bg-parchment-50 ring-2 ring-brass/40"
+                    : "border-ink/20 bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                )}
+              >
+                Erase hazard
+              </button>
+              {(() => {
+                const h = HAZARD_MAP.get(hazardKind);
+                return (
+                  <p className="text-[0.6rem] text-ink-faint">
+                    {h
+                      ? `${h.name}${h.damage ? ` — ${h.damage}` : ""}${h.difficult ? " · difficult terrain" : ""}`
+                      : "Click cells to clear hazards."}
+                  </p>
+                );
+              })()}
+            </div>
+          )}
+
           {tool === "prop" && (
             <div className="border-t border-parchment-400/40 pt-2">
               <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Props</p>
@@ -1266,6 +1465,17 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
               <Button size="sm" variant="secondary" className="flex-1" onClick={redo} disabled={redoStack.current.length === 0}>Redo</Button>
             </div>
             <Button size="sm" variant="secondary" className="w-full" onClick={fillAll}>Fill all ({theme.base})</Button>
+            {build.grid === "square" && (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="w-full"
+                onClick={autoWall}
+                title="Lay solid walls around every painted floor edge"
+              >
+                ⊞ Auto-wall edges
+              </Button>
+            )}
             <div className="flex gap-1">
               <Button size="sm" variant="ghost" className="flex-1" onClick={clearAll}>Clear tiles</Button>
               <Button size="sm" variant="ghost" className="flex-1" onClick={clearWalls}>Clear walls</Button>
