@@ -203,13 +203,23 @@ function runStockpiles(
   }
 }
 
-/** Slow NPC offtake from player stalls: a unit may sell into escrow each day. */
+/**
+ * Slow NPC offtake from player stalls: a unit may sell into escrow each day.
+ * Demand is price-sensitive — a bargain clears fast, a fair price (≈value)
+ * sells at a moderate rate, and NPCs never buy at or above double the item's
+ * value. Listings with no known value fall back to a flat fair rate.
+ */
 function sellConsignmentsToNpcs(economy: EconomyState, rng: () => number): Consignment[] {
-  return (economy.consignments ?? []).map((c) =>
-    c.qty > 0 && rng() < 0.25
+  return (economy.consignments ?? []).map((c) => {
+    if (c.qty <= 0) return c;
+    const value = c.value && c.value > 0 ? c.value : c.price;
+    const ratio = value > 0 ? c.price / value : 1;
+    if (ratio >= 2) return c; // priced at/above double its value → no NPC buyers
+    const chance = Math.min(0.6, Math.max(0, 0.22 * (2 - ratio)));
+    return rng() < chance
       ? { ...c, qty: c.qty - 1, escrow: (c.escrow ?? 0) + c.price }
-      : c,
-  );
+      : c;
+  });
 }
 
 /** Representative price per commodity: mean mid across markets that stock it. */

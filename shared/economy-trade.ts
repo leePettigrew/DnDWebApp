@@ -453,6 +453,10 @@ export function applyConsignList(
   const qty = Math.max(1, Math.floor(req.qty || 0));
   if (item.quantity < qty) return { error: `You only have ${item.quantity}.` };
   const price = Math.max(0, req.price || 0);
+  // An item can't be listed above double its actual value — no gouging.
+  if (item.value && item.value > 0 && price > item.value * 2) {
+    return { error: `Can't list above double the item's value (${item.value * 2} gp).` };
+  }
 
   const inv = (character.inventory ?? [])
     .map((i) => (i.id === req.itemId ? { ...i, quantity: i.quantity - qty } : i))

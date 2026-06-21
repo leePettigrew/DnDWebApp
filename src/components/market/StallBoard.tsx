@@ -164,10 +164,19 @@ export function StallBoard() {
                 <input
                   type="number"
                   min={0}
+                  max={listItem?.value ? listItem.value * 2 : undefined}
                   value={price}
-                  onChange={(e) => setPrice(Math.max(0, Number(e.target.value) || 0))}
+                  onChange={(e) => {
+                    const cap = listItem?.value ? listItem.value * 2 : Infinity;
+                    setPrice(Math.min(cap, Math.max(0, Number(e.target.value) || 0)));
+                  }}
                   className="h-9 w-24 rounded-md border border-parchment-400 bg-parchment-50 px-2 text-sm text-ink focus:border-brass focus:outline-none"
                 />
+                {listItem?.value ? (
+                  <span className="mt-0.5 block text-[0.6rem] text-ink-faint">
+                    max {listItem.value * 2} gp · cheaper sells faster
+                  </span>
+                ) : null}
               </label>
               <label className="text-xs text-ink-soft">
                 <span className="mb-1 block font-semibold text-ink">At</span>
