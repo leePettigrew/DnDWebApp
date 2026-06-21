@@ -18,6 +18,7 @@ import { PROPS, PROP_MAP } from "@/lib/battle/props";
 import type { PropDef } from "@/lib/battle/props";
 import { HAZARDS, HAZARD_MAP } from "@/lib/battle/hazards";
 import type { HazardDef } from "@/lib/battle/hazards";
+import { VIGNETTES } from "@/lib/battle/vignettes";
 import {
   brushCells,
   cellCenter,
@@ -294,7 +295,7 @@ function drawHazardCell(ctx: CanvasRenderingContext2D, grid: BattleGrid, col: nu
   ctx.restore();
 }
 
-type Tool = "paint" | "fill" | "erase" | "room" | "wall" | "prop" | "light" | "hazard" | "select" | "pan";
+type Tool = "paint" | "fill" | "erase" | "room" | "wall" | "prop" | "stamp" | "light" | "hazard" | "select" | "pan";
 
 const PROP_CATS: { key: string; label: string }[] = [
   { key: "dungeon", label: "Dungeon" },
@@ -322,10 +323,11 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   const [wallKind, setWallKind] = useState<WallKind>("solid");
   const [hazardKind, setHazardKind] = useState<string>("lava");
   const [roomShape, setRoomShape] = useState<"rect" | "ellipse" | "diamond" | "octagon">("rect");
+  const [vignetteId, setVignetteId] = useState<string>(VIGNETTES[0].id);
   const [showGrid, setShowGrid] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [propKind, setPropKind] = useState<string>("chest");
-  const [selectedPropId, setSelectedPropId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [propCat, setPropCat] = useState("dungeon");
   const [showTrace, setShowTrace] = useState(true);
   const [traceOpacity, setTraceOpacity] = useState(0.5);
@@ -345,12 +347,14 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   hazardKindRef.current = hazardKind;
   const roomShapeRef = useRef(roomShape);
   roomShapeRef.current = roomShape;
+  const vignetteRef = useRef(vignetteId);
+  vignetteRef.current = vignetteId;
   const gridRef = useRef(showGrid);
   gridRef.current = showGrid;
   const propKindRef = useRef(propKind);
   propKindRef.current = propKind;
-  const selPropRef = useRef(selectedPropId);
-  selPropRef.current = selectedPropId;
+  const selIdsRef = useRef(selectedIds);
+  selIdsRef.current = selectedIds;
   const showTraceRef = useRef(showTrace);
   showTraceRef.current = showTrace;
   const traceOpacityRef = useRef(traceOpacity);
@@ -470,14 +474,30 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     drawWalls(ctx, b.walls ?? [], cp);
 
     // Props.
+    const selSet = selIdsRef.current;
     for (const p of b.props ?? []) {
       drawProp(ctx, p, cp);
-      if (p.id === selPropRef.current) {
+      if (selSet.includes(p.id)) {
         const sc = p.scale ?? 1;
         ctx.strokeStyle = "rgba(230,199,114,0.95)";
         ctx.lineWidth = 2 / zoom;
         ctx.strokeRect(p.x * cp - cp * 0.5 * sc, p.y * cp - cp * 0.5 * sc, cp * sc, cp * sc);
       }
+    }
+
+    // Marquee selection rectangle.
+    const mq = marquee.current;
+    if (mq) {
+      ctx.strokeStyle = "rgba(230,199,114,0.9)";
+      ctx.lineWidth = 1.5 / zoom;
+      ctx.setLineDash([5 / zoom, 4 / zoom]);
+      ctx.strokeRect(
+        Math.min(mq.sx, mq.cx) * cp,
+        Math.min(mq.sy, mq.cy) * cp,
+        Math.abs(mq.cx - mq.sx) * cp,
+        Math.abs(mq.cy - mq.sy) * cp,
+      );
+      ctx.setLineDash([]);
     }
 
     // Light glow — warm pools from manual lights and light-emitting props, so the
@@ -769,7 +789,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     const b = buildRef.current;
     const prop: BattleProp = { id: newId(), kind: propKindRef.current, x, y, rot: 0, scale: 1 };
     setBuild({ ...b, props: [...(b.props ?? []), prop] });
-    setSelectedPropId(prop.id);
+    setSelectedIds([prop.id]);
     setDirty(true);
     return prop.id;
   }
@@ -803,7 +823,34 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       ...buildRef.current,
       props: (buildRef.current.props ?? []).filter((p) => p.id !== id),
     });
-    setSelectedPropId(null);
+    setSelectedIds((prev) => prev.filter((x) => x !== id));
+    setDirty(true);
+  }
+  function deleteSelected() {
+    const ids = selIdsRef.current;
+    if (!ids.length) return;
+    pushUndo();
+    const set = new Set(ids);
+    setBuild({
+      ...buildRef.current,
+      props: (buildRef.current.props ?? []).filter((p) => !set.has(p.id)),
+    });
+    setSelectedIds([]);
+    setDirty(true);
+  }
+  function copySelected() {
+    const set = new Set(selIdsRef.current);
+    clipboard.current = (buildRef.current.props ?? []).filter((p) => set.has(p.id)).map((p) => ({ ...p }));
+  }
+  function pasteClipboard() {
+    const clip = clipboard.current;
+    if (!clip.length) return;
+    pushUndo();
+    const pasted: BattleProp[] = clip.map((p) => ({ ...p, id: newId(), x: p.x + 1, y: p.y + 1 }));
+    setBuild({ ...buildRef.current, props: [...(buildRef.current.props ?? []), ...pasted] });
+    setSelectedIds(pasted.map((p) => p.id));
+    // Keep the clipboard offset growing so repeated pastes fan out.
+    clipboard.current = pasted.map((p) => ({ ...p }));
     setDirty(true);
   }
 
@@ -813,6 +860,9 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   const dragProp = useRef<string | null>(null);
   const dragUndo = useRef(false);
   const dragStruct = useRef<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
+  const groupDrag = useRef<{ startX: number; startY: number; origin: Map<string, { x: number; y: number }> } | null>(null);
+  const marquee = useRef<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
+  const clipboard = useRef<BattleProp[]>([]);
 
   function snapCorner(e: { clientX: number; clientY: number }) {
     const wp = worldPoint(e);
@@ -837,6 +887,26 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       requestRender();
       return;
     }
+    if (tool === "stamp") {
+      const wp = worldPoint(e);
+      const b = buildRef.current;
+      if (!wp || wp.x < 0 || wp.y < 0 || wp.x >= b.cols || wp.y >= b.rows) return;
+      const vig = VIGNETTES.find((v) => v.id === vignetteRef.current);
+      if (!vig) return;
+      pushUndo();
+      const stamped: BattleProp[] = vig.props.map((vp) => ({
+        id: newId(),
+        kind: vp.kind,
+        x: wp.x + vp.dx,
+        y: wp.y + vp.dy,
+        rot: vp.rot ?? 0,
+        scale: vp.scale ?? 1,
+      }));
+      setBuild({ ...b, props: [...(b.props ?? []), ...stamped] });
+      setDirty(true);
+      requestRender();
+      return;
+    }
     if (tool === "light") {
       const wp = worldPoint(e);
       const b = buildRef.current;
@@ -857,9 +927,28 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       const wp = worldPoint(e);
       if (!wp) return;
       const p = propAt(wp.x, wp.y);
-      setSelectedPropId(p?.id ?? null);
-      dragProp.current = p?.id ?? null;
-      dragUndo.current = false;
+      if (p) {
+        let ids = selIdsRef.current;
+        if (e.shiftKey) {
+          ids = ids.includes(p.id) ? ids.filter((x) => x !== p.id) : [...ids, p.id];
+          setSelectedIds(ids);
+        } else if (!ids.includes(p.id)) {
+          ids = [p.id];
+          setSelectedIds(ids);
+        }
+        // Begin moving the whole current selection together.
+        const props = buildRef.current.props ?? [];
+        const origin = new Map<string, { x: number; y: number }>();
+        for (const id of ids) {
+          const pr = props.find((q) => q.id === id);
+          if (pr) origin.set(id, { x: pr.x, y: pr.y });
+        }
+        groupDrag.current = { startX: wp.x, startY: wp.y, origin };
+        dragUndo.current = false;
+      } else {
+        if (!e.shiftKey) setSelectedIds([]);
+        marquee.current = { sx: wp.x, sy: wp.y, cx: wp.x, cy: wp.y };
+      }
       requestRender();
       return;
     }
@@ -903,6 +992,37 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       requestRender();
       return;
     }
+    if (groupDrag.current) {
+      const wp = worldPoint(e);
+      if (wp) {
+        if (!dragUndo.current) {
+          pushUndo();
+          dragUndo.current = true;
+        }
+        const gd = groupDrag.current;
+        const dx = wp.x - gd.startX;
+        const dy = wp.y - gd.startY;
+        setBuild({
+          ...buildRef.current,
+          props: (buildRef.current.props ?? []).map((p) => {
+            const o = gd.origin.get(p.id);
+            return o ? { ...p, x: o.x + dx, y: o.y + dy } : p;
+          }),
+        });
+        setDirty(true);
+      }
+      requestRender();
+      return;
+    }
+    if (marquee.current) {
+      const wp = worldPoint(e);
+      if (wp) {
+        marquee.current.cx = wp.x;
+        marquee.current.cy = wp.y;
+      }
+      requestRender();
+      return;
+    }
     if (dragStruct.current) {
       const s = snapCorner(e);
       if (s) {
@@ -923,6 +1043,24 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     panning.current = null;
     dragProp.current = null;
     dragUndo.current = false;
+    groupDrag.current = null;
+    // Commit a marquee selection (props whose centre falls inside the box).
+    const mq = marquee.current;
+    if (mq) {
+      marquee.current = null;
+      const x0 = Math.min(mq.sx, mq.cx);
+      const x1 = Math.max(mq.sx, mq.cx);
+      const y0 = Math.min(mq.sy, mq.cy);
+      const y1 = Math.max(mq.sy, mq.cy);
+      if (x1 - x0 > 0.2 || y1 - y0 > 0.2) {
+        const hits = (buildRef.current.props ?? [])
+          .filter((p) => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1)
+          .map((p) => p.id);
+        setSelectedIds(hits);
+      }
+      requestRender();
+      return;
+    }
     const ds = dragStruct.current;
     if (ds) {
       dragStruct.current = null;
@@ -1270,7 +1408,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
           <div>
             <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Tools</p>
             <div className="grid grid-cols-3 gap-1">
-              {([["paint", "Paint"], ["fill", "Fill"], ["erase", "Erase"], ["room", "Room"], ["wall", "Wall"], ["prop", "Prop"], ["light", "Light"], ["hazard", "Hazard"], ["select", "Select"], ["pan", "Pan"]] as [Tool, string][]).map(([t, label]) => (
+              {([["paint", "Paint"], ["fill", "Fill"], ["erase", "Erase"], ["room", "Room"], ["wall", "Wall"], ["prop", "Prop"], ["stamp", "Stamp"], ["light", "Light"], ["hazard", "Hazard"], ["select", "Select"], ["pan", "Pan"]] as [Tool, string][]).map(([t, label]) => (
                 <button
                   key={t}
                   onClick={() => setTool(t)}
@@ -1499,6 +1637,27 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
             </div>
           )}
 
+          {tool === "stamp" && (
+            <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Prefab vignettes</p>
+              <div className="grid grid-cols-1 gap-1">
+                {VIGNETTES.map((v) => (
+                  <button
+                    key={v.id}
+                    onClick={() => setVignetteId(v.id)}
+                    className={cn(
+                      "rounded-md border px-2 py-1 text-left text-[0.7rem] font-semibold",
+                      vignetteId === v.id ? "border-brass bg-brass/20 text-brass-dark" : "border-parchment-400 text-ink-soft hover:bg-parchment-300/50",
+                    )}
+                  >
+                    {v.name} <span className="text-ink-faint">({v.props.length})</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[0.6rem] text-ink-faint">Click the map to drop the whole furnished set; nudge pieces afterward with Select.</p>
+            </div>
+          )}
+
           {tool === "light" && (
             <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
               <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Light sources</p>
@@ -1519,24 +1678,44 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
             </div>
           )}
 
-          {tool === "select" &&
-            selectedPropId &&
-            (() => {
-              const p = (build.props ?? []).find((x) => x.id === selectedPropId);
-              if (!p) return null;
-              return (
-                <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
-                  <p className="text-xs font-semibold text-ink">{PROP_MAP.get(p.kind)?.name}</p>
+          {tool === "select" && (
+            <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
+              {selectedIds.length === 0 ? (
+                <p className="text-[0.6rem] text-ink-faint">
+                  Click a prop to select · Shift-click to add · drag empty space to box-select.
+                </p>
+              ) : selectedIds.length === 1 ? (
+                (() => {
+                  const p = (build.props ?? []).find((x) => x.id === selectedIds[0]);
+                  if (!p) return null;
+                  return (
+                    <>
+                      <p className="text-xs font-semibold text-ink">{PROP_MAP.get(p.kind)?.name}</p>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="secondary" className="flex-1" title="Rotate left" onClick={() => patchProp(p.id, { rot: (p.rot ?? 0) - 15 })}>⟲</Button>
+                        <Button size="sm" variant="secondary" className="flex-1" title="Rotate right" onClick={() => patchProp(p.id, { rot: (p.rot ?? 0) + 15 })}>⟳</Button>
+                        <Button size="sm" variant="secondary" className="flex-1" title="Smaller" onClick={() => patchProp(p.id, { scale: Math.max(0.4, (p.scale ?? 1) - 0.2) })}>−</Button>
+                        <Button size="sm" variant="secondary" className="flex-1" title="Bigger" onClick={() => patchProp(p.id, { scale: Math.min(3, (p.scale ?? 1) + 0.2) })}>＋</Button>
+                      </div>
+                    </>
+                  );
+                })()
+              ) : (
+                <p className="text-xs font-semibold text-ink">{selectedIds.length} props selected</p>
+              )}
+              {selectedIds.length > 0 && (
+                <>
                   <div className="flex gap-1">
-                    <Button size="sm" variant="secondary" className="flex-1" title="Rotate left" onClick={() => patchProp(p.id, { rot: (p.rot ?? 0) - 15 })}>⟲</Button>
-                    <Button size="sm" variant="secondary" className="flex-1" title="Rotate right" onClick={() => patchProp(p.id, { rot: (p.rot ?? 0) + 15 })}>⟳</Button>
-                    <Button size="sm" variant="secondary" className="flex-1" title="Smaller" onClick={() => patchProp(p.id, { scale: Math.max(0.4, (p.scale ?? 1) - 0.2) })}>−</Button>
-                    <Button size="sm" variant="secondary" className="flex-1" title="Bigger" onClick={() => patchProp(p.id, { scale: Math.min(3, (p.scale ?? 1) + 0.2) })}>＋</Button>
+                    <Button size="sm" variant="secondary" className="flex-1" onClick={copySelected}>Copy</Button>
+                    <Button size="sm" variant="secondary" className="flex-1" onClick={pasteClipboard}>Paste</Button>
                   </div>
-                  <Button size="sm" variant="danger" className="w-full" onClick={() => deleteProp(p.id)}>Delete prop</Button>
-                </div>
-              );
-            })()}
+                  <Button size="sm" variant="danger" className="w-full" onClick={deleteSelected}>
+                    Delete {selectedIds.length > 1 ? `${selectedIds.length} props` : "prop"}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
             <div className="flex gap-1">
