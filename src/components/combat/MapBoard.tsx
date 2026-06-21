@@ -9,11 +9,12 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { cn } from "@/components/ui/cn";
-import { useMapPings, useMaps, useRealtime } from "@/lib/data/hooks";
+import { useCombat, useMapPings, useMaps, useRealtime } from "@/lib/data/hooks";
 import type {
   AoeTemplate,
   BattleMap,
   CombatState,
+  MapAnnotation,
   MapLight,
   MapToken,
   Wall,
@@ -101,6 +102,57 @@ const CONDITION_ICON: Record<string, string> = {
   concentration: "🧠",
 };
 
+/** A map annotation rendered on the board: label, numbered marker, or DM note. */
+function AnnotationMark({ a, grid }: { a: MapAnnotation; grid: number }) {
+  const fs = Math.max(13, grid * (a.kind === "label" ? 0.42 : 0.34));
+  if (a.kind === "marker") {
+    const r = grid ? grid * 0.3 : 18;
+    return (
+      <g transform={`translate(${a.x}, ${a.y})`}>
+        <circle r={r} fill={a.color ?? "#E6C772"} stroke="#0E0A06" strokeWidth={2} />
+        <text textAnchor="middle" dominantBaseline="central" fontSize={fs} fontWeight={700} fill="#0E0A06">
+          {a.text}
+        </text>
+      </g>
+    );
+  }
+  if (a.kind === "note") {
+    return (
+      <g transform={`translate(${a.x}, ${a.y})`}>
+        <circle r={grid ? grid * 0.16 : 8} fill="#c060c0" stroke="#0E0A06" strokeWidth={1.5} />
+        <text
+          x={grid ? grid * 0.26 : 12}
+          dominantBaseline="central"
+          fontSize={fs * 0.8}
+          fontStyle="italic"
+          fill="#e0a0e0"
+          stroke="#0E0A06"
+          strokeWidth={Math.max(2, grid * 0.02)}
+          paintOrder="stroke"
+        >
+          {a.text}
+        </text>
+      </g>
+    );
+  }
+  return (
+    <text
+      x={a.x}
+      y={a.y}
+      textAnchor="middle"
+      dominantBaseline="central"
+      fontSize={fs}
+      fontWeight={700}
+      fill={a.color ?? "#F5E9CF"}
+      stroke="#0E0A06"
+      strokeWidth={Math.max(2, grid * 0.03)}
+      paintOrder="stroke"
+    >
+      {a.text}
+    </text>
+  );
+}
+
 export function MapBoard({
   map,
   combat,
@@ -114,6 +166,7 @@ export function MapBoard({
 }) {
   const realtime = useRealtime();
   const { update: updateMap } = useMaps();
+  const { update: updateCombat } = useCombat();
   const pings = useMapPings();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -136,6 +189,7 @@ export function MapBoard({
     | null
   >(null);
   const [flashId, setFlashId] = useState<string | null>(null);
+  const [showAnnos, setShowAnnos] = useState(true);
   const [aoeShape, setAoeShape] = useState<AoeShape>("circle");
   const [aoeFeet, setAoeFeet] = useState(20);
   const [aoe, setAoe] = useState<AoeTemplate | null>(null);
@@ -173,7 +227,38 @@ export function MapBoard({
   );
   const drawings = map.drawings ?? [];
   const templates = map.templates ?? [];
+  const annotations = map.annotations ?? [];
+  const portals = map.portals ?? [];
   const pxPerFoot = grid > 0 ? grid / feetPerCell : 12;
+  const autoCost = map.autoTerrainCost ?? false;
+  const difficultAt = useMemo(() => {
+    const tc = map.terrainCost;
+    if (!tc) return null;
+    return (px: number, py: number) => {
+      const c = Math.floor(px / tc.cell);
+      const r = Math.floor(py / tc.cell);
+      if (c < 0 || r < 0 || c >= tc.cols || r >= tc.rows) return false;
+      return tc.cells[r * tc.cols + c] === "1";
+    };
+  }, [map.terrainCost]);
+
+  /** Feet spent moving from→to (rounded to 5 ft). When auto terrain cost is on,
+   *  cells of difficult terrain along the path count double. */
+  function pathFeet(from: Pt, to: Pt): number {
+    if (!grid) return Math.round(dist(from, to));
+    const total = dist(from, to);
+    if (!autoCost || !difficultAt) return Math.round((total / grid) * feetPerCell / 5) * 5;
+    const steps = Math.max(1, Math.ceil(total / (grid * 0.4)));
+    let ft = 0;
+    let prev = from;
+    for (let i = 1; i <= steps; i++) {
+      const tt = i / steps;
+      const pt = { x: from.x + (to.x - from.x) * tt, y: from.y + (to.y - from.y) * tt };
+      ft += (dist(prev, pt) / grid) * feetPerCell * (difficultAt(pt.x, pt.y) ? 2 : 1);
+      prev = pt;
+    }
+    return Math.round(ft / 5) * 5;
+  }
 
   // Default vision for PC tokens so the map isn't pitch black if unset.
   const defaultVision = grid ? grid * 12 : imgSize ? Math.max(imgSize.w, imgSize.h) * 0.3 : 300;
@@ -400,6 +485,8 @@ export function MapBoard({
           setDrag({ id: t.id, pos: { x: t.x, y: t.y } });
         } else if (isDM && toggleDoorAt(p)) {
           // handled — opened/closed a door
+        } else if (isDM && tryPortalAt(p)) {
+          // handled — jumped to the linked map
         } else {
           gesture.current = { mode: "pan", lastX: e.clientX, lastY: e.clientY };
         }
@@ -553,6 +640,15 @@ export function MapBoard({
     void updateMap(map.id, {
       walls: walls.map((w) => (w.id === best ? { ...w, open: !w.open } : w)),
     });
+    return true;
+  }
+
+  /** DM clicks a portal to jump the War Table to the linked map. */
+  function tryPortalAt(p: Pt): boolean {
+    const threshold = Math.max(18 / view.scale, grid * 0.5);
+    const hit = portals.find((pt) => pt.targetMapId && dist(p, { x: pt.x, y: pt.y }) < threshold);
+    if (!hit?.targetMapId) return false;
+    void updateCombat({ activeMapId: hit.targetMapId });
     return true;
   }
 
@@ -855,13 +951,52 @@ export function MapBoard({
                     </g>
                   ))}
 
+                {/* Stairs / portals — everyone sees them; the DM clicks to jump. */}
+                {portals.map((pt) => (
+                  <g key={pt.id} transform={`translate(${pt.x}, ${pt.y})`}>
+                    <circle r={grid ? grid * 0.34 : 22} fill="rgba(40,90,140,0.5)" stroke="#7fd1e6" strokeWidth={3} />
+                    {[0, 1, 2].map((i) => {
+                      const s = grid ? grid * 0.13 : 8;
+                      const yy = -s + i * s;
+                      return <line key={i} x1={-s * 1.3 + i * s * 0.5} y1={yy} x2={s * 1.3} y2={yy} stroke="#dff3fb" strokeWidth={2.5} />;
+                    })}
+                    {pt.label && (
+                      <text y={grid ? grid * 0.34 + 14 : 36} textAnchor="middle" fontSize={Math.max(11, grid * 0.26)} fill="#dff3fb" stroke="#0E0A06" strokeWidth={Math.max(2, grid * 0.02)} paintOrder="stroke">
+                        {pt.label}
+                      </text>
+                    )}
+                  </g>
+                ))}
+
+                {/* Annotations — labels & numbered markers for all, notes for the DM. */}
+                {showAnnos &&
+                  annotations
+                    .filter((a) => a.kind !== "note" || isDM)
+                    .map((a) => <AnnotationMark key={a.id} a={a} grid={grid} />)}
+
                 {tokens.filter(tokenVisible).map((t) => {
                   const pos = drag && drag.id === t.id ? drag.pos : { x: t.x, y: t.y };
                   const c = combat?.combatants.find((x) => x.id === t.combatantId);
                   const hpPct = c && c.maxHp > 0 ? c.currentHp / c.maxHp : 1;
+                  const moveFt =
+                    drag && drag.id === t.id ? pathFeet({ x: t.x, y: t.y }, drag.pos) : null;
                   const active = t.combatantId && t.combatantId === activeCombatantId;
                   return (
                     <g key={t.id} transform={`translate(${pos.x}, ${pos.y})`}>
+                      {moveFt !== null && (
+                        <text
+                          y={-t.radius - 10}
+                          textAnchor="middle"
+                          fontSize={Math.max(13, grid * 0.32)}
+                          fontWeight={700}
+                          fill="#F5E9CF"
+                          stroke="#0E0A06"
+                          strokeWidth={Math.max(2, grid * 0.02)}
+                          paintOrder="stroke"
+                        >
+                          {moveFt} ft
+                        </text>
+                      )}
                       {active && (
                         <circle r={t.radius + 6} fill="none" stroke="#E6C772" strokeWidth={4} opacity={0.9} />
                       )}
@@ -1018,6 +1153,18 @@ export function MapBoard({
               title="See the map as your players do"
             >
               {dmPreview ? "Previewing" : "Player view"}
+            </button>
+          )}
+          {annotations.length > 0 && (
+            <button
+              onClick={() => setShowAnnos((v) => !v)}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
+                showAnnos ? "bg-brass/20 text-brass-dark" : "text-ink-soft hover:bg-parchment-300/60",
+              )}
+              title="Show or hide room labels & markers"
+            >
+              Labels
             </button>
           )}
         </div>

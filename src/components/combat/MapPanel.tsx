@@ -209,6 +209,17 @@ export function MapPanel() {
                 />
                 Fog of war
               </label>
+              <label className="flex items-center gap-1.5" title="Count difficult terrain double when measuring a token's move">
+                <input
+                  type="checkbox"
+                  checked={activeMap.autoTerrainCost ?? false}
+                  onChange={(e) =>
+                    updateMap(activeMap.id, { autoTerrainCost: e.target.checked })
+                  }
+                  className="h-4 w-4 accent-brass"
+                />
+                Auto terrain cost
+              </label>
               <label className="flex items-center gap-1.5">
                 Light
                 <select

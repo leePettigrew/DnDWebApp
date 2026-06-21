@@ -1111,6 +1111,19 @@ export interface AoeTemplate {
   label?: string;
 }
 
+/** A map annotation: a room-name label, a numbered marker, or a DM-only note.
+ *  In a BattleBuild these are cell coords; on a BattleMap they're image px. */
+export interface MapAnnotation {
+  id: ID;
+  x: number;
+  y: number;
+  kind: "label" | "marker" | "note";
+  text: string;
+  /** Auto-assigned sequence number for markers. */
+  n?: number;
+  color?: string;
+}
+
 /** A labelled point of interest on an overworld map (percent coordinates). */
 export interface MapLocation {
   id: ID;
@@ -1274,9 +1287,23 @@ export interface BattleBuild {
   walls?: BattleWall[];
   /** Light sources (cell coords) — exported to BattleMap.lights. */
   lights?: { id: ID; x: number; y: number; radius: number; color?: string }[];
+  /** Annotations (cell coords) — exported to BattleMap.annotations. */
+  annotations?: MapAnnotation[];
+  /** Stairs/portals (cell coords) — exported to BattleMap.portals. */
+  portals?: MapPortal[];
   /** Optional imported reference image (data URL) to trace over. */
   trace?: string;
   updatedAt: ISODateString;
+}
+
+/** A stairs/portal marker linking this map to another battle map (or POI). */
+export interface MapPortal {
+  id: ID;
+  x: number;
+  y: number;
+  /** Target BattleMap id to jump to on the War Table. */
+  targetMapId?: ID;
+  label?: string;
 }
 
 export interface BattleMap extends Entity {
@@ -1313,6 +1340,14 @@ export interface BattleMap extends Entity {
   tokens?: MapToken[];
   /** Area-of-effect spell templates currently laid on the map. */
   templates?: AoeTemplate[];
+  /** Room labels, numbered markers, and DM-only notes (image px). */
+  annotations?: MapAnnotation[];
+  /** Stairs/portals to other battle maps (image px). */
+  portals?: MapPortal[];
+  /** Per-cell movement cost grid for difficult terrain (from hazards). */
+  terrainCost?: { cols: number; rows: number; cell: number; cells: string };
+  /** When set, the War Table auto-applies terrain cost to drag measurements. */
+  autoTerrainCost?: boolean;
   /** Tile-painted build data (2D battle-map builder). */
   build?: BattleBuild;
 }

@@ -28,7 +28,7 @@ import {
   pixelToCell,
   snapVertex,
 } from "@/lib/battle/grid";
-import type { BattleBuild, BattleGrid, BattleMap, BattleProp, BattleWall, WallKind } from "@/lib/domain/types";
+import type { BattleBuild, BattleGrid, BattleMap, BattleProp, BattleWall, MapAnnotation, MapPortal, WallKind } from "@/lib/domain/types";
 import type { Material } from "@/lib/battle/materials";
 
 /** Draw all wall segments (shared by live canvas + flatten). */
@@ -295,7 +295,7 @@ function drawHazardCell(ctx: CanvasRenderingContext2D, grid: BattleGrid, col: nu
   ctx.restore();
 }
 
-type Tool = "paint" | "fill" | "erase" | "room" | "wall" | "prop" | "stamp" | "light" | "hazard" | "select" | "pan";
+type Tool = "paint" | "fill" | "erase" | "room" | "wall" | "prop" | "stamp" | "light" | "hazard" | "annotate" | "portal" | "select" | "pan";
 
 const PROP_CATS: { key: string; label: string }[] = [
   { key: "dungeon", label: "Dungeon" },
@@ -310,7 +310,7 @@ const swatch =
   "h-7 w-7 rounded-md border-2 transition-transform hover:scale-110";
 
 export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: () => void }) {
-  const { update } = useMaps();
+  const { items: maps, update } = useMaps();
   const { update: updateCombat } = useCombat();
 
   const [build, setBuild] = useState<BattleBuild>(() => map.build ?? emptyBattleBuild());
@@ -324,6 +324,9 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   const [hazardKind, setHazardKind] = useState<string>("lava");
   const [roomShape, setRoomShape] = useState<"rect" | "ellipse" | "diamond" | "octagon">("rect");
   const [vignetteId, setVignetteId] = useState<string>(VIGNETTES[0].id);
+  const [annoKind, setAnnoKind] = useState<"label" | "marker" | "note">("label");
+  const [annoText, setAnnoText] = useState("");
+  const [portalTarget, setPortalTarget] = useState<string>("");
   const [showGrid, setShowGrid] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [propKind, setPropKind] = useState<string>("chest");
@@ -349,6 +352,12 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   roomShapeRef.current = roomShape;
   const vignetteRef = useRef(vignetteId);
   vignetteRef.current = vignetteId;
+  const annoKindRef = useRef(annoKind);
+  annoKindRef.current = annoKind;
+  const annoTextRef = useRef(annoText);
+  annoTextRef.current = annoText;
+  const portalTargetRef = useRef(portalTarget);
+  portalTargetRef.current = portalTarget;
   const gridRef = useRef(showGrid);
   gridRef.current = showGrid;
   const propKindRef = useRef(propKind);
@@ -544,6 +553,69 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         ctx.stroke();
       }
     }
+
+    // Portals (stairs/links).
+    for (const p of b.portals ?? []) {
+      const x = p.x * cp;
+      const y = p.y * cp;
+      ctx.fillStyle = "rgba(40,90,140,0.55)";
+      ctx.beginPath();
+      ctx.arc(x, y, cp * 0.34, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#7fd1e6";
+      ctx.lineWidth = cp * 0.06;
+      ctx.stroke();
+      ctx.strokeStyle = "#dff3fb";
+      ctx.lineWidth = cp * 0.045;
+      for (let i = 0; i < 3; i++) {
+        const yy = y - cp * 0.13 + i * cp * 0.13;
+        ctx.beginPath();
+        ctx.moveTo(x - cp * 0.17 + i * cp * 0.06, yy);
+        ctx.lineTo(x + cp * 0.17, yy);
+        ctx.stroke();
+      }
+    }
+
+    // Annotations (labels, numbered markers, DM notes).
+    for (const a of b.annotations ?? []) {
+      const x = a.x * cp;
+      const y = a.y * cp;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (a.kind === "label") {
+        ctx.font = `bold ${cp * 0.42}px serif`;
+        ctx.lineWidth = cp * 0.07;
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.strokeText(a.text, x, y);
+        ctx.fillStyle = a.color ?? "#F5E9CF";
+        ctx.fillText(a.text, x, y);
+      } else if (a.kind === "marker") {
+        ctx.fillStyle = a.color ?? "#E6C772";
+        ctx.beginPath();
+        ctx.arc(x, y, cp * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#0E0A06";
+        ctx.lineWidth = cp * 0.04;
+        ctx.stroke();
+        ctx.fillStyle = "#0E0A06";
+        ctx.font = `bold ${cp * 0.34}px serif`;
+        ctx.fillText(a.text, x, y);
+      } else {
+        ctx.fillStyle = "#c060c0";
+        ctx.beginPath();
+        ctx.arc(x, y, cp * 0.16, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.textAlign = "left";
+        ctx.font = `italic ${cp * 0.28}px serif`;
+        ctx.lineWidth = cp * 0.05;
+        ctx.strokeStyle = "rgba(0,0,0,0.8)";
+        ctx.strokeText(a.text, x + cp * 0.26, y);
+        ctx.fillStyle = "#e0a0e0";
+        ctx.fillText(a.text, x + cp * 0.26, y);
+      }
+    }
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
 
     // Brush preview.
     const h = hover.current;
@@ -903,6 +975,64 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         scale: vp.scale ?? 1,
       }));
       setBuild({ ...b, props: [...(b.props ?? []), ...stamped] });
+      setDirty(true);
+      requestRender();
+      return;
+    }
+    if (tool === "annotate") {
+      const wp = worldPoint(e);
+      const b = buildRef.current;
+      if (!wp || wp.x < 0 || wp.y < 0 || wp.x >= b.cols || wp.y >= b.rows) return;
+      const annos = b.annotations ?? [];
+      const hit = annos.find((a) => Math.hypot(a.x - wp.x, a.y - wp.y) < 0.6);
+      if (hit) {
+        setBuild({ ...b, annotations: annos.filter((a) => a.id !== hit.id) });
+        setDirty(true);
+        requestRender();
+        return;
+      }
+      const kind = annoKindRef.current;
+      const text = annoTextRef.current.trim();
+      if ((kind === "label" || kind === "note") && !text) {
+        requestRender();
+        return;
+      }
+      const n = kind === "marker" ? annos.filter((a) => a.kind === "marker").reduce((m, a) => Math.max(m, a.n ?? 0), 0) + 1 : undefined;
+      const anno: MapAnnotation = {
+        id: newId(),
+        x: wp.x,
+        y: wp.y,
+        kind,
+        text: kind === "marker" ? String(n) : text,
+        n,
+        color: kind === "note" ? "#c060c0" : kind === "marker" ? "#E6C772" : "#F5E9CF",
+      };
+      setBuild({ ...b, annotations: [...annos, anno] });
+      setDirty(true);
+      requestRender();
+      return;
+    }
+    if (tool === "portal") {
+      const wp = worldPoint(e);
+      const b = buildRef.current;
+      if (!wp || wp.x < 0 || wp.y < 0 || wp.x >= b.cols || wp.y >= b.rows) return;
+      const portals = b.portals ?? [];
+      const hit = portals.find((p) => Math.hypot(p.x - wp.x, p.y - wp.y) < 0.6);
+      if (hit) {
+        setBuild({ ...b, portals: portals.filter((p) => p.id !== hit.id) });
+        setDirty(true);
+        requestRender();
+        return;
+      }
+      const target = portalTargetRef.current || undefined;
+      const portal: MapPortal = {
+        id: newId(),
+        x: wp.x,
+        y: wp.y,
+        targetMapId: target,
+        label: maps.find((m) => m.id === target)?.name,
+      };
+      setBuild({ ...b, portals: [...portals, portal] });
       setDirty(true);
       requestRender();
       return;
@@ -1346,6 +1476,20 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         }];
       }),
     ];
+    // Per-cell difficult-terrain grid from hazards (for War Table movement cost).
+    let costCells = "";
+    let anyCost = false;
+    if (b.hazards) {
+      const out: string[] = new Array(b.cols * b.rows);
+      for (let i = 0; i < b.cols * b.rows; i++) {
+        const hid = b.hazards[i];
+        const def = hid ? HAZARD_MAP.get(hid) : undefined;
+        const costly = def?.difficult ? "1" : "0";
+        if (costly === "1") anyCost = true;
+        out[i] = costly;
+      }
+      costCells = out.join("");
+    }
     void update(map.id, {
       imageUrl: dataUrl,
       width,
@@ -1366,6 +1510,10 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         open: false,
       })),
       lights,
+      // Annotations + portals (cell coords → image px) render live in combat.
+      annotations: (b.annotations ?? []).map((a) => ({ ...a, x: a.x * cp, y: a.y * cp })),
+      portals: (b.portals ?? []).map((p) => ({ ...p, x: p.x * cp, y: p.y * cp })),
+      terrainCost: anyCost ? { cols: b.cols, rows: b.rows, cell: cp, cells: costCells } : undefined,
       build: { ...b, updatedAt: nowISO() },
     });
     setDirty(false);
@@ -1408,7 +1556,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
           <div>
             <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Tools</p>
             <div className="grid grid-cols-3 gap-1">
-              {([["paint", "Paint"], ["fill", "Fill"], ["erase", "Erase"], ["room", "Room"], ["wall", "Wall"], ["prop", "Prop"], ["stamp", "Stamp"], ["light", "Light"], ["hazard", "Hazard"], ["select", "Select"], ["pan", "Pan"]] as [Tool, string][]).map(([t, label]) => (
+              {([["paint", "Paint"], ["fill", "Fill"], ["erase", "Erase"], ["room", "Room"], ["wall", "Wall"], ["prop", "Prop"], ["stamp", "Stamp"], ["light", "Light"], ["hazard", "Hazard"], ["annotate", "Label"], ["portal", "Portal"], ["select", "Select"], ["pan", "Pan"]] as [Tool, string][]).map(([t, label]) => (
                 <button
                   key={t}
                   onClick={() => setTool(t)}
@@ -1655,6 +1803,57 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
                 ))}
               </div>
               <p className="text-[0.6rem] text-ink-faint">Click the map to drop the whole furnished set; nudge pieces afterward with Select.</p>
+            </div>
+          )}
+
+          {tool === "annotate" && (
+            <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Annotations</p>
+              <div className="grid grid-cols-3 gap-1">
+                {(["label", "marker", "note"] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setAnnoKind(k)}
+                    className={cn(
+                      "rounded-md px-1 py-1 text-[0.6rem] font-semibold capitalize",
+                      annoKind === k ? "bg-oxblood text-parchment-50" : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                    )}
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
+              {annoKind !== "marker" && (
+                <input
+                  value={annoText}
+                  onChange={(e) => setAnnoText(e.target.value)}
+                  placeholder={annoKind === "note" ? "Secret DM note…" : "Room name…"}
+                  className="w-full rounded border border-parchment-400 bg-parchment-50 px-2 py-1 text-xs text-ink focus:border-brass focus:outline-none"
+                />
+              )}
+              <p className="text-[0.6rem] text-ink-faint">
+                {annoKind === "label" && "Type a name, then click to place it — players see labels."}
+                {annoKind === "marker" && "Click to drop the next numbered marker."}
+                {annoKind === "note" && "Type a note, then click — only the DM sees notes."}
+                {" Click an existing one to remove it."}
+              </p>
+            </div>
+          )}
+
+          {tool === "portal" && (
+            <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Stairs / portal</p>
+              <select
+                value={portalTarget}
+                onChange={(e) => setPortalTarget(e.target.value)}
+                className="w-full rounded border border-parchment-400 bg-parchment-50 px-2 py-1 text-xs text-ink focus:border-brass focus:outline-none"
+              >
+                <option value="">Link to… (none)</option>
+                {maps.filter((m) => m.id !== map.id).map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+              <p className="text-[0.6rem] text-ink-faint">Click to drop a portal; on the War Table the DM clicks it to jump to the linked map. Click an existing one to remove it.</p>
             </div>
           )}
 
