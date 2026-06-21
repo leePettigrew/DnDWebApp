@@ -21,6 +21,14 @@ import type { Combatant, MapToken } from "@/lib/domain/types";
 const PC_COLOR = "#86b58a";
 const NPC_COLOR = "#d6794a";
 
+/** One-click atmosphere: each sets the map's ambient light level + color tint. */
+const LIGHT_PRESETS = [
+  { id: "day", label: "Daylight", level: "bright", tint: "", hint: "Bright, no tint" },
+  { id: "dusk", label: "Dusk", level: "dim", tint: "#2a3358", hint: "Dim, cool blue" },
+  { id: "torch", label: "Torchlit", level: "dim", tint: "#6b3d12", hint: "Dim, warm amber — torches matter" },
+  { id: "pitch", label: "Pitch black", level: "dark", tint: "#0a0a14", hint: "Dark — sight needs light or darkvision" },
+] as const;
+
 export function MapPanel() {
   const { value: combat, update: updateCombat } = useCombat();
   const { items: maps, update: updateMap } = useMaps();
@@ -217,6 +225,21 @@ export function MapPanel() {
                   <option value="dark">Dark</option>
                 </select>
               </label>
+              <div className="flex items-center gap-1">
+                <span className="text-[0.7rem] uppercase tracking-wide text-ink-faint">Scene</span>
+                {LIGHT_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() =>
+                      updateMap(activeMap.id, { lightLevel: p.level, lightTint: p.tint })
+                    }
+                    title={p.hint}
+                    className="rounded-md border border-parchment-400 bg-parchment-50 px-2 py-1 text-xs font-semibold text-ink-soft hover:bg-parchment-300/60 hover:text-ink"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
               <div className="ml-auto flex flex-wrap gap-1.5">
                 <Button variant="secondary" size="sm" onClick={placeCombatants}>
                   Place combatants

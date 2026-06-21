@@ -125,6 +125,33 @@ export const PROPS: PropDef[] = [
     draw: (ctx, s) => { disc(ctx, 0, 0, s * 0.26, C.metal); disc(ctx, 0, 0, s * 0.18, "#3a2a1a"); disc(ctx, 0, 0, s * 0.12, C.fire); disc(ctx, 0, 0, s * 0.06, C.fireCore); },
   },
   {
+    id: "sconce", name: "Wall sconce", category: "dungeon", light: 3.5, lightColor: "#ffb347",
+    draw: (ctx, s) => { rrect(ctx, -s * 0.05, 0, s * 0.1, s * 0.18, s * 0.02, C.metal); disc(ctx, 0, -s * 0.04, s * 0.08, C.fire); disc(ctx, 0, -s * 0.07, s * 0.045, C.fireCore); },
+  },
+  {
+    id: "chandelier", name: "Chandelier", category: "dungeon", light: 5, lightColor: "#ffcf8a",
+    draw: (ctx, s) => {
+      ctx.strokeStyle = C.gold; ctx.lineWidth = s * 0.03;
+      ctx.beginPath(); ctx.arc(0, 0, s * 0.2, 0, Math.PI * 2); ctx.stroke();
+      disc(ctx, 0, 0, s * 0.04, C.gold);
+      for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; const x = Math.cos(a) * s * 0.2; const y = Math.sin(a) * s * 0.2; disc(ctx, x, y, s * 0.05, C.fire); disc(ctx, x, y, s * 0.025, C.fireCore); }
+    },
+  },
+  {
+    id: "lantern", name: "Lantern", category: "town", light: 3, lightColor: "#ffd27a",
+    draw: (ctx, s) => { rrect(ctx, -s * 0.03, -s * 0.2, s * 0.06, s * 0.06, s * 0.02, C.metal); rrect(ctx, -s * 0.1, -s * 0.14, s * 0.2, s * 0.28, s * 0.04, C.metal); rrect(ctx, -s * 0.06, -s * 0.09, s * 0.12, s * 0.18, s * 0.02, "#ffe9a8"); disc(ctx, 0, 0, s * 0.045, C.fireCore); },
+  },
+  {
+    id: "candelabra", name: "Candelabra", category: "town", light: 3.5, lightColor: "#ffcf8a",
+    draw: (ctx, s) => {
+      rrect(ctx, -s * 0.02, -s * 0.02, s * 0.04, s * 0.2, s * 0.01, C.gold);
+      disc(ctx, 0, s * 0.18, s * 0.08, C.gold);
+      ctx.strokeStyle = C.gold; ctx.lineWidth = s * 0.02;
+      ctx.beginPath(); ctx.moveTo(-s * 0.12, 0); ctx.lineTo(s * 0.12, 0); ctx.stroke();
+      for (const dx of [-0.12, 0, 0.12]) { rrect(ctx, dx * s - s * 0.015, -s * 0.12, s * 0.03, s * 0.12, s * 0.01, "#f0e6c0"); disc(ctx, dx * s, -s * 0.14, s * 0.035, C.fire); disc(ctx, dx * s, -s * 0.155, s * 0.018, C.fireCore); }
+    },
+  },
+  {
     id: "column", name: "Column", category: "dungeon", blocksMove: true, blocksSight: true,
     draw: (ctx, s) => { disc(ctx, 0, 0, s * 0.28, C.stone); disc(ctx, 0, 0, s * 0.2, C.stoneLight); ctx.strokeStyle = C.stoneDark; ctx.lineWidth = s * 0.02; ctx.beginPath(); ctx.arc(0, 0, s * 0.2, 0, Math.PI * 2); ctx.stroke(); },
   },

@@ -668,6 +668,14 @@ export function MapBoard({
                 draggable={false}
               />
 
+              {/* atmosphere tint (dusk, torchlight…) washed over the terrain */}
+              {map.lightTint && (
+                <div
+                  className="pointer-events-none absolute left-0 top-0 mix-blend-multiply"
+                  style={{ width: imgSize.w, height: imgSize.h, backgroundColor: map.lightTint, opacity: 0.34 }}
+                />
+              )}
+
               {/* warm light pools */}
               <canvas
                 ref={glowCanvasRef}
