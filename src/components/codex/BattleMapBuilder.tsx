@@ -25,29 +25,80 @@ import {
   pixelToCell,
   snapVertex,
 } from "@/lib/battle/grid";
-import type { BattleBuild, BattleGrid, BattleMap, BattleProp, BattleWall } from "@/lib/domain/types";
+import type { BattleBuild, BattleGrid, BattleMap, BattleProp, BattleWall, WallKind } from "@/lib/domain/types";
 import type { Material } from "@/lib/battle/materials";
 
 /** Draw all wall segments (shared by live canvas + flatten). */
-function drawWalls(ctx: CanvasRenderingContext2D, walls: BattleWall[], cp: number) {
+function drawOneWall(
+  ctx: CanvasRenderingContext2D,
+  w: BattleWall,
+  cp: number,
+  opts: { secretAsSolid?: boolean } = {},
+) {
+  const kind = w.kind ?? "solid";
+  const x1 = w.x1 * cp;
+  const y1 = w.y1 * cp;
+  const x2 = w.x2 * cp;
+  const y2 = w.y2 * cp;
+  const line = (color: string, width: number) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  };
+  if (kind === "window") {
+    line("#34302b", cp * 0.16);
+    line("#9fd3e6", cp * 0.08);
+    // iron-bar mullions across the pane
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const pl = Math.hypot(dx, dy) || 1;
+    const nx = -dy / pl;
+    const ny = dx / pl;
+    ctx.strokeStyle = "#34302b";
+    ctx.lineWidth = cp * 0.04;
+    for (const t of [0.3, 0.5, 0.7]) {
+      const mx = x1 + dx * t;
+      const my = y1 + dy * t;
+      ctx.beginPath();
+      ctx.moveTo(mx - nx * cp * 0.09, my - ny * cp * 0.09);
+      ctx.lineTo(mx + nx * cp * 0.09, my + ny * cp * 0.09);
+      ctx.stroke();
+    }
+  } else if (kind === "door") {
+    line("#3a2a18", cp * 0.26);
+    line("#8a5a2b", cp * 0.14);
+    ctx.fillStyle = "#e6c772";
+    const hx = x1 + (x2 - x1) * 0.76;
+    const hy = y1 + (y2 - y1) * 0.76;
+    ctx.beginPath();
+    ctx.arc(hx, hy, cp * 0.05, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // solid / secret base = stone
+    line("#332e28", cp * 0.18);
+    line("#574f45", cp * 0.07);
+    if (kind === "secret" && !opts.secretAsSolid) {
+      ctx.save();
+      ctx.setLineDash([cp * 0.14, cp * 0.1]);
+      line("#c060c0", cp * 0.05);
+      ctx.restore();
+      ctx.setLineDash([]);
+    }
+  }
+}
+
+function drawWalls(
+  ctx: CanvasRenderingContext2D,
+  walls: BattleWall[],
+  cp: number,
+  opts: { secretAsSolid?: boolean } = {},
+) {
   if (!walls.length) return;
   ctx.lineCap = "round";
-  ctx.strokeStyle = "#332e28";
-  ctx.lineWidth = cp * 0.18;
-  for (const w of walls) {
-    ctx.beginPath();
-    ctx.moveTo(w.x1 * cp, w.y1 * cp);
-    ctx.lineTo(w.x2 * cp, w.y2 * cp);
-    ctx.stroke();
-  }
-  ctx.strokeStyle = "#574f45";
-  ctx.lineWidth = cp * 0.07;
-  for (const w of walls) {
-    ctx.beginPath();
-    ctx.moveTo(w.x1 * cp, w.y1 * cp);
-    ctx.lineTo(w.x2 * cp, w.y2 * cp);
-    ctx.stroke();
-  }
+  for (const w of walls) drawOneWall(ctx, w, cp, opts);
   ctx.lineCap = "butt";
 }
 
@@ -209,6 +260,7 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
     return t?.palette[0] ?? "stone";
   });
   const [brush, setBrush] = useState(1);
+  const [wallKind, setWallKind] = useState<WallKind>("solid");
   const [showGrid, setShowGrid] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [propKind, setPropKind] = useState<string>("chest");
@@ -226,6 +278,8 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
   matRef.current = material;
   const brushRef = useRef(brush);
   brushRef.current = brush;
+  const wallKindRef = useRef(wallKind);
+  wallKindRef.current = wallKind;
   const gridRef = useRef(showGrid);
   gridRef.current = showGrid;
   const propKindRef = useRef(propKind);
@@ -787,7 +841,10 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
         pushUndo();
         setBuild({
           ...b,
-          walls: [...(b.walls ?? []), { id: newId(), x1: ds.sx, y1: ds.sy, x2: ds.cx, y2: ds.cy }],
+          walls: [
+            ...(b.walls ?? []),
+            { id: newId(), x1: ds.sx, y1: ds.sy, x2: ds.cx, y2: ds.cy, kind: wallKindRef.current },
+          ],
         });
         setDirty(true);
       }
@@ -897,7 +954,14 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       }
       ctx.stroke();
     }
-    drawWalls(ctx, b.walls ?? [], cp);
+    // Bake static walls only — doors render live on the War Table (open/closed),
+    // and secret doors bake as plain stone so players can't spot them.
+    drawWalls(
+      ctx,
+      (b.walls ?? []).filter((w) => (w.kind ?? "solid") !== "door"),
+      cp,
+      { secretAsSolid: true },
+    );
     for (const p of b.props ?? []) drawProp(ctx, p, cp);
     return { dataUrl: off.toDataURL("image/png"), width: off.width, height: off.height };
   }
@@ -937,12 +1001,15 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
       showGrid: b.grid === "square",
       feetPerCell: map.feetPerCell ?? 5,
       // Export walls (cell coords → image px) so combat line-of-sight works.
+      // Doors start closed; kind drives sight + the War Table door toggle.
       walls: (b.walls ?? []).map((w) => ({
         id: w.id,
         x1: w.x1 * cp,
         y1: w.y1 * cp,
         x2: w.x2 * cp,
         y2: w.y2 * cp,
+        kind: w.kind ?? "solid",
+        open: false,
       })),
       lights,
       build: { ...b, updatedAt: nowISO() },
@@ -1098,6 +1165,33 @@ export function BattleMapBuilder({ map, onClose }: { map: BattleMap; onClose: ()
               </div>
             </details>
           </div>
+
+          {tool === "wall" && (
+            <div className="space-y-1.5 border-t border-parchment-400/40 pt-2">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Wall type</p>
+              <div className="grid grid-cols-2 gap-1">
+                {([["solid", "Solid"], ["door", "Door"], ["window", "Window"], ["secret", "Secret"]] as [WallKind, string][]).map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => setWallKind(k)}
+                    className={cn(
+                      "rounded-md px-2 py-1 text-xs font-semibold transition-colors",
+                      wallKind === k ? "bg-oxblood text-parchment-50" : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[0.6rem] text-ink-faint">
+                {wallKind === "door" && "Blocks sight & movement; the DM toggles it open in the War Table."}
+                {wallKind === "window" && "Blocks movement but not sight, and lets light through (iron bars)."}
+                {wallKind === "secret" && "Looks like solid wall to players; only the DM can open it."}
+                {wallKind === "solid" && "Full wall — blocks sight and movement."}
+              </p>
+              <p className="text-[0.6rem] text-ink-faint">Drag along a cell edge. Leave a gap in a wall to fit a door or window.</p>
+            </div>
+          )}
 
           {tool === "prop" && (
             <div className="border-t border-parchment-400/40 pt-2">

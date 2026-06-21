@@ -252,7 +252,7 @@ export function MapPanel() {
 
           <p className="text-xs text-ink-faint">
             Scroll to zoom · drag empty space to pan · drag a token to move it
-            {isDM ? " · draw walls (sight blockers), set the Light level to dim/dark and drop torches with the Light tool, lay AoE spell templates, sketch, measure, or ping." : " · use Ruler to measure and Ping to point."}
+            {isDM ? " · draw walls (sight blockers), click a door with Move to open/close it, set the Light level to dim/dark and drop torches with the Light tool, lay AoE spell templates, sketch, measure, or ping." : " · use Ruler to measure and Ping to point."}
           </p>
         </div>
       )}

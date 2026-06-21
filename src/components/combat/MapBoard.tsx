@@ -159,6 +159,18 @@ export function MapBoard({
   const tokensRef = useRef(tokens);
   tokensRef.current = tokens;
   const walls = map.walls ?? [];
+  // Only these block line of sight: solid walls, plus closed doors / secret
+  // doors. Windows (and open doors) let sight + light pass straight through.
+  const sightWalls = useMemo(
+    () =>
+      walls.filter((w) => {
+        const k = w.kind ?? "solid";
+        if (k === "window") return false;
+        if (k === "door" || k === "secret") return !w.open;
+        return true;
+      }),
+    [walls],
+  );
   const drawings = map.drawings ?? [];
   const templates = map.templates ?? [];
   const pxPerFoot = grid > 0 ? grid / feetPerCell : 12;
@@ -276,7 +288,7 @@ export function MapBoard({
       imgSize.w,
       imgSize.h,
       viewers,
-      walls,
+      sightWalls,
       lights,
       lightLevel,
       litRef.current?.getContext("2d") ?? null,
@@ -285,7 +297,7 @@ export function MapBoard({
       fogColor: dark ? "rgba(6,5,8,0.985)" : "rgba(8,6,4,0.99)",
       exploredDim: 0,
     });
-  }, [imgSize, fogEnabled, isDM, dmPreview, tokens, walls, drag, defaultVision, lights, lightLevel]);
+  }, [imgSize, fogEnabled, isDM, dmPreview, tokens, sightWalls, drag, defaultVision, lights, lightLevel]);
 
   useEffect(() => {
     renderFog();
@@ -386,6 +398,8 @@ export function MapBoard({
             grab: { x: p.x - t.x, y: p.y - t.y },
           };
           setDrag({ id: t.id, pos: { x: t.x, y: t.y } });
+        } else if (isDM && toggleDoorAt(p)) {
+          // handled — opened/closed a door
         } else {
           gesture.current = { mode: "pan", lastX: e.clientX, lastY: e.clientY };
         }
@@ -519,6 +533,27 @@ export function MapBoard({
       void updateMap(map.id, { templates: [...templates, aoe] });
       setAoe(null);
     }
+  }
+
+  /** DM clicks a door/secret-door to toggle it open or closed (synced). */
+  function toggleDoorAt(p: Pt): boolean {
+    const threshold = Math.max(14 / view.scale, grid * 0.5);
+    let best: string | null = null;
+    let bestD = threshold;
+    for (const w of walls) {
+      const k = w.kind ?? "solid";
+      if (k !== "door" && k !== "secret") continue;
+      const d = distToSegment(p, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
+      if (d < bestD) {
+        bestD = d;
+        best = w.id;
+      }
+    }
+    if (!best) return false;
+    void updateMap(map.id, {
+      walls: walls.map((w) => (w.id === best ? { ...w, open: !w.open } : w)),
+    });
+    return true;
   }
 
   function eraseAt(p: Pt) {
@@ -743,17 +778,60 @@ export function MapBoard({
                   );
                 })}
 
+                {/* Doors render live for EVERYONE (not baked) so open/closed
+                    always matches state; the DM clicks one to toggle it. */}
+                {walls
+                  .filter((w) => (w.kind ?? "solid") === "door")
+                  .map((w) => {
+                    const dx = w.x2 - w.x1;
+                    const dy = w.y2 - w.y1;
+                    const L = Math.hypot(dx, dy) || 1;
+                    const lw = Math.max(5, grid * 0.16);
+                    if (w.open) {
+                      const ex = w.x1 + (-dy / L) * L;
+                      const ey = w.y1 + (dx / L) * L;
+                      return (
+                        <g key={w.id}>
+                          <line x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} stroke="#caa46a" strokeWidth={2} strokeDasharray="4 5" opacity={0.6} />
+                          <line x1={w.x1} y1={w.y1} x2={ex} y2={ey} stroke="#8a5a2b" strokeWidth={lw} strokeLinecap="round" />
+                        </g>
+                      );
+                    }
+                    return (
+                      <g key={w.id}>
+                        <line x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} stroke="#3a2a18" strokeWidth={lw + 3} strokeLinecap="round" />
+                        <line x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} stroke="#8a5a2b" strokeWidth={lw} strokeLinecap="round" />
+                      </g>
+                    );
+                  })}
+
+                {/* DM-only overlay marking the (player-invisible) sight walls. */}
                 {isDM && (
-                  <g stroke="#C25A3D" strokeWidth={3} strokeLinecap="round" opacity={0.85}>
-                    {walls.map((w) => (
-                      <line key={w.id} x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} />
-                    ))}
+                  <g strokeWidth={3} strokeLinecap="round" opacity={0.85}>
+                    {walls
+                      .filter((w) => (w.kind ?? "solid") !== "door")
+                      .map((w) => {
+                        const k = w.kind ?? "solid";
+                        const stroke = k === "window" ? "#7fd1e6" : k === "secret" ? "#c060c0" : "#C25A3D";
+                        return (
+                          <line
+                            key={w.id}
+                            x1={w.x1}
+                            y1={w.y1}
+                            x2={w.x2}
+                            y2={w.y2}
+                            stroke={stroke}
+                            strokeDasharray={k === "secret" ? "8 6" : undefined}
+                          />
+                        );
+                      })}
                     {pending?.kind === "wall" && (
                       <line
                         x1={pending.from.x}
                         y1={pending.from.y}
                         x2={pending.to.x}
                         y2={pending.to.y}
+                        stroke="#C25A3D"
                         strokeDasharray="6 6"
                       />
                     )}

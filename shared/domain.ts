@@ -1032,12 +1032,21 @@ export interface TimelineEvent extends Entity {
  * Tactical map layers (Phase 3). All coordinates are in MAP IMAGE PIXELS, so
  * they're resolution-independent of the viewer's pan/zoom.
  */
+/** Wall aperture kind. solid blocks sight+movement; door toggles open/closed;
+ *  window/iron-bars block movement but NOT sight (and pass light); secret is a
+ *  DM-only door disguised as solid wall to players. */
+export type WallKind = "solid" | "door" | "window" | "secret";
+
 export interface Wall {
   id: ID;
   x1: number;
   y1: number;
   x2: number;
   y2: number;
+  /** Aperture kind (default "solid"). */
+  kind?: WallKind;
+  /** For doors/secret doors: currently open (passable, lets sight through). */
+  open?: boolean;
 }
 
 export interface MapDrawing {
@@ -1244,6 +1253,8 @@ export interface BattleWall {
   y1: number;
   x2: number;
   y2: number;
+  /** Aperture kind (default "solid") — exported to Wall.kind. */
+  kind?: WallKind;
 }
 
 export interface BattleBuild {
@@ -1256,6 +1267,8 @@ export interface BattleBuild {
   theme?: string;
   /** Terrain material id per cell, row-major (length cols*rows). "" = void. */
   tiles: string[];
+  /** Hazard/liquid id per cell, row-major (lava, acid, web…). "" = none. */
+  hazards?: string[];
   props?: BattleProp[];
   /** Walls (cell coords) — drawn on the map and exported to BattleMap.walls. */
   walls?: BattleWall[];
@@ -1292,6 +1305,8 @@ export interface BattleMap extends Entity {
   fogEnabled?: boolean;
   /** Ambient light: bright (default, sight only) | dim | dark (need lights). */
   lightLevel?: "bright" | "dim" | "dark";
+  /** Atmosphere tint (hex) washed over the map — e.g. warm torchlight, cool dusk. */
+  lightTint?: string;
   lights?: MapLight[];
   walls?: Wall[];
   drawings?: MapDrawing[];
