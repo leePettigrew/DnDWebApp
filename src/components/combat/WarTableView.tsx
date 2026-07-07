@@ -208,8 +208,9 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
     () => map?.tokens?.find((t) => t.id === selectedTokenId) ?? null,
     [map?.tokens, selectedTokenId],
   );
-  const canEditToken =
-    !!selectedToken && (isDM || (!!selectedToken.ownerId && selectedToken.ownerId === userId));
+  // Map documents are DM-only on the server, so only the DM edits tokens
+  // here; players get a read-out of their own token instead.
+  const canEditToken = !!selectedToken && isDM;
 
   function patchToken(patch: Partial<MapToken>) {
     if (!map || !selectedToken) return;

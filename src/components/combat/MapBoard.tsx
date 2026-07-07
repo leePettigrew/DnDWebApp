@@ -311,6 +311,9 @@ export function MapBoard({
   const autoCost = map.autoTerrainCost ?? false;
   const enforceWalls = map.enforceWalls ?? false;
   const enforceSpeed = map.enforceSpeed ?? "off";
+  // Speed budgets only exist while combat runs — outside it movement is free
+  // (otherwise movedFt would accumulate forever with nothing to reset it).
+  const speedActive = enforceSpeed !== "off" && (combat?.active ?? false);
   const weather = map.weather ?? "none";
   const difficultAt = useMemo(() => {
     const tc = map.terrainCost;
@@ -476,17 +479,25 @@ export function MapBoard({
   // --- DM undo of map edits (walls, lights, ink, templates, token moves) ---
   const mapRef = useRef(map);
   mapRef.current = map;
-  const mapUndo = useRef<Partial<BattleMap>[]>([]);
+  const mapUndo = useRef<{ mapId: string; snap: Partial<BattleMap> }[]>([]);
   function pushMapUndo(...keys: ("walls" | "lights" | "templates" | "drawings" | "tokens")[]) {
     const m = mapRef.current;
     const snap: Partial<BattleMap> = {};
     for (const k of keys) snap[k] = (m[k] ?? []) as never;
-    mapUndo.current.push(snap);
+    mapUndo.current.push({ mapId: m.id, snap });
     if (mapUndo.current.length > 30) mapUndo.current.shift();
   }
   function undoMapEdit() {
-    const snap = mapUndo.current.pop();
-    if (snap) void updateMap(mapRef.current.id, snap);
+    // Never apply a snapshot taken on a different map (portal jumps, map
+    // switches) — those entries are stale history, not undoable state.
+    const cur = mapRef.current.id;
+    while (mapUndo.current.length) {
+      const top = mapUndo.current.pop()!;
+      if (top.mapId === cur) {
+        void updateMap(cur, top.snap);
+        return;
+      }
+    }
   }
 
   // Keyboard shortcuts (fullscreen War Table only).
@@ -528,6 +539,34 @@ export function MapBoard({
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shortcuts, isDM]);
+
+  // Budget bookkeeping: the DM's client is the single writer for movedFt.
+  // It watches synced token positions and charges each move's feet, so
+  // players never need (forbidden) map-document writes to be tracked.
+  const prevPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  useEffect(() => {
+    const prev = prevPosRef.current;
+    const next = new Map(tokens.map((t) => [t.id, { x: t.x, y: t.y }]));
+    if (isDM && speedActive) {
+      let changed = false;
+      const upd = tokens.map((t) => {
+        const p = prev.get(t.id);
+        if (p && (p.x !== t.x || p.y !== t.y)) {
+          const ft = pathFeet(p, { x: t.x, y: t.y });
+          if (ft > 0) {
+            changed = true;
+            return { ...t, movedFt: (t.movedFt ?? 0) + ft };
+          }
+        }
+        return t;
+      });
+      prevPosRef.current = next;
+      if (changed) void updateMap(map.id, { tokens: upd });
+    } else {
+      prevPosRef.current = next;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokens, isDM, speedActive, map.id]);
 
   // Fresh legs: when the turn passes to a combatant, the DM's client resets
   // that combatant's spent movement (single writer avoids write races).
@@ -911,25 +950,16 @@ export function MapBoard({
         : drag.pos;
       const spent = tk ? pathFeet({ x: tk.x, y: tk.y }, snapped) : 0;
       const remaining = Math.max(0, (tk?.speed ?? 30) - (tk?.movedFt ?? 0));
-      if (enforceSpeed === "block" && tk && spent > remaining) {
+      if (enforceSpeed === "block" && speedActive && tk && spent > remaining) {
         // Over budget — the move is refused and the token springs back.
         setDrag(null);
         setSpeedDenied({ id: g.id, at: Date.now() });
         return;
       }
       pushMapUndo("tokens");
-      if (enforceSpeed !== "off" && tk && spent > 0) {
-        // Track the budget: one write carrying both position and spent feet.
-        void updateMap(map.id, {
-          tokens: tokens.map((x) =>
-            x.id === g.id
-              ? { ...x, x: Math.round(snapped.x), y: Math.round(snapped.y), movedFt: (x.movedFt ?? 0) + spent }
-              : x,
-          ),
-        });
-      } else {
-        realtime.moveToken(map.id, g.id, Math.round(snapped.x), Math.round(snapped.y));
-      }
+      // Position always goes through moveToken — it's the only map write
+      // players are allowed; budget accounting happens on the DM client.
+      realtime.moveToken(map.id, g.id, Math.round(snapped.x), Math.round(snapped.y));
       setDrag(null);
     } else if (g.mode === "ruler") {
       setRuler(null);
@@ -1408,7 +1438,7 @@ export function MapBoard({
                     drag && drag.id === t.id ? pathFeet({ x: t.x, y: t.y }, drag.pos) : null;
                   const budget = t.speed ?? 30;
                   const remaining = Math.max(0, budget - (t.movedFt ?? 0));
-                  const overBudget = moveFt !== null && enforceSpeed !== "off" && moveFt > remaining;
+                  const overBudget = moveFt !== null && speedActive && moveFt > remaining;
                   const active = t.combatantId && t.combatantId === activeCombatantId;
                   return (
                     <g
@@ -1434,7 +1464,7 @@ export function MapBoard({
                           strokeWidth={Math.max(2, grid * 0.02)}
                           paintOrder="stroke"
                         >
-                          {moveFt} ft{enforceSpeed !== "off" ? ` / ${remaining}` : ""}
+                          {moveFt} ft{speedActive ? ` / ${remaining}` : ""}
                         </text>
                       )}
                       {active && (
