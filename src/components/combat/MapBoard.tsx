@@ -1118,7 +1118,7 @@ export function MapBoard({
   } as const;
 
   return (
-    <div className="relative">
+    <div className={cn("relative", fillHeight && "h-full")}>
       <div
         ref={containerRef}
         onPointerDown={onPointerDown}
