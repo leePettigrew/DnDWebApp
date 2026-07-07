@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { MapIcon, ChevronRightIcon } from "@/components/ui/icons";
 import { cn } from "@/components/ui/cn";
 import { MapBoard } from "./MapBoard";
+import { WarTableView } from "./WarTableView";
 import {
   useActiveCampaign,
   useCharacters,
@@ -41,6 +42,7 @@ export function MapPanel() {
   const user = useCurrentUser();
   const isDM = role !== "player";
   const [open, setOpen] = useState(true);
+  const [immersive, setImmersive] = useState(false);
 
   const activeMap = maps.find((m) => m.id === combat?.activeMapId) ?? null;
 
@@ -108,12 +110,19 @@ export function MapPanel() {
   // Players with no map set just see a gentle note (collapsed away otherwise).
   if (!isDM && !activeMap) return null;
 
+  if (immersive) return <WarTableView onClose={() => setImmersive(false)} />;
+
   return (
     <Panel
       title="Battle Map"
       eyebrow="The War Table"
       action={
         <div className="flex items-center gap-2">
+          {activeMap && (
+            <Button size="sm" onClick={() => setImmersive(true)} title="Open the fullscreen War Table">
+              ⚔ Enter War Table
+            </Button>
+          )}
           {isDM && maps.length > 0 && (
             <select
               value={activeMap?.id ?? ""}

@@ -194,11 +194,17 @@ export function MapBoard({
   combat,
   isDM,
   userId,
+  fillHeight = false,
+  onSelectToken,
 }: {
   map: BattleMap;
   combat: CombatState | null;
   isDM: boolean;
   userId: string | null;
+  /** Fill the parent (fullscreen War Table) instead of the 62vh panel. */
+  fillHeight?: boolean;
+  /** Fired when the user picks (or clears) a token with the Move tool. */
+  onSelectToken?: (id: string | null) => void;
 }) {
   const realtime = useRealtime();
   const { update: updateMap } = useMaps();
@@ -214,6 +220,8 @@ export function MapBoard({
   const exploredRef = useRef<HTMLCanvasElement | null>(null);
 
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
+  const imgSizeRef = useRef(imgSize);
+  imgSizeRef.current = imgSize;
   const [view, setView] = useState<View>({ scale: 1, offsetX: 0, offsetY: 0 });
   const [tool, setTool] = useState<Tool>("select");
   const [dmPreview, setDmPreview] = useState(false);
@@ -226,6 +234,7 @@ export function MapBoard({
   >(null);
   const [flashId, setFlashId] = useState<string | null>(null);
   const [speedDenied, setSpeedDenied] = useState<{ id: string; at: number } | null>(null);
+  const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [showAnnos, setShowAnnos] = useState(true);
   const [aoeShape, setAoeShape] = useState<AoeShape>("circle");
   const [aoeFeet, setAoeFeet] = useState(20);
@@ -353,6 +362,30 @@ export function MapBoard({
     });
   }, [imgSize, map.id]);
 
+  // Re-fit when the viewport itself changes size (entering fullscreen, panel
+  // resize) — only meaningful jumps, so pan/zoom isn't fought over pixels.
+  useEffect(() => {
+    const cont = containerRef.current;
+    if (!cont) return;
+    let last = { w: cont.clientWidth, h: cont.clientHeight };
+    const ro = new ResizeObserver(() => {
+      const w = cont.clientWidth;
+      const h = cont.clientHeight;
+      if (Math.abs(w - last.w) < 40 && Math.abs(h - last.h) < 40) return;
+      last = { w, h };
+      const sz = imgSizeRef.current;
+      if (!sz) return;
+      const scale = Math.min(w / sz.w, h / sz.h) || 1;
+      setView({
+        scale,
+        offsetX: (w - sz.w * scale) / 2,
+        offsetY: (h - sz.h * scale) / 2,
+      });
+    });
+    ro.observe(cont);
+    return () => ro.disconnect();
+  }, []);
+
   // Center + flash a token when its row is clicked in the initiative tracker.
   useEffect(() => {
     const onFocus = (e: Event) => {
@@ -418,8 +451,12 @@ export function MapBoard({
       return;
     }
 
+    // Personal vision: each player sees only through their OWN tokens; shared
+    // (default) pools the whole party's sight. The DM previews shared sight.
+    const personal = (map.visionMode ?? "shared") === "personal" && !isDM;
     const viewers: MapToken[] = tokens
       .filter((t) => t.isPC && !t.hidden)
+      .filter((t) => !personal || t.ownerId === userId)
       .map((t) =>
         drag && drag.id === t.id ? { ...t, x: drag.pos.x, y: drag.pos.y } : t,
       )
@@ -430,6 +467,15 @@ export function MapBoard({
       }));
 
     if (viewers.length === 0) {
+      if (personal) {
+        // You have no token on this map — you see nothing but darkness.
+        mctx.clearRect(0, 0, imgSize.w, imgSize.h);
+        paintFog(fctx, imgSize.w, imgSize.h, mask, null, {
+          fogColor: dark ? "rgba(6,5,8,0.985)" : "rgba(8,6,4,0.99)",
+          exploredDim: 0,
+        });
+        return;
+      }
       // No party vision yet — show the map rather than a black void.
       fctx.clearRect(0, 0, imgSize.w, imgSize.h);
       return;
@@ -455,7 +501,7 @@ export function MapBoard({
       fogColor: dark ? "rgba(6,5,8,0.985)" : "rgba(8,6,4,0.99)",
       exploredDim: 0,
     });
-  }, [imgSize, fogEnabled, isDM, dmPreview, tokens, sightWalls, drag, defaultVision, lights, lightLevel]);
+  }, [imgSize, fogEnabled, isDM, dmPreview, tokens, sightWalls, drag, defaultVision, lights, lightLevel, map.visionMode, userId]);
 
   useEffect(() => {
     renderFog();
@@ -571,11 +617,22 @@ export function MapBoard({
             grab: { x: p.x - t.x, y: p.y - t.y },
           };
           setDrag({ id: t.id, pos: { x: t.x, y: t.y } });
+          setSelectedTokenId(t.id);
+          onSelectToken?.(t.id);
         } else if (isDM && toggleDoorAt(p)) {
           // handled — opened/closed a door
         } else if (isDM && tryPortalAt(p)) {
           // handled — jumped to the linked map
         } else {
+          const inspect = anyTokenAt(p);
+          if (inspect && isDM) {
+            // DM can inspect a token they aren't dragging.
+            setSelectedTokenId(inspect.id);
+            onSelectToken?.(inspect.id);
+          } else {
+            setSelectedTokenId(null);
+            onSelectToken?.(null);
+          }
           gesture.current = { mode: "pan", lastX: e.clientX, lastY: e.clientY };
         }
         break;
@@ -861,7 +918,10 @@ export function MapBoard({
         onPointerUp={onPointerUp}
         onContextMenu={(e) => e.preventDefault()}
         className={cn(
-          "relative h-[62vh] min-h-80 w-full overflow-hidden rounded-card border-2 border-parchment-400/70 bg-leather/90 touch-none select-none",
+          "relative w-full overflow-hidden bg-leather/90 touch-none select-none",
+          fillHeight
+            ? "h-full"
+            : "h-[62vh] min-h-80 rounded-card border-2 border-parchment-400/70",
           tool === "pan" && "cursor-grab",
           tool === "ping" && "cursor-pointer",
         )}
@@ -1125,6 +1185,9 @@ export function MapBoard({
                       )}
                       {active && (
                         <circle r={r + 6} fill="none" stroke="#E6C772" strokeWidth={4} opacity={0.9} />
+                      )}
+                      {selectedTokenId === t.id && (
+                        <circle r={r + 3} fill="none" stroke="#7fd1e6" strokeWidth={2.5} strokeDasharray="5 4" opacity={0.9} />
                       )}
                       {flashId === t.id && (
                         <circle r={r + 8} fill="none" stroke="#F5E9CF" strokeWidth={5}>
