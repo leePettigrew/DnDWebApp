@@ -750,6 +750,19 @@ export function MapBoard({
     return maskRef.current?.getContext("2d") ?? null;
   }
 
+  /** Is a map point visible to this viewer? (players: gated by the fog mask
+   *  whenever fog or darkness is active; the DM always sees structure). */
+  const pointVisible = useCallback(
+    (x: number, y: number): boolean => {
+      if (isDM) return true;
+      if (!fogEnabled && lightLevel === "bright") return true;
+      const ctx = maskCtx();
+      if (!ctx || !imgSize) return true;
+      return isVisibleAt(ctx, x, y, imgSize.w, imgSize.h);
+    },
+    [isDM, fogEnabled, lightLevel, imgSize],
+  );
+
   const tokenVisible = useCallback(
     (t: MapToken): boolean => {
       if (t.hidden && !isDM) return false;
@@ -1252,8 +1265,9 @@ export function MapBoard({
                 viewBox={`0 0 ${imgSize.w} ${imgSize.h}`}
                 className="pointer-events-none absolute left-0 top-0"
               >
-                {/* AoE spell templates — visible to everyone, above fog, under tokens */}
-                {[...templates, ...(aoe ? [aoe] : [])].map((t) => {
+                {/* AoE spell templates — above fog, under tokens; players only
+                    see templates whose origin their sight has reached. */}
+                {[...templates.filter((t) => pointVisible(t.x, t.y)), ...(aoe ? [aoe] : [])].map((t) => {
                   const color = t.color ?? "#C25A3D";
                   const feet = Math.round(t.size / pxPerFoot);
                   const lx = t.shape === "circle" ? t.x : t.x + Math.cos(t.angle ?? 0) * t.size * 0.5;
@@ -1283,10 +1297,11 @@ export function MapBoard({
                   );
                 })}
 
-                {/* Doors render live for EVERYONE (not baked) so open/closed
-                    always matches state; the DM clicks one to toggle it. */}
+                {/* Doors render live (not baked) so open/closed always matches
+                    state; players only see doors their sight has reached. */}
                 {walls
                   .filter((w) => (w.kind ?? "solid") === "door")
+                  .filter((w) => pointVisible((w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2))
                   .map((w) => {
                     const dx = w.x2 - w.x1;
                     const dy = w.y2 - w.y1;
@@ -1352,8 +1367,8 @@ export function MapBoard({
                     </g>
                   ))}
 
-                {/* Stairs / portals — everyone sees them; the DM clicks to jump. */}
-                {portals.map((pt) => (
+                {/* Stairs / portals — fog-gated for players; the DM clicks to jump. */}
+                {portals.filter((pt) => pointVisible(pt.x, pt.y)).map((pt) => (
                   <g key={pt.id} transform={`translate(${pt.x}, ${pt.y})`}>
                     <circle r={grid ? grid * 0.34 : 22} fill="rgba(40,90,140,0.5)" stroke="#7fd1e6" strokeWidth={3} />
                     {[0, 1, 2].map((i) => {
@@ -1369,10 +1384,11 @@ export function MapBoard({
                   </g>
                 ))}
 
-                {/* Annotations — labels & numbered markers for all, notes for the DM. */}
+                {/* Annotations — labels & markers fog-gated for players; notes DM-only. */}
                 {showAnnos &&
                   annotations
                     .filter((a) => a.kind !== "note" || isDM)
+                    .filter((a) => pointVisible(a.x, a.y))
                     .map((a) => <AnnotationMark key={a.id} a={a} grid={grid} />)}
 
                 {/* Target tool: attacker reticle + aim line with range. */}
