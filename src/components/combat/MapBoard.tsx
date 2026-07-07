@@ -20,6 +20,7 @@ import type {
   Wall,
 } from "@/lib/domain/types";
 import { TOKEN_SIZE_CELLS } from "@/lib/domain/types";
+import { WeatherLayer } from "./WeatherLayer";
 import { newId } from "@/lib/domain/ids";
 import {
   clamp,
@@ -304,6 +305,7 @@ export function MapBoard({
   const autoCost = map.autoTerrainCost ?? false;
   const enforceWalls = map.enforceWalls ?? false;
   const enforceSpeed = map.enforceSpeed ?? "off";
+  const weather = map.weather ?? "none";
   const difficultAt = useMemo(() => {
     const tc = map.terrainCost;
     if (!tc) return null;
@@ -531,7 +533,9 @@ export function MapBoard({
     renderFog();
   }, [renderFog]);
 
-  // Warm light pools (visual tint), under the fog.
+  // Warm light pools (visual tint), under the fog. `flickerTick` makes each
+  // pool breathe a little, like real flame.
+  const [flickerTick, setFlickerTick] = useState(0);
   const renderGlow = useCallback(() => {
     const g = glowCanvasRef.current;
     if (!g || !imgSize) return;
@@ -540,23 +544,33 @@ export function MapBoard({
     ctx.clearRect(0, 0, imgSize.w, imgSize.h);
     if (lightLevel === "bright" || lights.length === 0) return;
     ctx.globalCompositeOperation = "lighter";
-    for (const L of lights) {
-      if (L.radius <= 0) continue;
+    lights.forEach((L, idx) => {
+      if (L.radius <= 0) return;
       const col = L.color ?? "#ffcf8a";
-      const grad = ctx.createRadialGradient(L.x, L.y, L.radius * 0.1, L.x, L.y, L.radius);
-      grad.addColorStop(0, hexA(col, 0.4 * (L.intensity ?? 1)));
+      // Deterministic per-light wobble: phase from index, driven by the tick.
+      const f = 0.86 + 0.14 * Math.sin(flickerTick * 0.9 + idx * 2.7);
+      const rad = L.radius * (0.97 + 0.03 * f);
+      const grad = ctx.createRadialGradient(L.x, L.y, rad * 0.1, L.x, L.y, rad);
+      grad.addColorStop(0, hexA(col, 0.4 * (L.intensity ?? 1) * f));
       grad.addColorStop(1, hexA(col, 0));
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(L.x, L.y, L.radius, 0, Math.PI * 2);
+      ctx.arc(L.x, L.y, rad, 0, Math.PI * 2);
       ctx.fill();
-    }
+    });
     ctx.globalCompositeOperation = "source-over";
-  }, [imgSize, lights, lightLevel]);
+  }, [imgSize, lights, lightLevel, flickerTick]);
 
   useEffect(() => {
     renderGlow();
   }, [renderGlow]);
+
+  // Drive the flame flicker only while lights are actually glowing.
+  useEffect(() => {
+    if (lightLevel === "bright" || lights.length === 0) return;
+    const id = window.setInterval(() => setFlickerTick((t) => (t + 1) % 100000), 160);
+    return () => window.clearInterval(id);
+  }, [lightLevel, lights.length]);
 
   // Reset explored memory when the map changes.
   useEffect(() => {
@@ -1298,7 +1312,18 @@ export function MapBoard({
                   const overBudget = moveFt !== null && enforceSpeed !== "off" && moveFt > remaining;
                   const active = t.combatantId && t.combatantId === activeCombatantId;
                   return (
-                    <g key={t.id} transform={`translate(${pos.x}, ${pos.y})`} opacity={ghost ? 0.45 : 1}>
+                    <g
+                      key={t.id}
+                      style={{
+                        transform: `translate(${pos.x}px, ${pos.y}px)`,
+                        // Remote moves glide; your own drag tracks the pointer raw.
+                        transition:
+                          drag && drag.id === t.id
+                            ? "none"
+                            : "transform 0.45s cubic-bezier(0.25, 0.9, 0.3, 1)",
+                      }}
+                      opacity={ghost ? 0.45 : 1}
+                    >
                       {moveFt !== null && (
                         <text
                           y={-r - 10}
@@ -1486,6 +1511,11 @@ export function MapBoard({
                     />
                   ))}
               </svg>
+
+              {/* ambient weather — topmost map-space layer */}
+              {weather !== "none" && (
+                <WeatherLayer w={imgSize.w} h={imgSize.h} kind={weather} />
+              )}
             </div>
           )
         )}

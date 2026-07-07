@@ -707,6 +707,24 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                   />
                   Fog of war
                 </label>
+                <label className="flex items-center justify-between">
+                  Weather
+                  <select
+                    value={map.weather ?? "none"}
+                    onChange={(e) =>
+                      updateMap(map.id, {
+                        weather: e.target.value as "none" | "rain" | "snow" | "embers" | "mist",
+                      })
+                    }
+                    className="h-6 rounded border border-parchment-400 bg-parchment-50 px-1"
+                  >
+                    <option value="none">Clear</option>
+                    <option value="rain">Rain</option>
+                    <option value="snow">Snow</option>
+                    <option value="embers">Embers</option>
+                    <option value="mist">Mist</option>
+                  </select>
+                </label>
               </div>
 
               <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Rules</p>
