@@ -1130,7 +1130,9 @@ export function MapBoard({
   } as const;
 
   return (
-    <div className={cn("relative", fillHeight && "h-full")}>
+    // Fill mode pins to the parent's box with absolute positioning — immune
+    // to percentage-height resolution quirks through nested flex parents.
+    <div className={fillHeight ? "absolute inset-0" : "relative"}>
       <div
         ref={containerRef}
         onPointerDown={onPointerDown}

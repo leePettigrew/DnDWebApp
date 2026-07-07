@@ -17,10 +17,25 @@ import * as Combat from "@/lib/combat/state";
 import { attackOptionsFor, type AttackOption } from "@/lib/combat/attacks";
 import { parseRollSpec, spec } from "@/lib/domain/dice";
 import { newId } from "@/lib/domain/ids";
+import {
+  abilityMod,
+  formatModifier,
+  savingThrowBonus,
+  skillBonus,
+} from "@/lib/domain/character";
 import { HAZARD_MAP } from "@/lib/battle/hazards";
 import type { View } from "@/lib/map/geometry";
-import { TOKEN_SIZE_CELLS } from "@/lib/domain/types";
-import type { Combatant, MapToken, RollMode, RollResult, TokenSize } from "@/lib/domain/types";
+import { SKILLS, TOKEN_SIZE_CELLS } from "@/lib/domain/types";
+import type {
+  AbilityKey,
+  Character,
+  Combatant,
+  MapToken,
+  RollMode,
+  RollResult,
+  StatBlock,
+  TokenSize,
+} from "@/lib/domain/types";
 
 const SIZES: TokenSize[] = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 
@@ -33,6 +48,184 @@ const LIGHT_PRESETS = [
 
 function hpTone(pct: number): string {
   return pct > 0.5 ? "bg-forest" : pct > 0.25 ? "bg-brass" : "bg-oxblood";
+}
+
+const ABILITIES: AbilityKey[] = ["str", "dex", "con", "int", "wis", "cha"];
+
+const trayChip =
+  "rounded-md border border-parchment-400/70 bg-parchment-50 px-2 py-1 text-[0.7rem] font-semibold text-ink-soft transition-colors hover:bg-brass/20 hover:text-brass-dark disabled:opacity-50";
+
+/**
+ * The active combatant's action tray: their attacks, ability checks, saves
+ * and skills as one-click rolls — shown to whoever runs that combatant (its
+ * owning player, or the DM), so each turn plays like a proper game turn.
+ */
+function TurnTray({
+  cb,
+  char,
+  sb,
+  attacks,
+  remainingFt,
+  rolling,
+  onD20,
+  onDamage,
+}: {
+  cb: Combatant;
+  char: Character | null;
+  sb: StatBlock | null;
+  attacks: AttackOption[];
+  remainingFt: number | null;
+  rolling: boolean;
+  onD20: (bonus: number, label: string, mode: RollMode) => void;
+  onDamage: (damage: string, label: string) => void;
+}) {
+  const [mode, setMode] = useState<RollMode>("normal");
+  const [skillKey, setSkillKey] = useState(SKILLS[0]?.key ?? "athletics");
+  const scores = char?.abilityScores ?? sb?.abilityScores ?? null;
+  const dying = cb.currentHp <= 0 && cb.maxHp > 0;
+  const skill = SKILLS.find((s) => s.key === skillKey) ?? SKILLS[0];
+
+  return (
+    <div
+      onPointerDown={(e) => e.stopPropagation()}
+      className="absolute bottom-3 left-1/2 max-h-[38%] w-[42rem] max-w-[96%] -translate-x-1/2 space-y-1.5 overflow-y-auto rounded-card border border-brass/50 bg-parchment-100/97 px-3 py-2 text-xs shadow-gilt backdrop-blur"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-display text-sm font-bold text-ink">⚔ {cb.name}&apos;s turn</span>
+        {remainingFt !== null && (
+          <span className="rounded-full bg-forest/15 px-2 py-0.5 font-semibold text-forest">
+            {remainingFt} ft movement left
+          </span>
+        )}
+        <span className="text-ink-faint">
+          HP {cb.currentHp}/{cb.maxHp} · AC {cb.armorClass}
+        </span>
+        <span className="ml-auto flex overflow-hidden rounded-md border border-parchment-400/70">
+          {(["normal", "advantage", "disadvantage"] as RollMode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={cn(
+                "px-1.5 py-0.5 text-[0.6rem] font-bold uppercase",
+                mode === m ? "bg-oxblood text-parchment-50" : "bg-parchment-50 text-ink-faint hover:text-ink",
+              )}
+              title={m}
+            >
+              {m === "normal" ? "—" : m === "advantage" ? "ADV" : "DIS"}
+            </button>
+          ))}
+        </span>
+      </div>
+
+      {dying && (
+        <div className="flex items-center gap-2 rounded-md border border-oxblood/50 bg-oxblood/10 px-2 py-1">
+          <span className="font-semibold text-oxblood">At 0 HP — roll a death save (10+ succeeds)</span>
+          <button disabled={rolling} onClick={() => onD20(0, `${cb.name} — death save`, mode)} className={trayChip}>
+            🎲 Death save
+          </button>
+        </div>
+      )}
+
+      {attacks.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Attacks</span>
+          {attacks.map((a) => (
+            <span key={a.id} className="flex overflow-hidden rounded-md border border-parchment-400/70">
+              <button
+                disabled={rolling}
+                onClick={() => onD20(a.bonus ?? 0, `${cb.name} — ${a.name}`, mode)}
+                title={a.note ?? a.name}
+                className="bg-parchment-50 px-2 py-1 text-[0.7rem] font-semibold text-ink-soft hover:bg-oxblood/15 hover:text-oxblood disabled:opacity-50"
+              >
+                ⚔ {a.name} {a.bonus !== undefined ? formatModifier(a.bonus) : ""}
+              </button>
+              {a.damage && parseRollSpec(a.damage) && (
+                <button
+                  disabled={rolling}
+                  onClick={() => onDamage(a.damage!, `${cb.name} — ${a.name} damage`)}
+                  title={`Roll ${a.damage}`}
+                  className="border-l border-parchment-400/70 bg-parchment-50 px-1.5 py-1 text-[0.65rem] text-ink-faint hover:bg-oxblood/15 hover:text-oxblood disabled:opacity-50"
+                >
+                  {a.damage.split(" ")[0]}
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {scores && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Checks</span>
+          {ABILITIES.map((k) => {
+            const m = abilityMod(scores, k);
+            return (
+              <button
+                key={k}
+                disabled={rolling}
+                onClick={() => onD20(m, `${cb.name} — ${k.toUpperCase()} check`, mode)}
+                className={trayChip}
+              >
+                {k.toUpperCase()} {formatModifier(m)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {scores && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Saves</span>
+          {ABILITIES.map((k) => {
+            const m = char ? savingThrowBonus(char, k) : abilityMod(scores, k);
+            return (
+              <button
+                key={k}
+                disabled={rolling}
+                onClick={() => onD20(m, `${cb.name} — ${k.toUpperCase()} save`, mode)}
+                className={trayChip}
+              >
+                {k.toUpperCase()} {formatModifier(m)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {char && skill && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Skills</span>
+          <select
+            value={skillKey}
+            onChange={(e) => setSkillKey(e.target.value as typeof skillKey)}
+            className="h-6 rounded border border-parchment-400 bg-parchment-50 px-1 text-[0.7rem]"
+          >
+            {SKILLS.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label} ({formatModifier(skillBonus(char, s))})
+              </option>
+            ))}
+          </select>
+          <button
+            disabled={rolling}
+            onClick={() => onD20(skillBonus(char, skill), `${cb.name} — ${skill.label}`, mode)}
+            className={trayChip}
+          >
+            🎲 Roll {skill.label}
+          </button>
+        </div>
+      )}
+
+      {!scores && attacks.length === 0 && (
+        <p className="text-[0.65rem] text-ink-faint">
+          No linked sheet or stat block — quick d20:
+          <button disabled={rolling} onClick={() => onD20(0, `${cb.name} — d20`, mode)} className={cn(trayChip, "ml-2")}>
+            🎲 d20
+          </button>
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** The immersive fullscreen War Table: initiative rail, live map, token HUD. */
@@ -140,6 +333,37 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   const active: Combatant | null =
     combat && combat.active ? combat.combatants[combat.turnIndex] ?? null : null;
 
+  // ── Turn tray (the active combatant's playable actions) ────────────
+  const activeChar = active?.isPC
+    ? characters.find((c) => c.id === active.sourceId) ?? null
+    : null;
+  const activeSb =
+    active && !active.isPC ? statBlocks.find((s) => s.id === active.sourceId) ?? null : null;
+  const activeAttacks = useMemo(
+    () => attackOptionsFor(active ?? undefined, characters, statBlocks),
+    [active, characters, statBlocks],
+  );
+  const canAct = !!active && (isDM || (!!activeChar?.ownerId && activeChar.ownerId === userId));
+  async function trayD20(bonus: number, label: string, mode: RollMode) {
+    if (rolling) return;
+    setRolling(true);
+    try {
+      await realtime.roll(spec(1, 20, bonus, mode, label));
+    } finally {
+      setRolling(false);
+    }
+  }
+  async function trayDamage(damage: string, label: string) {
+    const parsed = parseRollSpec(damage, label);
+    if (!parsed || rolling) return;
+    setRolling(true);
+    try {
+      await realtime.roll(parsed);
+    } finally {
+      setRolling(false);
+    }
+  }
+
   const portraitOf = (c: Combatant): string | undefined => {
     if (!c.sourceId) return undefined;
     return c.isPC
@@ -237,7 +461,9 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   const pxOf = (ft: number) => Math.max(0, Math.round(ft * pxPerFoot));
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-ink">
+    // bg-leather stays dark in BOTH themes (bg-ink flips to light in dark
+    // mode, which read as a blank cream void while the map loaded).
+    <div className="fixed inset-0 z-[70] flex flex-col bg-leather">
       {/* ── Command bar ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 border-b border-parchment-400/30 bg-parchment-100 px-4 py-2">
         <SwordsIcon className="h-5 w-5 text-oxblood" />
@@ -595,6 +821,24 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                 </div>
               )}
             </div>
+          )}
+
+          {/* Turn tray — your combatant's actions, like a proper game turn */}
+          {!engage && !selectedToken && map && active && canAct && (
+            <TurnTray
+              cb={active}
+              char={activeChar}
+              sb={activeSb}
+              attacks={activeAttacks}
+              remainingFt={(() => {
+                if ((map.enforceSpeed ?? "off") === "off") return null;
+                const tk = map.tokens?.find((t) => t.combatantId === active.id);
+                return tk ? Math.max(0, (tk.speed ?? 30) - (tk.movedFt ?? 0)) : null;
+              })()}
+              rolling={rolling}
+              onD20={(b, l, m) => void trayD20(b, l, m)}
+              onDamage={(d, l) => void trayDamage(d, l)}
+            />
           )}
 
           {/* Token HUD */}
