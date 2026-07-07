@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MapIcon, ChevronRightIcon } from "@/components/ui/icons";
 import { cn } from "@/components/ui/cn";
-import { MapBoard } from "./MapBoard";
+import { MapBoard, snapTokenPos, tokenCells } from "./MapBoard";
 import { WarTableView } from "./WarTableView";
 import {
   useActiveCampaign,
@@ -64,30 +64,44 @@ export function MapPanel() {
   function placeCombatants() {
     if (!activeMap || !combat) return;
     const cell = activeMap.gridSize ?? 70;
+    const ox = activeMap.gridOffsetX ?? 0;
+    const oy = activeMap.gridOffsetY ?? 0;
     const ownerOf = new Map(characters.map((c) => [c.id, c.ownerId]));
     const existing = activeMap.tokens ?? [];
     const byCombatant = new Map(
       existing.filter((t) => t.combatantId).map((t) => [t.combatantId, t]),
     );
-    let spawn = 0;
+    // Deploy onto whole cells: mediums sit dead-center, Large/Gargantuan on
+    // the intersection their 2×2/4×4 footprint centers on. Each token
+    // occupies its own cells; rows advance by the tallest creature placed.
+    const PER_ROW_CELLS = 10;
+    let col = 1;
+    let row = 1;
+    let rowSpan = 1;
     const next: MapToken[] = [];
     const make = (c: Combatant): MapToken => {
-      const perRow = 8;
-      const x = cell * 1.5 + (spawn % perRow) * cell * 1.2;
-      const y = cell * 1.5 + Math.floor(spawn / perRow) * cell * 1.2;
-      spawn++;
       // Pull identity from the source entity: PCs bring their sheet's
       // portrait + speed; monsters bring stat-block art, size and speed.
       const ch = c.isPC ? characters.find((x) => x.id === c.sourceId) : undefined;
       const sb = !c.isPC ? statBlocks.find((x) => x.id === c.sourceId) : undefined;
       const size = sb ? parseTokenSize(sb.size) : "medium";
       const cells = TOKEN_SIZE_CELLS[size] ?? 1;
+      const span = Math.max(1, Math.ceil(cells));
+      if (col + span > 1 + PER_ROW_CELLS) {
+        col = 1;
+        row += rowSpan;
+        rowSpan = 1;
+      }
+      const x = ox + (col + span / 2) * cell;
+      const y = oy + (row + span / 2) * cell;
+      col += span;
+      rowSpan = Math.max(rowSpan, span);
       return {
         id: newId(),
         combatantId: c.id,
         label: c.name,
-        x,
-        y,
+        x: Math.round(x),
+        y: Math.round(y),
         radius: cell * 0.42 * Math.max(1, cells),
         color: c.isPC ? PC_COLOR : NPC_COLOR,
         isPC: c.isPC,
@@ -220,6 +234,27 @@ export function MapPanel() {
                   className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
                 />
               </label>
+              <label className="flex items-center gap-1.5" title="Shift the grid to line the tiles up with the map art">
+                offset
+                <input
+                  type="number"
+                  value={activeMap.gridOffsetX ?? 0}
+                  onChange={(e) =>
+                    updateMap(activeMap.id, { gridOffsetX: Number(e.target.value) || 0 })
+                  }
+                  aria-label="Grid offset X"
+                  className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
+                />
+                <input
+                  type="number"
+                  value={activeMap.gridOffsetY ?? 0}
+                  onChange={(e) =>
+                    updateMap(activeMap.id, { gridOffsetY: Number(e.target.value) || 0 })
+                  }
+                  aria-label="Grid offset Y"
+                  className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
+                />
+              </label>
               <label className="flex items-center gap-1.5">
                 <input
                   type="checkbox"
@@ -304,6 +339,28 @@ export function MapPanel() {
                 <Button variant="secondary" size="sm" onClick={placeCombatants}>
                   Place combatants
                 </Button>
+                <button
+                  onClick={() => {
+                    const g = activeMap.gridSize ?? 0;
+                    if (!g) return;
+                    void updateMap(activeMap.id, {
+                      tokens: (activeMap.tokens ?? []).map((t) => {
+                        const s = snapTokenPos(
+                          { x: t.x, y: t.y },
+                          g,
+                          tokenCells(t),
+                          activeMap.gridOffsetX ?? 0,
+                          activeMap.gridOffsetY ?? 0,
+                        );
+                        return { ...t, x: Math.round(s.x), y: Math.round(s.y) };
+                      }),
+                    });
+                  }}
+                  title="Re-center every token onto the current grid"
+                  className="rounded-md px-2 py-1 text-xs font-semibold text-ink-faint hover:text-ink"
+                >
+                  ⌗ Snap tokens
+                </button>
                 <button
                   onClick={() => updateMap(activeMap.id, { tokens: [] })}
                   className="rounded-md px-2 py-1 text-xs font-semibold text-ink-faint hover:text-oxblood"

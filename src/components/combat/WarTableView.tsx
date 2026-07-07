@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, SwordsIcon } from "@/components/ui/icons";
-import { MapBoard, type TargetPick } from "./MapBoard";
+import { MapBoard, snapTokenPos, tokenCells, type TargetPick } from "./MapBoard";
 import {
   useCharacters,
   useCombat,
@@ -742,6 +742,46 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                     className="numerals h-6 w-12 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
                   />
                 </label>
+                <label className="flex items-center gap-1" title="Shift the grid right to line the tiles up with the map art">
+                  off x
+                  <input
+                    type="number"
+                    value={map.gridOffsetX ?? 0}
+                    onChange={(e) => updateMap(map.id, { gridOffsetX: Number(e.target.value) || 0 })}
+                    className="numerals h-6 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
+                  />
+                </label>
+                <label className="flex items-center gap-1" title="Shift the grid down to line the tiles up with the map art">
+                  off y
+                  <input
+                    type="number"
+                    value={map.gridOffsetY ?? 0}
+                    onChange={(e) => updateMap(map.id, { gridOffsetY: Number(e.target.value) || 0 })}
+                    className="numerals h-6 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
+                  />
+                </label>
+                <button
+                  onClick={() => {
+                    const g = map.gridSize ?? 0;
+                    if (!g) return;
+                    void updateMap(map.id, {
+                      tokens: (map.tokens ?? []).map((t) => {
+                        const s = snapTokenPos(
+                          { x: t.x, y: t.y },
+                          g,
+                          tokenCells(t),
+                          map.gridOffsetX ?? 0,
+                          map.gridOffsetY ?? 0,
+                        );
+                        return { ...t, x: Math.round(s.x), y: Math.round(s.y) };
+                      }),
+                    });
+                  }}
+                  title="Re-center every token onto the current grid (after changing size/offset)"
+                  className="rounded-md border border-parchment-400 bg-parchment-50 px-2 py-1 font-semibold text-ink-soft hover:bg-parchment-300/60"
+                >
+                  ⌗ Snap tokens to grid
+                </button>
               </div>
 
               <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Light & sight</p>

@@ -87,7 +87,7 @@ function segsCross(a1: Pt, a2: Pt, b1: Pt, b2: Pt): boolean {
 }
 
 /** Cells-per-side a token occupies (medium 1, large 2, huge 3…). */
-function tokenCells(t: MapToken): number {
+export function tokenCells(t: MapToken): number {
   return TOKEN_SIZE_CELLS[t.size ?? "medium"] ?? 1;
 }
 
@@ -98,16 +98,19 @@ function tokenR(t: MapToken, grid: number): number {
 }
 
 /** Size-aware grid snap: odd-cell tokens sit on cell centers, even-cell
- *  tokens (Large 2×2, Gargantuan 4×4) sit on cell intersections. */
-function snapTokenPos(p: Pt, grid: number, cells: number): Pt {
+ *  tokens (Large 2×2, Gargantuan 4×4) sit on cell intersections. Honors the
+ *  map's grid offset so snapping matches a shifted/aligned grid. */
+export function snapTokenPos(p: Pt, grid: number, cells: number, ox = 0, oy = 0): Pt {
   if (!grid) return p;
+  const x = p.x - ox;
+  const y = p.y - oy;
   const even = cells >= 1 && Math.round(cells) % 2 === 0;
   if (even) {
-    return { x: Math.round(p.x / grid) * grid, y: Math.round(p.y / grid) * grid };
+    return { x: ox + Math.round(x / grid) * grid, y: oy + Math.round(y / grid) * grid };
   }
   return {
-    x: (Math.floor(p.x / grid) + 0.5) * grid,
-    y: (Math.floor(p.y / grid) + 0.5) * grid,
+    x: ox + (Math.floor(x / grid) + 0.5) * grid,
+    y: oy + (Math.floor(y / grid) + 0.5) * grid,
   };
 }
 
@@ -272,6 +275,8 @@ export function MapBoard({
   >(null);
 
   const grid = map.gridSize ?? 0;
+  const gridOx = map.gridOffsetX ?? 0;
+  const gridOy = map.gridOffsetY ?? 0;
   const feetPerCell = map.feetPerCell ?? 5;
   const fogEnabled = map.fogEnabled ?? false;
   const lightLevel = map.lightLevel ?? "bright";
@@ -844,7 +849,7 @@ export function MapBoard({
         break;
       case "light":
         if (isDM) {
-          const pos = grid ? snapToCellCenter(p, grid) : p;
+          const pos = snapCell(p);
           const light: MapLight = {
             id: newId(),
             x: Math.round(pos.x),
@@ -858,7 +863,7 @@ export function MapBoard({
         break;
       case "aoe":
         if (isDM) {
-          const origin = grid ? snapToCellCenter(p, grid) : p;
+          const origin = snapCell(p);
           const sizePx = Math.max(1, aoeFeet) * pxPerFoot;
           gesture.current = { mode: "aoe", origin };
           setAoe({
@@ -925,7 +930,7 @@ export function MapBoard({
       setAoe((cur) => {
         if (!cur) return cur;
         if (cur.shape === "circle") {
-          const c = grid ? snapToCellCenter(p, grid) : p;
+          const c = snapCell(p);
           return { ...cur, x: c.x, y: c.y };
         }
         return { ...cur, angle: Math.atan2(p.y - g.origin.y, p.x - g.origin.x) };
@@ -946,7 +951,7 @@ export function MapBoard({
     if (g.mode === "token" && drag) {
       const tk = tokens.find((t) => t.id === g.id);
       const snapped = grid
-        ? snapTokenPos(drag.pos, grid, tk ? tokenCells(tk) : 1)
+        ? snapTokenPos(drag.pos, grid, tk ? tokenCells(tk) : 1, gridOx, gridOy)
         : drag.pos;
       const spent = tk ? pathFeet({ x: tk.x, y: tk.y }, snapped) : 0;
       const remaining = Math.max(0, (tk?.speed ?? 30) - (tk?.movedFt ?? 0));
@@ -987,6 +992,13 @@ export function MapBoard({
       void updateMap(map.id, { templates: [...templates, aoe] });
       setAoe(null);
     }
+  }
+
+  /** Offset-aware cell-center snap for lights/AoE origins. */
+  function snapCell(p: Pt): Pt {
+    if (!grid) return p;
+    const s = snapToCellCenter({ x: p.x - gridOx, y: p.y - gridOy }, grid);
+    return { x: s.x + gridOx, y: s.y + gridOy };
   }
 
   /** Distance in feet (5-ft steps, incl. elevation) and line-of-sight. */
