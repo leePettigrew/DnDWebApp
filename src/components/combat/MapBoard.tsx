@@ -36,14 +36,23 @@ import {
   paintFog,
 } from "@/lib/map/fog";
 
-type Tool = "select" | "pan" | "wall" | "light" | "aoe" | "draw" | "erase" | "ruler" | "ping";
+type Tool = "select" | "pan" | "target" | "wall" | "light" | "aoe" | "draw" | "erase" | "ruler" | "ping";
 type AoeShape = "circle" | "cone" | "line";
+
+/** What the Target tool hands the roll card when an attack is lined up. */
+export interface TargetPick {
+  attackerTokenId: string;
+  targetTokenId: string;
+  feet: number;
+  losBlocked: boolean;
+}
 
 const DRAW_COLOR = "#E6C772";
 
 const ALL_TOOLS: { key: Tool; label: string; dm?: boolean }[] = [
   { key: "select", label: "Move" },
   { key: "pan", label: "Pan" },
+  { key: "target", label: "Target" },
   { key: "ruler", label: "Ruler" },
   { key: "ping", label: "Ping" },
   { key: "wall", label: "Wall", dm: true },
@@ -196,6 +205,7 @@ export function MapBoard({
   userId,
   fillHeight = false,
   onSelectToken,
+  onTarget,
 }: {
   map: BattleMap;
   combat: CombatState | null;
@@ -205,6 +215,8 @@ export function MapBoard({
   fillHeight?: boolean;
   /** Fired when the user picks (or clears) a token with the Move tool. */
   onSelectToken?: (id: string | null) => void;
+  /** Enables the Target tool: fired when attacker → target is lined up. */
+  onTarget?: (pick: TargetPick) => void;
 }) {
   const realtime = useRealtime();
   const { update: updateMap } = useMaps();
@@ -235,6 +247,8 @@ export function MapBoard({
   const [flashId, setFlashId] = useState<string | null>(null);
   const [speedDenied, setSpeedDenied] = useState<{ id: string; at: number } | null>(null);
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
+  const [attackerId, setAttackerId] = useState<string | null>(null);
+  const [aimPos, setAimPos] = useState<Pt | null>(null);
   const [showAnnos, setShowAnnos] = useState(true);
   const [aoeShape, setAoeShape] = useState<AoeShape>("circle");
   const [aoeFeet, setAoeFeet] = useState(20);
@@ -322,7 +336,9 @@ export function MapBoard({
   // Default vision for PC tokens so the map isn't pitch black if unset.
   const defaultVision = grid ? grid * 12 : imgSize ? Math.max(imgSize.w, imgSize.h) * 0.3 : 300;
 
-  const tools = ALL_TOOLS.filter((t) => isDM || !t.dm);
+  const tools = ALL_TOOLS.filter(
+    (t) => (isDM || !t.dm) && (t.key !== "target" || !!onTarget),
+  );
 
   // --- image load + canvas sizing -----------------------------------------
 
@@ -413,6 +429,14 @@ export function MapBoard({
     const id = window.setTimeout(() => setSpeedDenied(null), 1400);
     return () => window.clearTimeout(id);
   }, [speedDenied]);
+
+  // Leaving the Target tool clears the lined-up attacker.
+  useEffect(() => {
+    if (tool !== "target") {
+      setAttackerId(null);
+      setAimPos(null);
+    }
+  }, [tool]);
 
   // Fresh legs: when the turn passes to a combatant, the DM's client resets
   // that combatant's spent movement (single writer avoids write races).
@@ -637,6 +661,32 @@ export function MapBoard({
         }
         break;
       }
+      case "target": {
+        const hit = anyTokenAt(p);
+        if (!hit) {
+          setAttackerId(null);
+          setAimPos(null);
+          break;
+        }
+        const atk = attackerId ? tokens.find((t) => t.id === attackerId) : null;
+        if (!atk || hit.id === attackerId) {
+          // First click picks the attacker — a token you control.
+          if (isDM || hit.ownerId === userId) {
+            setAttackerId(hit.id);
+            setAimPos(null);
+          }
+          break;
+        }
+        if (!tokenVisible(hit)) break; // can't target what you can't see
+        const info = engageInfo(atk, hit);
+        onTarget?.({
+          attackerTokenId: atk.id,
+          targetTokenId: hit.id,
+          feet: info.feet,
+          losBlocked: info.losBlocked,
+        });
+        break;
+      }
       case "ping":
         realtime.ping(map.id, p.x, p.y);
         break;
@@ -693,6 +743,9 @@ export function MapBoard({
   }
 
   function onPointerMove(e: ReactPointerEvent) {
+    if (tool === "target" && attackerId && imgSize) {
+      setAimPos(toMap(e));
+    }
     const g = gesture.current;
     if (!g) return;
     if (g.mode === "pan") {
@@ -796,6 +849,18 @@ export function MapBoard({
       void updateMap(map.id, { templates: [...templates, aoe] });
       setAoe(null);
     }
+  }
+
+  /** Distance in feet (5-ft steps, incl. elevation) and line-of-sight. */
+  function engageInfo(a: MapToken, b: MapToken): { feet: number; losBlocked: boolean } {
+    const flat = dist({ x: a.x, y: a.y }, { x: b.x, y: b.y });
+    const dEle = ((a.elevation ?? 0) - (b.elevation ?? 0)) * pxPerFoot;
+    const d3 = Math.hypot(flat, dEle);
+    const feet = grid ? Math.round(((d3 / grid) * feetPerCell) / 5) * 5 : Math.round(d3);
+    const losBlocked = sightWalls.some((w) =>
+      segsCross({ x: a.x, y: a.y }, { x: b.x, y: b.y }, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }),
+    );
+    return { feet, losBlocked };
   }
 
   /** DM clicks a door/secret-door to toggle it open or closed (synced). */
@@ -1152,6 +1217,71 @@ export function MapBoard({
                   annotations
                     .filter((a) => a.kind !== "note" || isDM)
                     .map((a) => <AnnotationMark key={a.id} a={a} grid={grid} />)}
+
+                {/* Target tool: attacker reticle + aim line with range. */}
+                {tool === "target" && attackerId && (() => {
+                  const atk = tokens.find((t) => t.id === attackerId);
+                  if (!atk) return null;
+                  const hover = aimPos ? anyTokenAt(aimPos) : null;
+                  const tgt = hover && hover.id !== atk.id && tokenVisible(hover) ? hover : null;
+                  const end = tgt ? { x: tgt.x, y: tgt.y } : aimPos;
+                  const info = tgt ? engageInfo(atk, tgt) : null;
+                  const flatFeet =
+                    !tgt && end && grid
+                      ? Math.round(((dist({ x: atk.x, y: atk.y }, end) / grid) * feetPerCell) / 5) * 5
+                      : null;
+                  const color = info?.losBlocked ? "#ff6a4d" : "#7fd1e6";
+                  return (
+                    <g>
+                      <circle
+                        cx={atk.x}
+                        cy={atk.y}
+                        r={tokenR(atk, grid) + 7}
+                        fill="none"
+                        stroke="#7fd1e6"
+                        strokeWidth={3}
+                        strokeDasharray="4 5"
+                      />
+                      {end && (
+                        <>
+                          <line
+                            x1={atk.x}
+                            y1={atk.y}
+                            x2={end.x}
+                            y2={end.y}
+                            stroke={color}
+                            strokeWidth={3}
+                            strokeDasharray="10 6"
+                            opacity={0.9}
+                          />
+                          {tgt && (
+                            <circle
+                              cx={tgt.x}
+                              cy={tgt.y}
+                              r={tokenR(tgt, grid) + 7}
+                              fill="none"
+                              stroke={color}
+                              strokeWidth={3.5}
+                            />
+                          )}
+                          <text
+                            x={(atk.x + end.x) / 2}
+                            y={(atk.y + end.y) / 2 - 12}
+                            textAnchor="middle"
+                            fontSize={Math.max(14, 22 / view.scale)}
+                            fontWeight={700}
+                            fill={color}
+                            stroke="#0E0A06"
+                            strokeWidth={Math.max(2, 3 / view.scale)}
+                            paintOrder="stroke"
+                          >
+                            {info ? `${info.feet} ft${info.losBlocked ? " · no line of sight" : ""}` : flatFeet !== null ? `${flatFeet} ft` : ""}
+                          </text>
+                        </>
+                      )}
+                    </g>
+                  );
+                })()}
 
                 {tokens.filter(tokenVisible).map((t) => {
                   const pos = drag && drag.id === t.id ? drag.pos : { x: t.x, y: t.y };

@@ -4,18 +4,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, SwordsIcon } from "@/components/ui/icons";
-import { MapBoard } from "./MapBoard";
+import { MapBoard, type TargetPick } from "./MapBoard";
 import {
   useCharacters,
   useCombat,
   useMaps,
   usePermissions,
+  useRealtime,
   useStatBlocks,
 } from "@/lib/data/hooks";
 import * as Combat from "@/lib/combat/state";
+import { attackOptionsFor, type AttackOption } from "@/lib/combat/attacks";
+import { parseRollSpec, spec } from "@/lib/domain/dice";
 import { HAZARD_MAP } from "@/lib/battle/hazards";
 import { TOKEN_SIZE_CELLS } from "@/lib/domain/types";
-import type { Combatant, MapToken, TokenSize } from "@/lib/domain/types";
+import type { Combatant, MapToken, RollMode, RollResult, TokenSize } from "@/lib/domain/types";
 
 const SIZES: TokenSize[] = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 
@@ -38,10 +41,92 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   const { items: statBlocks } = useStatBlocks();
   const { isDM, userId, canEditCombat } = usePermissions();
 
+  const realtime = useRealtime();
   const map = maps.find((m) => m.id === combat?.activeMapId) ?? null;
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prompt, setPrompt] = useState<{ name: string; lines: string[] } | null>(null);
+
+  // ── Target & roll ──────────────────────────────────────────────────
+  const [engage, setEngage] = useState<TargetPick | null>(null);
+  const [attackId, setAttackId] = useState<string>("");
+  const [bonusStr, setBonusStr] = useState<string>("0");
+  const [damageStr, setDamageStr] = useState<string>("");
+  const [rollMode, setRollMode] = useState<RollMode>("normal");
+  const [atkResult, setAtkResult] = useState<RollResult | null>(null);
+  const [dmgResult, setDmgResult] = useState<RollResult | null>(null);
+  const [rolling, setRolling] = useState(false);
+
+  const attackerToken = map?.tokens?.find((t) => t.id === engage?.attackerTokenId) ?? null;
+  const targetToken = map?.tokens?.find((t) => t.id === engage?.targetTokenId) ?? null;
+  const attackerCb = combat?.combatants.find((c) => c.id === attackerToken?.combatantId);
+  const targetCb = combat?.combatants.find((c) => c.id === targetToken?.combatantId);
+  const attackOptions = useMemo(
+    () => attackOptionsFor(attackerCb, characters, statBlocks),
+    [attackerCb, characters, statBlocks],
+  );
+
+  function applyAttackOption(o: AttackOption | undefined) {
+    setAttackId(o?.id ?? "");
+    setBonusStr(String(o?.bonus ?? 0));
+    setDamageStr(o?.damage ?? "");
+  }
+  function handleTarget(pick: TargetPick) {
+    setEngage(pick);
+    setAtkResult(null);
+    setDmgResult(null);
+    setRollMode("normal");
+  }
+  // Prefill the roll card whenever a new attacker lines up.
+  const lastAttackerRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = engage?.attackerTokenId ?? null;
+    if (id === lastAttackerRef.current) return;
+    lastAttackerRef.current = id;
+    applyAttackOption(attackOptions[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engage?.attackerTokenId, attackOptions]);
+
+  async function rollAttack() {
+    if (rolling || !attackerCb || !targetCb) return;
+    setRolling(true);
+    try {
+      const bonus = parseInt(bonusStr, 10) || 0;
+      const name = attackOptions.find((o) => o.id === attackId)?.name ?? "Attack";
+      const r = await realtime.roll(
+        spec(1, 20, bonus, rollMode, `${attackerCb.name} → ${targetCb.name}: ${name}`),
+      );
+      setAtkResult(r);
+      setDmgResult(null);
+    } finally {
+      setRolling(false);
+    }
+  }
+  async function rollDamage() {
+    if (rolling || !attackerCb || !targetCb) return;
+    const parsed = parseRollSpec(damageStr, undefined);
+    if (!parsed) return;
+    setRolling(true);
+    try {
+      const name = attackOptions.find((o) => o.id === attackId)?.name ?? "Attack";
+      const crit = atkResult?.isCrit ?? false;
+      const groups = crit ? parsed.groups.map((g) => ({ ...g, count: g.count * 2 })) : parsed.groups;
+      const r = await realtime.roll({
+        ...parsed,
+        groups,
+        label: `${attackerCb.name} → ${targetCb.name}: ${name} damage${crit ? " (CRIT)" : ""}`,
+      });
+      setDmgResult(r);
+    } finally {
+      setRolling(false);
+    }
+  }
+  function applyRolledDamage() {
+    if (!combat || !targetCb || !dmgResult) return;
+    void setCombat(Combat.applyDamage(combat, targetCb.id, dmgResult.total));
+    setDmgResult(null);
+    setAtkResult(null);
+  }
 
   const grid = map?.gridSize ?? 0;
   const feetPerCell = map?.feetPerCell ?? 5;
@@ -283,6 +368,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
               userId={userId}
               fillHeight
               onSelectToken={setSelectedTokenId}
+              onTarget={handleTarget}
             />
           ) : (
             <div className="flex h-full items-center justify-center">
@@ -316,8 +402,121 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
+          {/* Roll card — attack lined up with the Target tool */}
+          {engage && attackerToken && targetToken && (
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute bottom-3 left-1/2 w-[34rem] max-w-[95%] -translate-x-1/2 rounded-card border border-oxblood/50 bg-parchment-100/97 p-3 text-xs shadow-lg backdrop-blur"
+            >
+              <div className="flex items-center gap-2">
+                <SwordsIcon className="h-4 w-4 text-oxblood" />
+                <span className="font-display text-sm font-bold text-ink">
+                  {attackerToken.label} → {targetToken.label}
+                </span>
+                <span className={cn("font-semibold", engage.losBlocked ? "text-oxblood" : "text-ink-soft")}>
+                  {engage.feet} ft{engage.losBlocked ? " · no line of sight!" : ""}
+                </span>
+                {isDM && targetCb && (
+                  <span className="text-ink-faint">AC {targetCb.armorClass}</span>
+                )}
+                <button
+                  onClick={() => { setEngage(null); setAtkResult(null); setDmgResult(null); }}
+                  className="ml-auto rounded p-1 text-ink-faint hover:text-ink"
+                  aria-label="Close roll card"
+                >
+                  <CloseIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-end gap-2">
+                {attackOptions.length > 0 && (
+                  <label className="text-ink-soft">
+                    <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Attack</span>
+                    <select
+                      value={attackId}
+                      onChange={(e) => applyAttackOption(attackOptions.find((o) => o.id === e.target.value))}
+                      className="h-7 max-w-40 rounded border border-parchment-400 bg-parchment-50 px-1"
+                    >
+                      {attackOptions.map((o) => (
+                        <option key={o.id} value={o.id}>{o.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="text-ink-soft">
+                  <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">To hit</span>
+                  <input
+                    value={bonusStr}
+                    onChange={(e) => setBonusStr(e.target.value)}
+                    className="numerals h-7 w-12 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
+                  />
+                </label>
+                <label className="text-ink-soft">
+                  <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Damage</span>
+                  <input
+                    value={damageStr}
+                    onChange={(e) => setDamageStr(e.target.value)}
+                    placeholder="1d8+3 slashing"
+                    className="h-7 w-32 rounded border border-parchment-400 bg-parchment-50 px-1"
+                  />
+                </label>
+                <label className="text-ink-soft">
+                  <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Mode</span>
+                  <select
+                    value={rollMode}
+                    onChange={(e) => setRollMode(e.target.value as RollMode)}
+                    className="h-7 rounded border border-parchment-400 bg-parchment-50 px-1"
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="advantage">Advantage</option>
+                    <option value="disadvantage">Disadvantage</option>
+                  </select>
+                </label>
+                <Button size="sm" disabled={rolling} onClick={() => void rollAttack()}>
+                  🎲 Attack
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={rolling || !parseRollSpec(damageStr)}
+                  onClick={() => void rollDamage()}
+                >
+                  Damage{atkResult?.isCrit ? " ×2 (crit!)" : ""}
+                </Button>
+              </div>
+
+              {(atkResult || dmgResult) && (
+                <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-parchment-400/50 pt-2">
+                  {atkResult && (
+                    <span className="font-semibold text-ink">
+                      To hit: <span className="numerals text-base">{atkResult.total}</span>
+                      {atkResult.isCrit && <span className="ml-1 text-forest">natural 20!</span>}
+                      {atkResult.isFumble && <span className="ml-1 text-oxblood">natural 1…</span>}
+                      {isDM && targetCb && !atkResult.isFumble && (
+                        <span className={cn("ml-2 rounded px-1.5 py-0.5 text-[0.65rem] font-bold uppercase", atkResult.isCrit || atkResult.total >= targetCb.armorClass ? "bg-forest/15 text-forest" : "bg-oxblood/12 text-oxblood")}>
+                          {atkResult.isCrit || atkResult.total >= targetCb.armorClass ? "HIT" : "MISS"}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {dmgResult && (
+                    <span className="font-semibold text-ink">
+                      Damage: <span className="numerals text-base text-oxblood">{dmgResult.total}</span>
+                    </span>
+                  )}
+                  {dmgResult && canEditCombat && targetCb && (
+                    <Button size="sm" onClick={applyRolledDamage}>
+                      Apply {dmgResult.total} to {targetCb.name}
+                    </Button>
+                  )}
+                  <span className="ml-auto text-[0.6rem] text-ink-faint">rolls land in the shared dice log</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Token HUD */}
-          {selectedToken && map && (
+          {!engage && selectedToken && map && (
             <div
               onPointerDown={(e) => e.stopPropagation()}
               className="absolute bottom-3 left-1/2 flex max-w-[95%] -translate-x-1/2 flex-wrap items-end gap-2 rounded-card border border-parchment-400/70 bg-parchment-100/95 px-3 py-2 text-xs shadow-lg backdrop-blur"
