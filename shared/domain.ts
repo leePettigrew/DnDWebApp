@@ -1057,6 +1057,19 @@ export interface MapDrawing {
   points: number[];
 }
 
+/** 5e creature sizes; drives how many cells a token occupies on the grid. */
+export type TokenSize = "tiny" | "small" | "medium" | "large" | "huge" | "gargantuan";
+
+/** Cells per side a token of a given size occupies (medium = 1×1, huge = 3×3). */
+export const TOKEN_SIZE_CELLS: Record<TokenSize, number> = {
+  tiny: 0.5,
+  small: 1,
+  medium: 1,
+  large: 2,
+  huge: 3,
+  gargantuan: 4,
+};
+
 export interface MapToken {
   id: ID;
   /** Links to a Combatant so HP/labels can track the War Table. */
@@ -1079,6 +1092,14 @@ export interface MapToken {
   /** DM-hidden token — never shown to players. */
   hidden?: boolean;
   portraitUrl?: string;
+  /** Creature size (default "medium") — sets footprint on the grid. */
+  size?: TokenSize;
+  /** Height above (+) or below (−) the ground, in feet (flying, pits). */
+  elevation?: number;
+  /** Movement speed in feet per turn (default 30). */
+  speed?: number;
+  /** Feet already moved this turn; reset when the combatant's turn starts. */
+  movedFt?: number;
 }
 
 /** A placed light source on a battle map (map image px). */
@@ -1348,6 +1369,17 @@ export interface BattleMap extends Entity {
   terrainCost?: { cols: number; rows: number; cell: number; cells: string };
   /** When set, the War Table auto-applies terrain cost to drag measurements. */
   autoTerrainCost?: boolean;
+  /** Player sight: shared party vision (default) or each player sees only
+   *  through their own tokens. */
+  visionMode?: "shared" | "personal";
+  /** Ambient weather overlay drawn above the map. */
+  weather?: "none" | "rain" | "snow" | "embers" | "mist";
+  /** Enforcement: tokens cannot be dragged through solid walls/closed doors. */
+  enforceWalls?: boolean;
+  /** Enforcement of per-turn speed: off | warn (red readout) | block. */
+  enforceSpeed?: "off" | "warn" | "block";
+  /** Saved DM camera spots to jump between. */
+  bookmarks?: { id: ID; name: string; scale: number; offsetX: number; offsetY: number }[];
   /** Tile-painted build data (2D battle-map builder). */
   build?: BattleBuild;
 }

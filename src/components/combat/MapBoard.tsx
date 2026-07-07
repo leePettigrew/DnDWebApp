@@ -19,6 +19,7 @@ import type {
   MapToken,
   Wall,
 } from "@/lib/domain/types";
+import { TOKEN_SIZE_CELLS } from "@/lib/domain/types";
 import { newId } from "@/lib/domain/ids";
 import {
   clamp,
@@ -63,6 +64,41 @@ function initials(name: string): string {
   const p = name.trim().split(/\s+/).filter(Boolean);
   if (!p.length) return "?";
   return (p.length === 1 ? p[0].slice(0, 2) : p[0][0] + p[p.length - 1][0]).toUpperCase();
+}
+
+/** Do segments a1→a2 and b1→b2 properly intersect? (for wall blocking) */
+function segsCross(a1: Pt, a2: Pt, b1: Pt, b2: Pt): boolean {
+  const d = (p: Pt, q: Pt, r: Pt) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const d1 = d(b1, b2, a1);
+  const d2 = d(b1, b2, a2);
+  const d3 = d(a1, a2, b1);
+  const d4 = d(a1, a2, b2);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+/** Cells-per-side a token occupies (medium 1, large 2, huge 3…). */
+function tokenCells(t: MapToken): number {
+  return TOKEN_SIZE_CELLS[t.size ?? "medium"] ?? 1;
+}
+
+/** Effective on-map radius: size × grid when a grid exists, else stored px. */
+function tokenR(t: MapToken, grid: number): number {
+  if (!grid) return t.radius;
+  return grid * tokenCells(t) * 0.46;
+}
+
+/** Size-aware grid snap: odd-cell tokens sit on cell centers, even-cell
+ *  tokens (Large 2×2, Gargantuan 4×4) sit on cell intersections. */
+function snapTokenPos(p: Pt, grid: number, cells: number): Pt {
+  if (!grid) return p;
+  const even = cells >= 1 && Math.round(cells) % 2 === 0;
+  if (even) {
+    return { x: Math.round(p.x / grid) * grid, y: Math.round(p.y / grid) * grid };
+  }
+  return {
+    x: (Math.floor(p.x / grid) + 0.5) * grid,
+    y: (Math.floor(p.y / grid) + 0.5) * grid,
+  };
 }
 
 /** SVG polygon points for a cone or line AoE template (D&D geometry). */
@@ -189,6 +225,7 @@ export function MapBoard({
     | null
   >(null);
   const [flashId, setFlashId] = useState<string | null>(null);
+  const [speedDenied, setSpeedDenied] = useState<{ id: string; at: number } | null>(null);
   const [showAnnos, setShowAnnos] = useState(true);
   const [aoeShape, setAoeShape] = useState<AoeShape>("circle");
   const [aoeFeet, setAoeFeet] = useState(20);
@@ -225,12 +262,25 @@ export function MapBoard({
       }),
     [walls],
   );
+  // Walls that stop MOVEMENT: solid, windows/bars, and closed doors. Open
+  // doors let creatures through; sight is a separate (sightWalls) filter.
+  const moveWalls = useMemo(
+    () =>
+      walls.filter((w) => {
+        const k = w.kind ?? "solid";
+        if (k === "door" || k === "secret") return !w.open;
+        return true; // solid + window both block movement
+      }),
+    [walls],
+  );
   const drawings = map.drawings ?? [];
   const templates = map.templates ?? [];
   const annotations = map.annotations ?? [];
   const portals = map.portals ?? [];
   const pxPerFoot = grid > 0 ? grid / feetPerCell : 12;
   const autoCost = map.autoTerrainCost ?? false;
+  const enforceWalls = map.enforceWalls ?? false;
+  const enforceSpeed = map.enforceSpeed ?? "off";
   const difficultAt = useMemo(() => {
     const tc = map.terrainCost;
     if (!tc) return null;
@@ -323,6 +373,29 @@ export function MapBoard({
     window.addEventListener("dl:focus-combatant", onFocus);
     return () => window.removeEventListener("dl:focus-combatant", onFocus);
   }, []);
+
+  // Clear the "not enough movement" flash after a beat.
+  useEffect(() => {
+    if (!speedDenied) return;
+    const id = window.setTimeout(() => setSpeedDenied(null), 1400);
+    return () => window.clearTimeout(id);
+  }, [speedDenied]);
+
+  // Fresh legs: when the turn passes to a combatant, the DM's client resets
+  // that combatant's spent movement (single writer avoids write races).
+  const activeCombatantIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const active = combat && combat.active ? combat.combatants[combat.turnIndex]?.id ?? null : null;
+    if (active === activeCombatantIdRef.current) return;
+    activeCombatantIdRef.current = active;
+    if (!isDM || !active) return;
+    const toks = tokensRef.current;
+    if (!toks.some((t) => t.combatantId === active && (t.movedFt ?? 0) !== 0)) return;
+    void updateMap(map.id, {
+      tokens: toks.map((t) => (t.combatantId === active ? { ...t, movedFt: 0 } : t)),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [combat?.turnIndex, combat?.active, combat?.combatants, isDM, map.id]);
 
   // --- fog rendering -------------------------------------------------------
 
@@ -435,13 +508,25 @@ export function MapBoard({
     (p: Pt): MapToken | null => {
       for (let i = tokens.length - 1; i >= 0; i--) {
         const t = tokens[i];
-        if (dist({ x: t.x, y: t.y }, p) <= t.radius) {
+        if (dist({ x: t.x, y: t.y }, p) <= tokenR(t, grid)) {
           if (isDM || t.ownerId === userId) return t;
         }
       }
       return null;
     },
-    [tokens, isDM, userId],
+    [tokens, isDM, userId, grid],
+  );
+
+  /** Any token under the point, regardless of move permission (targeting). */
+  const anyTokenAt = useCallback(
+    (p: Pt): MapToken | null => {
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const t = tokens[i];
+        if (dist({ x: t.x, y: t.y }, p) <= tokenR(t, grid)) return t;
+      }
+      return null;
+    },
+    [tokens, grid],
   );
 
   function maskCtx() {
@@ -451,6 +536,9 @@ export function MapBoard({
   const tokenVisible = useCallback(
     (t: MapToken): boolean => {
       if (t.hidden && !isDM) return false;
+      // Invisible creatures vanish for everyone except the DM and their owner.
+      const cb = combat?.combatants.find((x) => x.id === t.combatantId);
+      if (cb?.conditions.includes("invisible") && !isDM && t.ownerId !== userId) return false;
       if (isDM && !dmPreview) return true;
       if (t.ownerId && t.ownerId === userId) return true;
       if (!fogEnabled) return true;
@@ -458,7 +546,7 @@ export function MapBoard({
       if (!ctx || !imgSize) return true;
       return isVisibleAt(ctx, t.x, t.y, imgSize.w, imgSize.h);
     },
-    [isDM, dmPreview, userId, fogEnabled, imgSize],
+    [isDM, dmPreview, userId, fogEnabled, imgSize, combat],
   );
 
   // --- pointer interactions ------------------------------------------------
@@ -560,7 +648,16 @@ export function MapBoard({
     }
     const p = toMap(e);
     if (g.mode === "token") {
-      setDrag({ id: g.id, pos: { x: p.x - g.grab.x, y: p.y - g.grab.y } });
+      const next = { x: p.x - g.grab.x, y: p.y - g.grab.y };
+      // Wall enforcement: refuse drag steps that pass through a movement
+      // blocker — the token stops at the wall instead of ghosting through.
+      if (enforceWalls && drag && drag.id === g.id) {
+        const blocked = moveWalls.some((w) =>
+          segsCross(drag.pos, next, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }),
+        );
+        if (blocked) return;
+      }
+      setDrag({ id: g.id, pos: next });
     } else if (g.mode === "ruler") {
       setRuler({ from: g.from, to: p });
     } else if (g.mode === "wall") {
@@ -594,8 +691,30 @@ export function MapBoard({
     if (!g) return;
 
     if (g.mode === "token" && drag) {
-      const snapped = grid ? snapToCellCenter(drag.pos, grid) : drag.pos;
-      realtime.moveToken(map.id, g.id, Math.round(snapped.x), Math.round(snapped.y));
+      const tk = tokens.find((t) => t.id === g.id);
+      const snapped = grid
+        ? snapTokenPos(drag.pos, grid, tk ? tokenCells(tk) : 1)
+        : drag.pos;
+      const spent = tk ? pathFeet({ x: tk.x, y: tk.y }, snapped) : 0;
+      const remaining = Math.max(0, (tk?.speed ?? 30) - (tk?.movedFt ?? 0));
+      if (enforceSpeed === "block" && tk && spent > remaining) {
+        // Over budget — the move is refused and the token springs back.
+        setDrag(null);
+        setSpeedDenied({ id: g.id, at: Date.now() });
+        return;
+      }
+      if (enforceSpeed !== "off" && tk && spent > 0) {
+        // Track the budget: one write carrying both position and spent feet.
+        void updateMap(map.id, {
+          tokens: tokens.map((x) =>
+            x.id === g.id
+              ? { ...x, x: Math.round(snapped.x), y: Math.round(snapped.y), movedFt: (x.movedFt ?? 0) + spent }
+              : x,
+          ),
+        });
+      } else {
+        realtime.moveToken(map.id, g.id, Math.round(snapped.x), Math.round(snapped.y));
+      }
       setDrag(null);
     } else if (g.mode === "ruler") {
       setRuler(null);
@@ -978,72 +1097,128 @@ export function MapBoard({
                   const pos = drag && drag.id === t.id ? drag.pos : { x: t.x, y: t.y };
                   const c = combat?.combatants.find((x) => x.id === t.combatantId);
                   const hpPct = c && c.maxHp > 0 ? c.currentHp / c.maxHp : 1;
+                  const r = tokenR(t, grid);
+                  const dead = !!c && c.maxHp > 0 && c.currentHp <= 0;
+                  const bloodied = !!c && !dead && hpPct <= 0.5;
+                  const ghost = !!c?.conditions.includes("invisible") || (t.hidden && isDM);
                   const moveFt =
                     drag && drag.id === t.id ? pathFeet({ x: t.x, y: t.y }, drag.pos) : null;
+                  const budget = t.speed ?? 30;
+                  const remaining = Math.max(0, budget - (t.movedFt ?? 0));
+                  const overBudget = moveFt !== null && enforceSpeed !== "off" && moveFt > remaining;
                   const active = t.combatantId && t.combatantId === activeCombatantId;
                   return (
-                    <g key={t.id} transform={`translate(${pos.x}, ${pos.y})`}>
+                    <g key={t.id} transform={`translate(${pos.x}, ${pos.y})`} opacity={ghost ? 0.45 : 1}>
                       {moveFt !== null && (
                         <text
-                          y={-t.radius - 10}
+                          y={-r - 10}
                           textAnchor="middle"
                           fontSize={Math.max(13, grid * 0.32)}
                           fontWeight={700}
-                          fill="#F5E9CF"
+                          fill={overBudget ? "#ff6a4d" : "#F5E9CF"}
                           stroke="#0E0A06"
                           strokeWidth={Math.max(2, grid * 0.02)}
                           paintOrder="stroke"
                         >
-                          {moveFt} ft
+                          {moveFt} ft{enforceSpeed !== "off" ? ` / ${remaining}` : ""}
                         </text>
                       )}
                       {active && (
-                        <circle r={t.radius + 6} fill="none" stroke="#E6C772" strokeWidth={4} opacity={0.9} />
+                        <circle r={r + 6} fill="none" stroke="#E6C772" strokeWidth={4} opacity={0.9} />
                       )}
                       {flashId === t.id && (
-                        <circle r={t.radius + 8} fill="none" stroke="#F5E9CF" strokeWidth={5}>
-                          <animate attributeName="r" values={`${t.radius + 4};${t.radius + 30}`} dur="0.85s" repeatCount="2" />
+                        <circle r={r + 8} fill="none" stroke="#F5E9CF" strokeWidth={5}>
+                          <animate attributeName="r" values={`${r + 4};${r + 30}`} dur="0.85s" repeatCount="2" />
                           <animate attributeName="opacity" values="0.95;0" dur="0.85s" repeatCount="2" />
                         </circle>
                       )}
+                      {speedDenied?.id === t.id && (
+                        <g>
+                          <circle r={r + 6} fill="none" stroke="#ff6a4d" strokeWidth={4}>
+                            <animate attributeName="opacity" values="1;0" dur="1.3s" repeatCount="1" />
+                          </circle>
+                          <text
+                            y={-r - 12}
+                            textAnchor="middle"
+                            fontSize={Math.max(12, grid * 0.3)}
+                            fontWeight={700}
+                            fill="#ff6a4d"
+                            stroke="#0E0A06"
+                            strokeWidth={2}
+                            paintOrder="stroke"
+                          >
+                            no movement left
+                          </text>
+                        </g>
+                      )}
                       <circle
-                        r={t.radius}
-                        fill={t.isPC ? "#243524" : "#3a1c17"}
-                        stroke={t.color}
+                        r={r}
+                        fill={dead ? "#2c2c2a" : bloodied ? (t.isPC ? "#3a2424" : "#4a1c14") : t.isPC ? "#243524" : "#3a1c17"}
+                        stroke={dead ? "#6b6b66" : t.color}
                         strokeWidth={4}
                       />
-                      {c && (
+                      {t.portraitUrl && !dead && (
+                        <>
+                          <clipPath id={`tkclip-${t.id}`}>
+                            <circle r={r - 2} />
+                          </clipPath>
+                          <image
+                            href={t.portraitUrl}
+                            x={-r + 2}
+                            y={-r + 2}
+                            width={(r - 2) * 2}
+                            height={(r - 2) * 2}
+                            clipPath={`url(#tkclip-${t.id})`}
+                            preserveAspectRatio="xMidYMid slice"
+                            opacity={bloodied ? 0.8 : 1}
+                          />
+                          {bloodied && (
+                            <circle r={r - 2} fill="#8a1a10" opacity={0.28} clipPath={`url(#tkclip-${t.id})`} />
+                          )}
+                        </>
+                      )}
+                      {c && !dead && (
                         <circle
-                          r={t.radius}
+                          r={r}
                           fill="none"
                           stroke={hpPct > 0.5 ? "#6E9A72" : hpPct > 0.25 ? "#E6C772" : "#C25A3D"}
                           strokeWidth={4}
-                          strokeDasharray={`${Math.max(0, hpPct) * 2 * Math.PI * t.radius} ${2 * Math.PI * t.radius}`}
+                          strokeDasharray={`${Math.max(0, hpPct) * 2 * Math.PI * r} ${2 * Math.PI * r}`}
                           transform="rotate(-90)"
                           opacity={0.95}
                         />
                       )}
-                      <text
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        fontSize={t.radius}
-                        fontWeight={700}
-                        fill="#F5E9CF"
-                      >
-                        {initials(t.label)}
-                      </text>
+                      {(!t.portraitUrl || dead) && (
+                        <text
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize={dead ? r * 1.1 : Math.min(r, grid * 0.5 || r)}
+                          fontWeight={700}
+                          fill={dead ? "#c9c9c2" : "#F5E9CF"}
+                        >
+                          {dead ? "☠" : initials(t.label)}
+                        </text>
+                      )}
+                      {(t.elevation ?? 0) !== 0 && (
+                        <g transform={`translate(${r * 0.78}, ${-r * 0.78})`}>
+                          <rect x={-15} y={-9} width={30} height={18} rx={9} fill="#1c2f45" stroke="#7fd1e6" strokeWidth={1.5} />
+                          <text textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700} fill="#dff3fb">
+                            {(t.elevation ?? 0) > 0 ? `↑${t.elevation}` : `↓${Math.abs(t.elevation ?? 0)}`}
+                          </text>
+                        </g>
+                      )}
                       {t.hidden && isDM && (
-                        <text y={t.radius + 14} textAnchor="middle" fontSize={t.radius * 0.7} fill="#C25A3D">
+                        <text y={r + 14} textAnchor="middle" fontSize={Math.max(11, r * 0.5)} fill="#C25A3D">
                           hidden
                         </text>
                       )}
-                      {c && c.conditions.length > 0 && (() => {
+                      {c && c.conditions.length > 0 && !dead && (() => {
                         const conds = c.conditions.slice(0, 6);
                         const n = conds.length;
-                        const size = Math.max(11, t.radius * 0.62);
+                        const size = Math.max(11, r * 0.5);
                         const gap = size * 1.04;
                         const totalW = (n - 1) * gap + size;
-                        const cy = -(t.radius + size * 0.85);
+                        const cy = -(r + size * 0.85);
                         return (
                           <g>
                             <title>{conds.join(", ")}</title>

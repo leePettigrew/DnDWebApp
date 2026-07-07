@@ -14,8 +14,11 @@ import {
   useCombat,
   useCurrentUser,
   useMaps,
+  useStatBlocks,
 } from "@/lib/data/hooks";
 import { newId } from "@/lib/domain/ids";
+import { parseSpeedFeet, parseTokenSize } from "@/lib/combat/attacks";
+import { TOKEN_SIZE_CELLS } from "@/lib/domain/types";
 import type { Combatant, MapToken } from "@/lib/domain/types";
 
 const PC_COLOR = "#86b58a";
@@ -33,6 +36,7 @@ export function MapPanel() {
   const { value: combat, update: updateCombat } = useCombat();
   const { items: maps, update: updateMap } = useMaps();
   const { items: characters } = useCharacters();
+  const { items: statBlocks } = useStatBlocks();
   const { role } = useActiveCampaign();
   const user = useCurrentUser();
   const isDM = role !== "player";
@@ -70,17 +74,26 @@ export function MapPanel() {
       const x = cell * 1.5 + (spawn % perRow) * cell * 1.2;
       const y = cell * 1.5 + Math.floor(spawn / perRow) * cell * 1.2;
       spawn++;
+      // Pull identity from the source entity: PCs bring their sheet's
+      // portrait + speed; monsters bring stat-block art, size and speed.
+      const ch = c.isPC ? characters.find((x) => x.id === c.sourceId) : undefined;
+      const sb = !c.isPC ? statBlocks.find((x) => x.id === c.sourceId) : undefined;
+      const size = sb ? parseTokenSize(sb.size) : "medium";
+      const cells = TOKEN_SIZE_CELLS[size] ?? 1;
       return {
         id: newId(),
         combatantId: c.id,
         label: c.name,
         x,
         y,
-        radius: cell * 0.42,
+        radius: cell * 0.42 * Math.max(1, cells),
         color: c.isPC ? PC_COLOR : NPC_COLOR,
         isPC: c.isPC,
         ownerId: c.isPC && c.sourceId ? ownerOf.get(c.sourceId) : undefined,
         visionRadius: c.isPC ? cell * 12 : 0,
+        size,
+        speed: ch ? parseSpeedFeet(ch.speed) : parseSpeedFeet(sb?.speed),
+        portraitUrl: ch?.portraitUrl || sb?.portraitUrl || undefined,
       };
     };
     for (const c of combat.combatants) {
@@ -219,6 +232,33 @@ export function MapPanel() {
                   className="h-4 w-4 accent-brass"
                 />
                 Auto terrain cost
+              </label>
+              <label className="flex items-center gap-1.5" title="Tokens can't be dragged through solid walls or closed doors">
+                <input
+                  type="checkbox"
+                  checked={activeMap.enforceWalls ?? false}
+                  onChange={(e) =>
+                    updateMap(activeMap.id, { enforceWalls: e.target.checked })
+                  }
+                  className="h-4 w-4 accent-brass"
+                />
+                Walls block
+              </label>
+              <label className="flex items-center gap-1.5" title="Per-turn speed budget: warn shows red, block refuses the move">
+                Speed
+                <select
+                  value={activeMap.enforceSpeed ?? "off"}
+                  onChange={(e) =>
+                    updateMap(activeMap.id, {
+                      enforceSpeed: e.target.value as "off" | "warn" | "block",
+                    })
+                  }
+                  className="h-7 rounded border border-parchment-400 bg-parchment-50 px-1 text-sm"
+                >
+                  <option value="off">Free</option>
+                  <option value="warn">Warn</option>
+                  <option value="block">Enforce</option>
+                </select>
               </label>
               <label className="flex items-center gap-1.5">
                 Light
