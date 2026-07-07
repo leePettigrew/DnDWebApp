@@ -16,7 +16,9 @@ import {
 import * as Combat from "@/lib/combat/state";
 import { attackOptionsFor, type AttackOption } from "@/lib/combat/attacks";
 import { parseRollSpec, spec } from "@/lib/domain/dice";
+import { newId } from "@/lib/domain/ids";
 import { HAZARD_MAP } from "@/lib/battle/hazards";
+import type { View } from "@/lib/map/geometry";
 import { TOKEN_SIZE_CELLS } from "@/lib/domain/types";
 import type { Combatant, MapToken, RollMode, RollResult, TokenSize } from "@/lib/domain/types";
 
@@ -46,6 +48,9 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prompt, setPrompt] = useState<{ name: string; lines: string[] } | null>(null);
+  const [cam, setCam] = useState<{ view: View; viewport: { w: number; h: number } } | null>(null);
+  const [miniNat, setMiniNat] = useState<{ w: number; h: number } | null>(null);
+  const [bookmarkName, setBookmarkName] = useState("");
 
   // ── Target & roll ──────────────────────────────────────────────────
   const [engage, setEngage] = useState<TargetPick | null>(null);
@@ -179,12 +184,21 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id]);
 
-  // Esc closes (unless typing in a field).
+  // Esc: first dismiss the roll card, then leave the War Table.
+  const engageOpenRef = useRef(false);
+  engageOpenRef.current = !!engage;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (engageOpenRef.current) {
+        setEngage(null);
+        setAtkResult(null);
+        setDmgResult(null);
+      } else {
+        onClose();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -367,14 +381,81 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
               isDM={isDM}
               userId={userId}
               fillHeight
+              shortcuts
               onSelectToken={setSelectedTokenId}
               onTarget={handleTarget}
+              onViewChange={(view, viewport) => setCam({ view, viewport })}
             />
           ) : (
             <div className="flex h-full items-center justify-center">
               <p className="text-sm text-parchment-300/70">
                 {isDM ? "Choose a map above to begin." : "The DM hasn't set a battle map yet."}
               </p>
+            </div>
+          )}
+
+          {/* Minimap (DM — the plain image would leak fogged areas to players) */}
+          {isDM && map && (
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute right-2 top-2 w-44 overflow-hidden rounded-md border border-parchment-400/70 bg-ink/80 shadow-lg"
+              style={{ display: settingsOpen ? "none" : undefined }}
+            >
+              <div
+                className="relative cursor-pointer"
+                onClick={(e) => {
+                  if (!miniNat) return;
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const fx = (e.clientX - r.left) / r.width;
+                  const fy = (e.clientY - r.top) / r.height;
+                  window.dispatchEvent(
+                    new CustomEvent("dl:map-camera", {
+                      detail: { x: fx * miniNat.w, y: fy * miniNat.h },
+                    }),
+                  );
+                }}
+                title="Click to jump the camera"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={map.imageUrl}
+                  alt=""
+                  className="block w-full opacity-90"
+                  onLoad={(e) =>
+                    setMiniNat({
+                      w: (e.target as HTMLImageElement).naturalWidth,
+                      h: (e.target as HTMLImageElement).naturalHeight,
+                    })
+                  }
+                />
+                {miniNat && (
+                  <svg
+                    viewBox={`0 0 ${miniNat.w} ${miniNat.h}`}
+                    className="pointer-events-none absolute inset-0 h-full w-full"
+                  >
+                    {(map.tokens ?? []).map((t) => (
+                      <circle
+                        key={t.id}
+                        cx={t.x}
+                        cy={t.y}
+                        r={Math.max(6, miniNat.w * 0.012)}
+                        fill={t.isPC ? "#86b58a" : "#d6794a"}
+                      />
+                    ))}
+                    {cam && cam.view.scale > 0 && (
+                      <rect
+                        x={-cam.view.offsetX / cam.view.scale}
+                        y={-cam.view.offsetY / cam.view.scale}
+                        width={cam.viewport.w / cam.view.scale}
+                        height={cam.viewport.h / cam.view.scale}
+                        fill="none"
+                        stroke="#E6C772"
+                        strokeWidth={Math.max(2, miniNat.w * 0.004)}
+                      />
+                    )}
+                  </svg>
+                )}
+              </div>
             </div>
           )}
 
@@ -759,6 +840,63 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                     <option value="block">Enforce</option>
                   </select>
                 </label>
+              </div>
+
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Camera spots</p>
+              <div className="space-y-1.5">
+                <div className="flex gap-1">
+                  <input
+                    value={bookmarkName}
+                    onChange={(e) => setBookmarkName(e.target.value)}
+                    placeholder="The altar…"
+                    className="h-7 min-w-0 flex-1 rounded border border-parchment-400 bg-parchment-50 px-2"
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      if (!cam || !bookmarkName.trim()) return;
+                      const cx = (cam.viewport.w / 2 - cam.view.offsetX) / cam.view.scale;
+                      const cy = (cam.viewport.h / 2 - cam.view.offsetY) / cam.view.scale;
+                      void updateMap(map.id, {
+                        bookmarks: [
+                          ...(map.bookmarks ?? []),
+                          { id: newId(), name: bookmarkName.trim(), scale: cam.view.scale, offsetX: cx, offsetY: cy },
+                        ],
+                      });
+                      setBookmarkName("");
+                    }}
+                  >
+                    Save
+                  </Button>
+                </div>
+                {(map.bookmarks ?? []).map((b) => (
+                  <div key={b.id} className="flex items-center gap-1">
+                    <button
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent("dl:map-camera", {
+                            detail: { x: b.offsetX, y: b.offsetY, scale: b.scale },
+                          }),
+                        )
+                      }
+                      className="min-w-0 flex-1 truncate rounded-md border border-parchment-400 bg-parchment-50 px-2 py-1 text-left font-semibold text-ink-soft hover:bg-parchment-300/60"
+                    >
+                      📍 {b.name}
+                    </button>
+                    <button
+                      onClick={() =>
+                        updateMap(map.id, {
+                          bookmarks: (map.bookmarks ?? []).filter((x) => x.id !== b.id),
+                        })
+                      }
+                      className="px-1 text-ink-faint hover:text-oxblood"
+                      aria-label={`Delete bookmark ${b.name}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
               </div>
 
               <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Housekeeping</p>

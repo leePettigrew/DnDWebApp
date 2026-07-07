@@ -207,6 +207,8 @@ export function MapBoard({
   fillHeight = false,
   onSelectToken,
   onTarget,
+  onViewChange,
+  shortcuts = false,
 }: {
   map: BattleMap;
   combat: CombatState | null;
@@ -218,6 +220,10 @@ export function MapBoard({
   onSelectToken?: (id: string | null) => void;
   /** Enables the Target tool: fired when attacker → target is lined up. */
   onTarget?: (pick: TargetPick) => void;
+  /** Reports camera + viewport so a parent can draw a minimap. */
+  onViewChange?: (view: View, viewport: { w: number; h: number }) => void;
+  /** Enable keyboard shortcuts (1-9 tools, +/- zoom, F fit, Ctrl+Z undo). */
+  shortcuts?: boolean;
 }) {
   const realtime = useRealtime();
   const { update: updateMap } = useMaps();
@@ -341,6 +347,8 @@ export function MapBoard({
   const tools = ALL_TOOLS.filter(
     (t) => (isDM || !t.dm) && (t.key !== "target" || !!onTarget),
   );
+  const toolsListRef = useRef(tools);
+  toolsListRef.current = tools;
 
   // --- image load + canvas sizing -----------------------------------------
 
@@ -439,6 +447,87 @@ export function MapBoard({
       setAimPos(null);
     }
   }, [tool]);
+
+  // External camera control ("dl:map-camera" {x, y, scale?}) — minimap
+  // clicks and saved bookmarks jump the viewport here.
+  useEffect(() => {
+    const onCam = (e: Event) => {
+      const d = (e as CustomEvent<{ x: number; y: number; scale?: number }>).detail;
+      const cont = containerRef.current;
+      if (!d || !cont) return;
+      const r = cont.getBoundingClientRect();
+      setView((v) => {
+        const scale = d.scale ?? v.scale;
+        return { scale, offsetX: r.width / 2 - d.x * scale, offsetY: r.height / 2 - d.y * scale };
+      });
+    };
+    window.addEventListener("dl:map-camera", onCam);
+    return () => window.removeEventListener("dl:map-camera", onCam);
+  }, []);
+
+  // Report the camera to the parent (minimap viewport rectangle).
+  useEffect(() => {
+    const cont = containerRef.current;
+    if (!cont || !onViewChange) return;
+    onViewChange(view, { w: cont.clientWidth, h: cont.clientHeight });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  // --- DM undo of map edits (walls, lights, ink, templates, token moves) ---
+  const mapRef = useRef(map);
+  mapRef.current = map;
+  const mapUndo = useRef<Partial<BattleMap>[]>([]);
+  function pushMapUndo(...keys: ("walls" | "lights" | "templates" | "drawings" | "tokens")[]) {
+    const m = mapRef.current;
+    const snap: Partial<BattleMap> = {};
+    for (const k of keys) snap[k] = (m[k] ?? []) as never;
+    mapUndo.current.push(snap);
+    if (mapUndo.current.length > 30) mapUndo.current.shift();
+  }
+  function undoMapEdit() {
+    const snap = mapUndo.current.pop();
+    if (snap) void updateMap(mapRef.current.id, snap);
+  }
+
+  // Keyboard shortcuts (fullscreen War Table only).
+  const toolsRef = toolsListRef;
+  useEffect(() => {
+    if (!shortcuts) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        if (isDM) {
+          e.preventDefault();
+          undoMapEdit();
+        }
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key >= "1" && e.key <= "9") {
+        const t = toolsRef.current[Number(e.key) - 1];
+        if (t) setTool(t.key);
+      } else if (e.key === "+" || e.key === "=") {
+        setView((v) => ({ ...v, scale: clamp(v.scale * 1.15, 0.1, 8) }));
+      } else if (e.key === "-") {
+        setView((v) => ({ ...v, scale: clamp(v.scale / 1.15, 0.1, 8) }));
+      } else if (e.key.toLowerCase() === "f") {
+        const cont = containerRef.current;
+        const sz = imgSizeRef.current;
+        if (!cont || !sz) return;
+        const r = cont.getBoundingClientRect();
+        const scale = Math.min(r.width / sz.w, r.height / sz.h) || 1;
+        setView({
+          scale,
+          offsetX: (r.width - sz.w * scale) / 2,
+          offsetY: (r.height - sz.h * scale) / 2,
+        });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shortcuts, isDM]);
 
   // Fresh legs: when the turn passes to a combatant, the DM's client resets
   // that combatant's spent movement (single writer avoids write races).
@@ -724,6 +813,7 @@ export function MapBoard({
             radius: grid ? grid * 4 : 200,
             color: "#ffcf8a",
           };
+          pushMapUndo("lights");
           void updateMap(map.id, { lights: [...lights, light] });
         }
         break;
@@ -827,6 +917,7 @@ export function MapBoard({
         setSpeedDenied({ id: g.id, at: Date.now() });
         return;
       }
+      pushMapUndo("tokens");
       if (enforceSpeed !== "off" && tk && spent > 0) {
         // Track the budget: one write carrying both position and spent feet.
         void updateMap(map.id, {
@@ -846,11 +937,13 @@ export function MapBoard({
       const { from, to } = pending;
       if (dist(from, to) > 6) {
         const wall: Wall = { id: newId(), x1: from.x, y1: from.y, x2: to.x, y2: to.y };
+        pushMapUndo("walls");
         void updateMap(map.id, { walls: [...walls, wall] });
       }
       setPending(null);
     } else if (g.mode === "draw" && pending && pending.kind === "draw") {
       if (pending.points.length >= 4) {
+        pushMapUndo("drawings");
         void updateMap(map.id, {
           drawings: [
             ...drawings,
@@ -860,6 +953,7 @@ export function MapBoard({
       }
       setPending(null);
     } else if (g.mode === "aoe" && aoe) {
+      pushMapUndo("templates");
       void updateMap(map.id, { templates: [...templates, aoe] });
       setAoe(null);
     }
@@ -892,6 +986,7 @@ export function MapBoard({
       }
     }
     if (!best) return false;
+    pushMapUndo("walls");
     void updateMap(map.id, {
       walls: walls.map((w) => (w.id === best ? { ...w, open: !w.open } : w)),
     });
@@ -916,11 +1011,13 @@ export function MapBoard({
         : dist(p, { x: t.x, y: t.y }) <= Math.max(threshold, grid * 0.6),
     );
     if (tplHit) {
+      pushMapUndo("templates");
       void updateMap(map.id, { templates: templates.filter((t) => t.id !== tplHit.id) });
       return;
     }
     const lightHit = lights.find((L) => dist(p, { x: L.x, y: L.y }) < Math.max(threshold, grid * 0.4));
     if (lightHit) {
+      pushMapUndo("lights");
       void updateMap(map.id, { lights: lights.filter((L) => L.id !== lightHit.id) });
       return;
     }
@@ -934,6 +1031,7 @@ export function MapBoard({
       }
     }
     if (bestWall) {
+      pushMapUndo("walls");
       void updateMap(map.id, { walls: walls.filter((w) => w.id !== bestWall) });
       return;
     }
@@ -949,6 +1047,7 @@ export function MapBoard({
       }
     }
     if (bestDraw) {
+      pushMapUndo("drawings");
       void updateMap(map.id, { drawings: drawings.filter((d) => d.id !== bestDraw) });
     }
   }
