@@ -1,4 +1,4 @@
-import { nowISO } from "@/lib/domain/ids";
+import { newId, nowISO } from "@/lib/domain/ids";
 import type { Combatant, CombatState, ConditionKey } from "@/lib/domain/types";
 import { sortByInitiative } from "./factory";
 
@@ -42,6 +42,16 @@ export function endCombat(): CombatState {
     turnIndex: 0,
     combatants: [],
   });
+}
+
+/** Append a line to the combat chronicle (capped to the last 120 entries). */
+export function appendLog(
+  state: CombatState,
+  text: string,
+  kind?: string,
+): CombatState {
+  const entry = { id: newId(), at: nowISO(), text, kind };
+  return stamp({ ...state, log: [...(state.log ?? []), entry].slice(-120) });
 }
 
 export function nextTurn(state: CombatState): CombatState {

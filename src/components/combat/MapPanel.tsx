@@ -288,6 +288,17 @@ export function MapPanel() {
                 />
                 Walls block
               </label>
+              <label className="flex items-center gap-1.5" title="Snap dropped tokens to the grid; off = free placement">
+                <input
+                  type="checkbox"
+                  checked={activeMap.snapToGrid ?? true}
+                  onChange={(e) =>
+                    updateMap(activeMap.id, { snapToGrid: e.target.checked })
+                  }
+                  className="h-4 w-4 accent-brass"
+                />
+                Snap
+              </label>
               <label className="flex items-center gap-1.5" title="Per-turn speed budget: warn shows red, block refuses the move">
                 Speed
                 <select

@@ -383,6 +383,15 @@ export interface Combatant {
  * there is one per campaign (the server keys it by campaign). The shape is
  * identical so the UI is unchanged.
  */
+/** One line in the War Table's chronicle (damage, turns, doors, saves…). */
+export interface CombatLogEntry {
+  id: ID;
+  at: ISODateString;
+  text: string;
+  /** turn | damage | door | save | misc — drives the entry's icon. */
+  kind?: string;
+}
+
 export interface CombatState {
   id: "combat"; // singleton key
   active: boolean;
@@ -393,6 +402,10 @@ export interface CombatState {
   encounterName?: string;
   /** The battle map shown on the War Table (id of a BattleMap). */
   activeMapId?: ID;
+  /** Rolling chronicle of combat events (capped to the last ~100). */
+  log?: CombatLogEntry[];
+  /** Optional per-turn countdown in seconds (0/undefined = no timer). */
+  turnSeconds?: number;
   updatedAt: ISODateString;
 }
 
@@ -1374,6 +1387,8 @@ export interface BattleMap extends Entity {
   visionMode?: "shared" | "personal";
   /** Ambient weather overlay drawn above the map. */
   weather?: "none" | "rain" | "snow" | "embers" | "mist";
+  /** Snap dropped tokens to the grid (default true); off = free placement. */
+  snapToGrid?: boolean;
   /** Enforcement: tokens cannot be dragged through solid walls/closed doors. */
   enforceWalls?: boolean;
   /** Enforcement of per-turn speed: off | warn (red readout) | block. */

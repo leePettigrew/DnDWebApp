@@ -20,6 +20,7 @@ import type {
   Wall,
 } from "@/lib/domain/types";
 import { TOKEN_SIZE_CELLS } from "@/lib/domain/types";
+import * as Combat from "@/lib/combat/state";
 import { WeatherLayer } from "./WeatherLayer";
 import { newId } from "@/lib/domain/ids";
 import {
@@ -210,6 +211,7 @@ export function MapBoard({
   fillHeight = false,
   onSelectToken,
   onTarget,
+  onProvoke,
   onViewChange,
   shortcuts = false,
 }: {
@@ -223,6 +225,8 @@ export function MapBoard({
   onSelectToken?: (id: string | null) => void;
   /** Enables the Target tool: fired when attacker → target is lined up. */
   onTarget?: (pick: TargetPick) => void;
+  /** Fired when a token's move leaves an enemy's melee reach (opportunity attack). */
+  onProvoke?: (p: { moverTokenId: string; enemyTokenIds: string[] }) => void;
   /** Reports camera + viewport so a parent can draw a minimap. */
   onViewChange?: (view: View, viewport: { w: number; h: number }) => void;
   /** Enable keyboard shortcuts (1-9 tools, +/- zoom, F fit, Ctrl+Z undo). */
@@ -456,6 +460,20 @@ export function MapBoard({
     }
   }, [tool]);
 
+  // "dl:arm-aoe" {shape, feet}: a spell card arms the AoE tool with that
+  // template so the next map click places it (players get a local preview).
+  useEffect(() => {
+    const onArm = (e: Event) => {
+      const d = (e as CustomEvent<{ shape?: AoeShape; feet?: number }>).detail;
+      if (!d?.shape || !d?.feet) return;
+      setAoeShape(d.shape);
+      setAoeFeet(d.feet);
+      setTool("aoe");
+    };
+    window.addEventListener("dl:arm-aoe", onArm);
+    return () => window.removeEventListener("dl:arm-aoe", onArm);
+  }, []);
+
   // External camera control ("dl:map-camera" {x, y, scale?}) — minimap
   // clicks and saved bookmarks jump the viewport here.
   useEffect(() => {
@@ -545,33 +563,56 @@ export function MapBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shortcuts, isDM]);
 
-  // Budget bookkeeping: the DM's client is the single writer for movedFt.
-  // It watches synced token positions and charges each move's feet, so
-  // players never need (forbidden) map-document writes to be tracked.
+  // The DM's client watches synced token positions and is the single writer
+  // for movement bookkeeping: it charges speed-budget feet, and flags
+  // opportunity attacks when a move leaves an enemy's melee reach.
   const prevPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   useEffect(() => {
     const prev = prevPosRef.current;
     const next = new Map(tokens.map((t) => [t.id, { x: t.x, y: t.y }]));
-    if (isDM && speedActive) {
-      let changed = false;
-      const upd = tokens.map((t) => {
+    if (isDM) {
+      const moved = tokens.filter((t) => {
         const p = prev.get(t.id);
-        if (p && (p.x !== t.x || p.y !== t.y)) {
-          const ft = pathFeet(p, { x: t.x, y: t.y });
-          if (ft > 0) {
-            changed = true;
-            return { ...t, movedFt: (t.movedFt ?? 0) + ft };
+        return p && (p.x !== t.x || p.y !== t.y);
+      });
+      if (speedActive && moved.length) {
+        let changed = false;
+        const upd = tokens.map((t) => {
+          const p = prev.get(t.id);
+          if (p && (p.x !== t.x || p.y !== t.y)) {
+            const ft = pathFeet(p, { x: t.x, y: t.y });
+            if (ft > 0) {
+              changed = true;
+              return { ...t, movedFt: (t.movedFt ?? 0) + ft };
+            }
+          }
+          return t;
+        });
+        if (changed) void updateMap(map.id, { tokens: upd });
+      }
+      // Opportunity attacks: enemy melee reach (5 ft edge-to-edge) covered
+      // the mover's START but not their END, and the enemy is still standing.
+      if (onProvoke && combat?.active && pxPerFoot > 0) {
+        for (const tk of moved) {
+          if (!tk.combatantId) continue;
+          const from = prev.get(tk.id)!;
+          const inReach = (e: MapToken, pos: Pt) =>
+            (dist({ x: e.x, y: e.y }, pos) - tokenR(e, grid) - tokenR(tk, grid)) / pxPerFoot <= 5.5;
+          const provokers = tokens.filter((e) => {
+            if (e.id === tk.id || !e.combatantId || e.isPC === tk.isPC || e.hidden) return false;
+            const cb = combat.combatants.find((c) => c.id === e.combatantId);
+            if (!cb || (cb.maxHp > 0 && cb.currentHp <= 0)) return false;
+            return inReach(e, from) && !inReach(e, { x: tk.x, y: tk.y });
+          });
+          if (provokers.length) {
+            onProvoke({ moverTokenId: tk.id, enemyTokenIds: provokers.map((e) => e.id) });
           }
         }
-        return t;
-      });
-      prevPosRef.current = next;
-      if (changed) void updateMap(map.id, { tokens: upd });
-    } else {
-      prevPosRef.current = next;
+      }
     }
+    prevPosRef.current = next;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokens, isDM, speedActive, map.id]);
+  }, [tokens, isDM, speedActive, map.id, combat]);
 
   // Fresh legs: when the turn passes to a combatant, the DM's client resets
   // that combatant's spent movement (single writer avoids write races).
@@ -816,6 +857,7 @@ export function MapBoard({
           } else {
             setSelectedTokenId(null);
             onSelectToken?.(null);
+            if (!isDM) setAoe(null); // clear a player's local spell preview
           }
           gesture.current = { mode: "pan", lastX: e.clientX, lastY: e.clientY };
         }
@@ -874,23 +916,24 @@ export function MapBoard({
           void updateMap(map.id, { lights: [...lights, light] });
         }
         break;
-      case "aoe":
-        if (isDM) {
-          const origin = snapCell(p);
-          const sizePx = Math.max(1, aoeFeet) * pxPerFoot;
-          gesture.current = { mode: "aoe", origin };
-          setAoe({
-            id: newId(),
-            shape: aoeShape,
-            x: origin.x,
-            y: origin.y,
-            size: sizePx,
-            angle: 0,
-            width: aoeShape === "line" ? Math.max(pxPerFoot * 5, grid || pxPerFoot * 5) : undefined,
-            color: "#C25A3D",
-          });
-        }
+      case "aoe": {
+        // Players reach this tool only by arming a spell — their template is
+        // a personal preview (map writes are DM-only on the server).
+        const origin = snapCell(p);
+        const sizePx = Math.max(1, aoeFeet) * pxPerFoot;
+        gesture.current = { mode: "aoe", origin };
+        setAoe({
+          id: newId(),
+          shape: aoeShape,
+          x: origin.x,
+          y: origin.y,
+          size: sizePx,
+          angle: 0,
+          width: aoeShape === "line" ? Math.max(pxPerFoot * 5, grid || pxPerFoot * 5) : undefined,
+          color: "#C25A3D",
+        });
         break;
+      }
       case "draw":
         if (isDM) {
           gesture.current = { mode: "draw" };
@@ -963,9 +1006,10 @@ export function MapBoard({
 
     if (g.mode === "token" && drag) {
       const tk = tokens.find((t) => t.id === g.id);
-      const snapped = grid
-        ? snapTokenPos(drag.pos, grid, tk ? tokenCells(tk) : 1, gridOx, gridOy)
-        : drag.pos;
+      const snapped =
+        grid && (map.snapToGrid ?? true)
+          ? snapTokenPos(drag.pos, grid, tk ? tokenCells(tk) : 1, gridOx, gridOy)
+          : drag.pos;
       const spent = tk ? pathFeet({ x: tk.x, y: tk.y }, snapped) : 0;
       const remaining = Math.max(0, (tk?.speed ?? 30) - (tk?.movedFt ?? 0));
       if (enforceSpeed === "block" && speedActive && tk && spent > remaining) {
@@ -1001,9 +1045,15 @@ export function MapBoard({
       }
       setPending(null);
     } else if (g.mode === "aoe" && aoe) {
-      pushMapUndo("templates");
-      void updateMap(map.id, { templates: [...templates, aoe] });
-      setAoe(null);
+      if (isDM) {
+        pushMapUndo("templates");
+        void updateMap(map.id, { templates: [...templates, aoe] });
+        setAoe(null);
+      } else {
+        // Player spell preview: keep it on screen locally and hand the
+        // pointer back to Move — clicking empty ground clears it.
+        setTool("select");
+      }
     }
   }
 
@@ -1042,9 +1092,15 @@ export function MapBoard({
     }
     if (!best) return false;
     pushMapUndo("walls");
+    const opened = !walls.find((w) => w.id === best)?.open;
     void updateMap(map.id, {
       walls: walls.map((w) => (w.id === best ? { ...w, open: !w.open } : w)),
     });
+    if (combat?.active) {
+      void updateCombat(
+        Combat.appendLog(combat, `The DM ${opened ? "opens" : "closes"} a door.`, "door"),
+      );
+    }
     return true;
   }
 

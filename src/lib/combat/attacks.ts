@@ -1,6 +1,8 @@
 import type {
   Character,
   Combatant,
+  InventoryItem,
+  Spell,
   StatBlock,
   TokenSize,
 } from "@/lib/domain/types";
@@ -22,6 +24,8 @@ export interface AttackOption {
   /** Where it came from, for the card's fine print. */
   source: "weapon" | "action" | "manual";
   note?: string;
+  /** Ranged weapon distances in feet (normal/long), when the text says so. */
+  range?: { normal: number; long: number };
 }
 
 /** "+4 to hit" / "+11 to hit" → 4 / 11 (also tolerates "-1 to hit"). */
@@ -66,6 +70,7 @@ export function attackOptionsFor(
         damage: i.damage,
         source: "weapon" as const,
         note: i.properties,
+        range: parseWeaponRange(i.properties) ?? undefined,
       }));
   }
   const sb = statBlocks.find((s) => s.id === combatant.sourceId);
@@ -80,9 +85,90 @@ export function attackOptionsFor(
         damage: parsed.damage,
         source: "action" as const,
         note: a.description,
+        range: parseWeaponRange(a.description) ?? undefined,
       };
     })
     .filter((a) => a.bonus !== undefined || a.damage);
+}
+
+/** "Ammunition (range 80/320)" / "range 20/60" → { normal, long } feet. */
+export function parseWeaponRange(text: string | undefined): { normal: number; long: number } | null {
+  if (!text) return null;
+  const m = /(\d+)\s*\/\s*(\d+)/.exec(text);
+  if (!m) return null;
+  return { normal: parseInt(m[1], 10), long: parseInt(m[2], 10) };
+}
+
+/** What a spell's description yields for the table: dice, area, range, save. */
+export interface SpellEffect {
+  /** Rollable damage/healing formula, e.g. "8d6 fire". */
+  damage?: string;
+  /** AoE template if the text names one (cube ≈ circle of half its side). */
+  shape?: "circle" | "cone" | "line";
+  feet?: number;
+  /** Human range: "60 ft", "Touch", "Self"… */
+  rangeText?: string;
+  /** Saving throw ability, e.g. "DEX". */
+  save?: string;
+}
+
+const SPELL_AREA_RE = /(\d+)-foot(?:-radius)?(?:\s+(?:radius|long|tall|wide))*\s*(sphere|radius|circle|cylinder|cone|line|cube|square)/i;
+const SPELL_RANGE_RE = /range[:\s]+(self|touch|sight|(\d+)\s*(?:feet|foot|ft))/i;
+const SPELL_SAVE_RE = /(strength|dexterity|constitution|intelligence|wisdom|charisma)\s+saving\s+throw/i;
+const DICE_RE = /(\d+d\d+(?:\s*[+-]\s*\d+)?)\s*([a-z]+)?/i;
+
+/** Best-effort read of a spell description (free text) into table effects. */
+export function parseSpellEffect(desc: string | undefined): SpellEffect {
+  if (!desc) return {};
+  const out: SpellEffect = {};
+  const dice = DICE_RE.exec(desc);
+  if (dice) {
+    const type = dice[2] && /^[a-z]{3,}$/i.test(dice[2]) ? ` ${dice[2]}` : "";
+    out.damage = dice[1].replace(/\s+/g, "") + type;
+  }
+  const area = SPELL_AREA_RE.exec(desc);
+  if (area) {
+    const feet = parseInt(area[1], 10);
+    const kind = area[2].toLowerCase();
+    if (kind === "cone") {
+      out.shape = "cone";
+      out.feet = feet;
+    } else if (kind === "line") {
+      out.shape = "line";
+      out.feet = feet;
+    } else if (kind === "cube" || kind === "square") {
+      out.shape = "circle";
+      out.feet = Math.max(5, Math.round(feet / 2));
+    } else {
+      out.shape = "circle";
+      out.feet = feet;
+    }
+  }
+  const range = SPELL_RANGE_RE.exec(desc);
+  if (range) out.rangeText = range[2] ? `${range[2]} ft` : range[1][0].toUpperCase() + range[1].slice(1).toLowerCase();
+  const save = SPELL_SAVE_RE.exec(desc);
+  if (save) out.save = save[1].slice(0, 3).toUpperCase();
+  return out;
+}
+
+/** Spells that do something rollable/placeable at the table. */
+export function usableSpells(char: Character | null): { spell: Spell; fx: SpellEffect }[] {
+  if (!char) return [];
+  return (char.spells ?? [])
+    .map((spell) => ({ spell, fx: parseSpellEffect(spell.description) }))
+    .filter(({ fx }) => fx.damage || fx.shape || fx.save);
+}
+
+/** Non-weapon items with dice in their text (potions, wands, scrolls…). */
+export function usableItems(char: Character | null): { item: InventoryItem; dice: string }[] {
+  if (!char) return [];
+  return (char.inventory ?? [])
+    .filter((i) => i.category !== "weapon" && (i.quantity ?? 0) > 0)
+    .map((i) => {
+      const m = DICE_RE.exec(`${i.properties ?? ""} ${i.description ?? ""}`);
+      return m ? { item: i, dice: m[1].replace(/\s+/g, "") } : null;
+    })
+    .filter((x): x is { item: InventoryItem; dice: string } => !!x);
 }
 
 /** "Large" / "Huge (dragon)" → TokenSize; anything unknown → medium. */

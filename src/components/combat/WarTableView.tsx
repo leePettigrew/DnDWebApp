@@ -11,10 +11,17 @@ import {
   useMaps,
   usePermissions,
   useRealtime,
+  useRollHistory,
   useStatBlocks,
 } from "@/lib/data/hooks";
 import * as Combat from "@/lib/combat/state";
-import { attackOptionsFor, type AttackOption } from "@/lib/combat/attacks";
+import {
+  attackOptionsFor,
+  usableItems,
+  usableSpells,
+  type AttackOption,
+  type SpellEffect,
+} from "@/lib/combat/attacks";
 import { parseRollSpec, spec } from "@/lib/domain/dice";
 import { newId } from "@/lib/domain/ids";
 import {
@@ -22,6 +29,7 @@ import {
   formatModifier,
   savingThrowBonus,
   skillBonus,
+  spellSaveDC,
 } from "@/lib/domain/character";
 import { HAZARD_MAP } from "@/lib/battle/hazards";
 import type { View } from "@/lib/map/geometry";
@@ -81,9 +89,20 @@ function TurnTray({
 }) {
   const [mode, setMode] = useState<RollMode>("normal");
   const [skillKey, setSkillKey] = useState(SKILLS[0]?.key ?? "athletics");
+  const [openSpellId, setOpenSpellId] = useState<string | null>(null);
   const scores = char?.abilityScores ?? sb?.abilityScores ?? null;
   const dying = cb.currentHp <= 0 && cb.maxHp > 0;
   const skill = SKILLS.find((s) => s.key === skillKey) ?? SKILLS[0];
+  const spells = usableSpells(char);
+  const items = usableItems(char);
+  const dc = char ? spellSaveDC(char) : null;
+  const openSpell = spells.find((s) => s.spell.id === openSpellId) ?? null;
+  const armAoe = (fx: SpellEffect) => {
+    if (!fx.shape || !fx.feet) return;
+    window.dispatchEvent(
+      new CustomEvent("dl:arm-aoe", { detail: { shape: fx.shape, feet: fx.feet } }),
+    );
+  };
 
   return (
     <div
@@ -138,6 +157,7 @@ function TurnTray({
                 className="bg-parchment-50 px-2 py-1 text-[0.7rem] font-semibold text-ink-soft hover:bg-oxblood/15 hover:text-oxblood disabled:opacity-50"
               >
                 ⚔ {a.name} {a.bonus !== undefined ? formatModifier(a.bonus) : ""}
+                {a.range ? <span className="ml-1 text-[0.6rem] text-ink-faint">{a.range.normal}/{a.range.long} ft</span> : null}
               </button>
               {a.damage && parseRollSpec(a.damage) && (
                 <button
@@ -150,6 +170,76 @@ function TurnTray({
                 </button>
               )}
             </span>
+          ))}
+        </div>
+      )}
+
+      {spells.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Spells</span>
+          {spells.map(({ spell, fx }) => (
+            <button
+              key={spell.id}
+              onClick={() => setOpenSpellId(openSpellId === spell.id ? null : spell.id)}
+              title={spell.description}
+              className={cn(
+                "rounded-md border px-2 py-1 text-[0.7rem] font-semibold transition-colors",
+                openSpellId === spell.id
+                  ? "border-arcane bg-arcane/20 text-arcane"
+                  : "border-parchment-400/70 bg-parchment-50 text-ink-soft hover:bg-arcane/15 hover:text-arcane",
+              )}
+            >
+              ✦ {spell.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {openSpell && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-arcane/40 bg-arcane/10 px-2 py-1.5">
+          <span className="font-semibold text-arcane">✦ {openSpell.spell.name}</span>
+          {openSpell.fx.rangeText && <span className="text-ink-soft">📏 {openSpell.fx.rangeText}</span>}
+          {openSpell.fx.shape && openSpell.fx.feet && (
+            <span className="text-ink-soft">
+              ⌖ {openSpell.fx.feet}-ft {openSpell.fx.shape}
+            </span>
+          )}
+          {openSpell.fx.save && (
+            <span className="text-ink-soft">
+              🛡 {openSpell.fx.save} save{dc !== null ? ` DC ${dc}` : ""}
+            </span>
+          )}
+          {openSpell.fx.damage && parseRollSpec(openSpell.fx.damage) && (
+            <button
+              disabled={rolling}
+              onClick={() => onDamage(openSpell.fx.damage!, `${cb.name} — ${openSpell.spell.name}`)}
+              className={trayChip}
+            >
+              🎲 {openSpell.fx.damage}
+            </button>
+          )}
+          {openSpell.fx.shape && openSpell.fx.feet && (
+            <button onClick={() => armAoe(openSpell.fx)} className={trayChip} title="Click the map to place the template">
+              ⌖ Place template
+            </button>
+          )}
+        </div>
+      )}
+
+      {items.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Items</span>
+          {items.map(({ item, dice }) => (
+            <button
+              key={item.id}
+              disabled={rolling}
+              onClick={() => onDamage(dice, `${cb.name} — ${item.name}`)}
+              title={item.description ?? item.properties ?? item.name}
+              className={trayChip}
+            >
+              🧪 {item.name} ({dice}
+              {item.quantity > 1 ? ` ×${item.quantity}` : ""})
+            </button>
           ))}
         </div>
       )}
@@ -244,6 +334,18 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   const [cam, setCam] = useState<{ view: View; viewport: { w: number; h: number } } | null>(null);
   const [miniNat, setMiniNat] = useState<{ w: number; h: number } | null>(null);
   const [bookmarkName, setBookmarkName] = useState("");
+  const [logOpen, setLogOpen] = useState(true);
+  const { items: rollLog } = useRollHistory();
+  const [timerNow, setTimerNow] = useState(() => Date.now());
+  const turnStartRef = useRef(Date.now());
+  const [conPrompts, setConPrompts] = useState<
+    { id: string; cbId: string; name: string; dmg: number; dc: number; bonus: number }[]
+  >([]);
+  const [oaPrompt, setOaPrompt] = useState<{
+    id: string;
+    moverName: string;
+    enemies: { cbId: string; name: string; attack: AttackOption | null }[];
+  } | null>(null);
 
   // ── Target & roll ──────────────────────────────────────────────────
   const [engage, setEngage] = useState<TargetPick | null>(null);
@@ -321,7 +423,13 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   }
   function applyRolledDamage() {
     if (!combat || !targetCb || !dmgResult) return;
-    void setCombat(Combat.applyDamage(combat, targetCb.id, dmgResult.total));
+    let next = Combat.applyDamage(combat, targetCb.id, dmgResult.total);
+    next = Combat.appendLog(
+      next,
+      `${attackerCb?.name ?? "Someone"} hits ${targetCb.name} for ${dmgResult.total} damage.`,
+      "damage",
+    );
+    void setCombat(next);
     setDmgResult(null);
     setAtkResult(null);
   }
@@ -364,6 +472,126 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // ── Turn advance (chronicled) + timer ───────────────────────────────
+  function advanceTurn(dir: 1 | -1) {
+    if (!combat) return;
+    let next = dir === 1 ? Combat.nextTurn(combat) : Combat.prevTurn(combat);
+    const nm = next.combatants[next.turnIndex]?.name ?? "—";
+    next = Combat.appendLog(next, `Round ${next.round} — ${nm}'s turn.`, "turn");
+    void setCombat(next);
+  }
+  const turnSeconds = combat?.turnSeconds ?? 0;
+  useEffect(() => {
+    if (!combat?.active || turnSeconds <= 0) return;
+    const id = window.setInterval(() => setTimerNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [combat?.active, turnSeconds]);
+  const timerLeft =
+    combat?.active && turnSeconds > 0
+      ? Math.max(0, turnSeconds - (timerNow - turnStartRef.current) / 1000)
+      : null;
+
+  // ── Concentration watchdog (DM): damage → CON save prompt ──────────
+  const prevHpRef = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    const prev = prevHpRef.current;
+    const next = new Map<string, number>();
+    for (const cb of combat?.combatants ?? []) next.set(cb.id, cb.currentHp);
+    if (isDM && combat?.active) {
+      for (const cb of combat.combatants) {
+        const p = prev.get(cb.id);
+        if (p !== undefined && cb.currentHp < p && cb.conditions.includes("concentration")) {
+          const dmg = p - cb.currentHp;
+          const dc = Math.max(10, Math.floor(dmg / 2));
+          const ch = cb.isPC ? characters.find((c) => c.id === cb.sourceId) : null;
+          const sbX = !cb.isPC ? statBlocks.find((s) => s.id === cb.sourceId) : null;
+          const bonus = ch
+            ? savingThrowBonus(ch, "con")
+            : sbX
+              ? abilityMod(sbX.abilityScores, "con")
+              : 0;
+          setConPrompts((q) => [...q, { id: newId(), cbId: cb.id, name: cb.name, dmg, dc, bonus }]);
+        }
+      }
+    }
+    prevHpRef.current = next;
+  }, [combat, isDM, characters, statBlocks]);
+
+  async function rollConcentration(p: (typeof conPrompts)[number]) {
+    if (rolling) return;
+    setRolling(true);
+    try {
+      const r = await realtime.roll(
+        spec(1, 20, p.bonus, "normal", `${p.name} — concentration (DC ${p.dc})`),
+      );
+      const kept = r.isCrit ? true : r.isFumble ? false : r.total >= p.dc;
+      if (combat) {
+        let next = combat;
+        if (!kept) next = Combat.toggleCondition(next, p.cbId, "concentration");
+        next = Combat.appendLog(
+          next,
+          kept
+            ? `${p.name} holds concentration (${r.total} vs DC ${p.dc}).`
+            : `${p.name} LOSES concentration (${r.total} vs DC ${p.dc})!`,
+          "save",
+        );
+        void setCombat(next);
+      }
+      setConPrompts((q) => q.filter((x) => x.id !== p.id));
+    } finally {
+      setRolling(false);
+    }
+  }
+
+  // ── Opportunity attacks (fired by the DM client's move watcher) ─────
+  function handleProvoke({ moverTokenId, enemyTokenIds }: { moverTokenId: string; enemyTokenIds: string[] }) {
+    const toks = map?.tokens ?? [];
+    const mover = toks.find((t) => t.id === moverTokenId);
+    if (!mover || !combat) return;
+    const enemies = enemyTokenIds
+      .map((id) => {
+        const t = toks.find((x) => x.id === id);
+        const cb = combat.combatants.find((c) => c.id === t?.combatantId);
+        if (!cb) return null;
+        const atts = attackOptionsFor(cb, characters, statBlocks);
+        return { cbId: cb.id, name: cb.name, attack: atts[0] ?? null };
+      })
+      .filter((x): x is NonNullable<typeof x> => !!x);
+    if (!enemies.length) return;
+    setOaPrompt({ id: newId(), moverName: mover.label, enemies });
+    void updateCombat(
+      Combat.appendLog(
+        combat,
+        `${mover.label} moves out of reach — ${enemies.map((e) => e.name).join(", ")} may take an opportunity attack!`,
+        "misc",
+      ),
+    );
+  }
+
+  // ── Chronicle: combat log + shared dice rolls, merged by time ──────
+  const chronicle = useMemo(() => {
+    const icons: Record<string, string> = { turn: "⚔", damage: "💥", door: "🚪", save: "🛡", misc: "❗" };
+    const fromLog = (combat?.log ?? []).map((e) => ({
+      id: e.id,
+      at: e.at,
+      icon: icons[e.kind ?? "misc"] ?? "•",
+      text: e.text,
+    }));
+    const fromRolls = rollLog.map((r) => ({
+      id: r.id,
+      at: r.timestamp,
+      icon: "🎲",
+      text: `${r.rolledByName ? `${r.rolledByName}: ` : ""}${r.label ?? r.notation} → ${r.total}`,
+    }));
+    return [...fromLog, ...fromRolls]
+      .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+      .slice(-70);
+  }, [combat?.log, rollLog]);
+  const chronicleEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    chronicleEndRef.current?.scrollIntoView({ block: "end" });
+  }, [chronicle.length, logOpen]);
+
   const portraitOf = (c: Combatant): string | undefined => {
     if (!c.sourceId) return undefined;
     return c.isPC
@@ -379,6 +607,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
     const id = active?.id ?? null;
     if (id === lastActiveRef.current) return;
     lastActiveRef.current = id;
+    turnStartRef.current = Date.now();
     setPrompt(null);
     if (!id || !active) return;
     window.dispatchEvent(new CustomEvent("dl:focus-combatant", { detail: { combatantId: id } }));
@@ -470,22 +699,10 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
         <span className="font-display text-sm font-bold text-ink">
           {combat?.encounterName || map?.name || "War Table"}
         </span>
-        {combat?.active && (
-          <span className="rounded-full border border-brass/50 bg-brass/10 px-3 py-0.5 text-sm font-semibold text-brass-dark">
-            Round {combat.round} · {active?.name ?? "—"}
-          </span>
-        )}
-        {canEditCombat && combat?.active && (
-          <span className="flex items-center gap-1">
-            <Button size="sm" variant="secondary" onClick={() => void setCombat(Combat.prevTurn(combat))}>
-              <ChevronLeftIcon className="h-4 w-4" /> Prev
-            </Button>
-            <Button size="sm" onClick={() => void setCombat(Combat.nextTurn(combat))}>
-              Next turn <ChevronRightIcon className="h-4 w-4" />
-            </Button>
-          </span>
-        )}
         <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" variant="secondary" onClick={() => setLogOpen((v) => !v)}>
+            📜 Chronicle
+          </Button>
           {isDM && map && (
             <Button size="sm" variant="secondary" onClick={() => setSettingsOpen((v) => !v)}>
               {settingsOpen ? "✕ Settings" : "⚙ Map settings"}
@@ -611,6 +828,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
               shortcuts
               onSelectToken={setSelectedTokenId}
               onTarget={handleTarget}
+              onProvoke={isDM ? handleProvoke : undefined}
               onViewChange={(view, viewport) => setCam({ view, viewport })}
             />
           ) : (
@@ -686,29 +904,187 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* Start-of-turn reminders (DM) */}
-          {prompt && (
-            <div className="absolute left-1/2 top-3 w-[26rem] max-w-[90%] -translate-x-1/2 rounded-card border border-brass/60 bg-parchment-100/95 p-3 shadow-gilt backdrop-blur">
-              <div className="flex items-start gap-2">
-                <span className="text-lg">⚔️</span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-ink">{prompt.name}&apos;s turn</p>
-                  <ul className="mt-1 space-y-0.5 text-xs text-ink-soft">
-                    {prompt.lines.map((l, i) => (
-                      <li key={i}>• {l}</li>
-                    ))}
-                  </ul>
-                </div>
+          {/* Chronicle — the fight's story: rolls, damage, turns, doors */}
+          {logOpen && (
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute bottom-14 right-2 z-10 flex max-h-[42%] w-80 max-w-[85%] flex-col overflow-hidden rounded-card border border-[#c9a24a]/40 bg-[#161009]/92 shadow-lg backdrop-blur"
+            >
+              <div className="flex items-center gap-2 border-b border-[#c9a24a]/25 px-3 py-1.5">
+                <span className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">
+                  📜 Chronicle
+                </span>
                 <button
-                  onClick={() => setPrompt(null)}
+                  onClick={() => setLogOpen(false)}
+                  className="ml-auto rounded p-0.5 text-[#a3906c] hover:text-[#f2e6cb]"
+                  aria-label="Close chronicle"
+                >
+                  <CloseIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
+                {chronicle.length === 0 ? (
+                  <p className="text-[0.7rem] text-[#a3906c]">Nothing yet — the tale begins…</p>
+                ) : (
+                  chronicle.map((e) => (
+                    <p key={e.id} className="text-[0.7rem] leading-snug text-[#e8d9b5]">
+                      <span className="mr-1">{e.icon}</span>
+                      {e.text}
+                    </p>
+                  ))
+                )}
+                <div ref={chronicleEndRef} />
+              </div>
+            </div>
+          )}
+
+          {/* ── Top-center HUD stack: turn banner, reminders, saves, OAs ── */}
+          <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex w-[30rem] max-w-[94%] -translate-x-1/2 flex-col items-center gap-2">
+            {combat?.active && (
+              <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-[#c9a24a]/60 bg-[#161009]/95 py-1.5 pl-2 pr-2 shadow-lg backdrop-blur">
+                <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+                  {timerLeft !== null && turnSeconds > 0 && (
+                    <svg viewBox="0 0 44 44" className="absolute inset-0 h-full w-full -rotate-90">
+                      <circle cx="22" cy="22" r="20" fill="none" stroke="#3a2d1a" strokeWidth="3" />
+                      <circle
+                        cx="22"
+                        cy="22"
+                        r="20"
+                        fill="none"
+                        stroke={timerLeft / turnSeconds < 0.25 ? "#e05545" : "#c9a24a"}
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeDasharray={`${(timerLeft / turnSeconds) * 125.7} 125.7`}
+                        className={timerLeft / turnSeconds < 0.25 ? "animate-pulse" : undefined}
+                      />
+                    </svg>
+                  )}
+                  <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-[#c9a24a]/70 bg-[#241a10] text-xs font-bold text-[#f0d885]">
+                    {active && portraitOf(active) ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={portraitOf(active)} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      active?.name.slice(0, 2).toUpperCase() ?? "—"
+                    )}
+                  </span>
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[0.6rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">
+                    Round {combat.round}
+                    {timerLeft !== null && turnSeconds > 0 ? ` · ${Math.ceil(timerLeft)}s` : ""}
+                  </span>
+                  <span className="block max-w-52 truncate font-display text-base font-bold leading-tight text-[#f2e6cb]">
+                    {active?.name ?? "—"}
+                  </span>
+                </span>
+                {canEditCombat && (
+                  <span className="ml-1 flex items-center gap-1">
+                    <button
+                      onClick={() => advanceTurn(-1)}
+                      className="flex h-8 w-8 items-center justify-center rounded-full border border-[#c9a24a]/40 text-[#e8d9b5] hover:bg-[#c9a24a]/20"
+                      aria-label="Previous turn"
+                    >
+                      <ChevronLeftIcon className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => advanceTurn(1)}
+                      className="flex h-8 items-center gap-1 rounded-full border border-[#c9a24a]/60 bg-[#c9a24a]/15 px-3 text-xs font-bold uppercase tracking-wide text-[#f0d885] hover:bg-[#c9a24a]/30"
+                    >
+                      End turn <ChevronRightIcon className="h-4 w-4" />
+                    </button>
+                  </span>
+                )}
+              </div>
+            )}
+
+            {prompt && (
+              <div className="pointer-events-auto w-full rounded-card border border-brass/60 bg-parchment-100/95 p-3 shadow-gilt backdrop-blur">
+                <div className="flex items-start gap-2">
+                  <span className="text-lg">⚔️</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-ink">{prompt.name}&apos;s turn</p>
+                    <ul className="mt-1 space-y-0.5 text-xs text-ink-soft">
+                      {prompt.lines.map((l, i) => (
+                        <li key={i}>• {l}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <button
+                    onClick={() => setPrompt(null)}
+                    className="rounded p-1 text-ink-faint hover:text-ink"
+                    aria-label="Dismiss"
+                  >
+                    <CloseIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {conPrompts.map((p) => (
+              <div key={p.id} className="pointer-events-auto flex w-full flex-wrap items-center gap-2 rounded-card border border-arcane/60 bg-parchment-100/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
+                <span className="text-base">🧠</span>
+                <span className="min-w-0 flex-1 font-semibold text-ink">
+                  {p.name} took {p.dmg} — CON save DC {p.dc} to keep concentration
+                </span>
+                <Button size="sm" disabled={rolling} onClick={() => void rollConcentration(p)}>
+                  🎲 Roll {formatModifier(p.bonus)}
+                </Button>
+                <button
+                  onClick={() => setConPrompts((q) => q.filter((x) => x.id !== p.id))}
                   className="rounded p-1 text-ink-faint hover:text-ink"
                   aria-label="Dismiss"
                 >
                   <CloseIcon className="h-4 w-4" />
                 </button>
               </div>
-            </div>
-          )}
+            ))}
+
+            {oaPrompt && (
+              <div className="pointer-events-auto w-full rounded-card border border-oxblood/60 bg-parchment-100/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">⚡</span>
+                  <span className="min-w-0 flex-1 font-semibold text-ink">
+                    {oaPrompt.moverName} provokes opportunity attacks!
+                  </span>
+                  <button
+                    onClick={() => setOaPrompt(null)}
+                    className="rounded p-1 text-ink-faint hover:text-ink"
+                    aria-label="Dismiss"
+                  >
+                    <CloseIcon className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {oaPrompt.enemies.map((e) => (
+                    <span key={e.cbId} className="flex items-center gap-1">
+                      <button
+                        disabled={rolling}
+                        onClick={() =>
+                          void trayD20(
+                            e.attack?.bonus ?? 0,
+                            `${e.name} — opportunity attack vs ${oaPrompt.moverName}`,
+                            "normal",
+                          )
+                        }
+                        className="rounded-md border border-oxblood/50 bg-oxblood/10 px-2 py-1 font-semibold text-oxblood hover:bg-oxblood/20 disabled:opacity-50"
+                      >
+                        ⚔ {e.name} {e.attack?.bonus !== undefined ? formatModifier(e.attack.bonus) : ""}
+                      </button>
+                      {e.attack?.damage && parseRollSpec(e.attack.damage) && (
+                        <button
+                          disabled={rolling}
+                          onClick={() => void trayDamage(e.attack!.damage!, `${e.name} — OA damage`)}
+                          className="rounded-md border border-parchment-400/70 bg-parchment-50 px-1.5 py-1 text-[0.65rem] text-ink-faint hover:text-oxblood disabled:opacity-50"
+                        >
+                          {e.attack.damage.split(" ")[0]}
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Roll card — attack lined up with the Target tool */}
           {engage && attackerToken && targetToken && (
@@ -724,6 +1100,15 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                 <span className={cn("font-semibold", engage.losBlocked ? "text-oxblood" : "text-ink-soft")}>
                   {engage.feet} ft{engage.losBlocked ? " · no line of sight!" : ""}
                 </span>
+                {(() => {
+                  const opt = attackOptions.find((o) => o.id === attackId);
+                  if (!opt?.range) return null;
+                  if (engage.feet > opt.range.long)
+                    return <span className="font-bold text-oxblood">out of range ({opt.range.long} ft max)</span>;
+                  if (engage.feet > opt.range.normal)
+                    return <span className="font-semibold text-brass-dark">long range — disadvantage</span>;
+                  return null;
+                })()}
                 {isDM && targetCb && (
                   <span className="text-ink-faint">AC {targetCb.armorClass}</span>
                 )}
@@ -1124,6 +1509,34 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                     <option value="warn">Warn</option>
                     <option value="block">Enforce</option>
                   </select>
+                </label>
+                <label className="flex items-center gap-1.5" title="Snap dropped tokens to the grid; off = place tokens anywhere">
+                  <input
+                    type="checkbox"
+                    checked={map.snapToGrid ?? true}
+                    onChange={(e) => updateMap(map.id, { snapToGrid: e.target.checked })}
+                    className="h-3.5 w-3.5 accent-brass"
+                  />
+                  Snap tokens to grid
+                </label>
+                <label className="flex items-center justify-between" title="Per-turn countdown shown on the banner (0 = off)">
+                  Turn timer
+                  <span className="flex items-center gap-1">
+                    {[0, 60, 90].map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => combat && void updateCombat({ turnSeconds: s })}
+                        className={cn(
+                          "rounded px-1.5 py-0.5 text-[0.65rem] font-semibold",
+                          (combat?.turnSeconds ?? 0) === s
+                            ? "bg-oxblood text-parchment-50"
+                            : "bg-parchment-50 text-ink-soft hover:bg-parchment-300/60",
+                        )}
+                      >
+                        {s === 0 ? "Off" : `${s}s`}
+                      </button>
+                    ))}
+                  </span>
                 </label>
               </div>
 

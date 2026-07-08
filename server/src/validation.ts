@@ -50,6 +50,13 @@ const combatant = z.object({
   notes: z.string().optional(),
 });
 
+const combatLogEntry = z.object({
+  id: z.string().max(80),
+  at: z.string().max(40),
+  text: z.string().max(300),
+  kind: z.string().max(20).optional(),
+});
+
 const combatState = z.object({
   id: z.literal("combat"),
   active: z.boolean(),
@@ -58,6 +65,8 @@ const combatState = z.object({
   combatants: z.array(combatant).max(200),
   encounterName: z.string().max(200).optional(),
   activeMapId: z.string().max(80).optional(),
+  log: z.array(combatLogEntry).max(150).optional(),
+  turnSeconds: z.number().int().min(0).max(3600).optional(),
   updatedAt: z.string(),
 });
 
@@ -69,6 +78,8 @@ const combatPatch = z
     combatants: z.array(combatant).max(200),
     encounterName: z.string().max(200),
     activeMapId: z.string().max(80),
+    log: z.array(combatLogEntry).max(150),
+    turnSeconds: z.number().int().min(0).max(3600),
     updatedAt: z.string(),
   })
   .partial();
