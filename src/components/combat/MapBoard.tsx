@@ -228,6 +228,8 @@ export function MapBoard({
   onTarget,
   onProvoke,
   onAimChange,
+  lockedAttackerId = null,
+  lockedTargetId = null,
   onViewChange,
   shortcuts = false,
 }: {
@@ -248,6 +250,10 @@ export function MapBoard({
   onProvoke?: (p: { moverTokenId: string; enemyTokenIds: string[] }) => void;
   /** Reports the Target tool's lined-up attacker (null when not aiming). */
   onAimChange?: (attackerTokenId: string | null) => void;
+  /** A locked engagement to draw persistently (attacker → target). */
+  lockedAttackerId?: string | null;
+  /** The locked-on target of the current engagement. */
+  lockedTargetId?: string | null;
   /** Reports camera + viewport so a parent can draw a minimap. */
   onViewChange?: (view: View, viewport: { w: number; h: number }) => void;
   /** Enable keyboard shortcuts (1-9 tools, +/- zoom, F fit, Ctrl+Z undo). */
@@ -912,17 +918,27 @@ export function MapBoard({
       case "target": {
         const hit = anyTokenAt(p);
         if (!hit) {
-          setAttackerId(null);
-          setAimPos(null);
+          // Empty ground pans — the armed attacker and any lock stay put
+          // (Esc or the card's ✕ is how you stand down).
+          gesture.current = { mode: "pan", lastX: e.clientX, lastY: e.clientY };
           break;
         }
         const atk = attackerId ? tokens.find((t) => t.id === attackerId) : null;
-        if (!atk || hit.id === attackerId) {
+        if (!atk) {
           // First click picks the attacker — a token you control.
           if (isDM || hit.ownerId === userId) {
             setAttackerId(hit.id);
             setAimPos(null);
           }
+          break;
+        }
+        if (hit.id === atk.id) break;
+        // Clicking another token on your own side re-arms the attacker;
+        // anything else becomes (or replaces) the locked target.
+        const sameSide = isDM ? hit.isPC === atk.isPC : hit.ownerId === userId;
+        if (sameSide && (isDM || hit.ownerId === userId)) {
+          setAttackerId(hit.id);
+          setAimPos(null);
           break;
         }
         if (!tokenVisible(hit)) break; // can't target what you can't see
@@ -1492,6 +1508,51 @@ export function MapBoard({
                     .filter((a) => a.kind !== "note" || isDM)
                     .filter((a) => pointVisible(a.x, a.y))
                     .map((a) => <AnnotationMark key={a.id} a={a} grid={grid} />)}
+
+                {/* Locked engagement — persists whatever tool is active,
+                    until the target is switched or the card is closed. */}
+                {lockedAttackerId && lockedTargetId && (() => {
+                  const a = tokens.find((t) => t.id === lockedAttackerId);
+                  const b = tokens.find((t) => t.id === lockedTargetId);
+                  if (!a || !b) return null;
+                  return (
+                    <g>
+                      <line
+                        x1={a.x}
+                        y1={a.y}
+                        x2={b.x}
+                        y2={b.y}
+                        stroke="#e05545"
+                        strokeWidth={2.5}
+                        strokeDasharray="12 7"
+                        opacity={0.65}
+                      />
+                      <circle
+                        cx={b.x}
+                        cy={b.y}
+                        r={tokenR(b, grid) + 7}
+                        fill="none"
+                        stroke="#e05545"
+                        strokeWidth={3.5}
+                      >
+                        <animate attributeName="opacity" values="1;0.45;1" dur="1.6s" repeatCount="indefinite" />
+                      </circle>
+                      <text
+                        x={b.x}
+                        y={b.y - tokenR(b, grid) - 14}
+                        textAnchor="middle"
+                        fontSize={Math.max(12, grid * 0.26)}
+                        fontWeight={700}
+                        fill="#e05545"
+                        stroke="#0E0A06"
+                        strokeWidth={2}
+                        paintOrder="stroke"
+                      >
+                        ◎ locked
+                      </text>
+                    </g>
+                  );
+                })()}
 
                 {/* Target tool: attacker reticle + aim line with range. */}
                 {tool === "target" && attackerId && (() => {

@@ -992,6 +992,8 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
               onTarget={handleTarget}
               onProvoke={isDM ? handleProvoke : undefined}
               onAimChange={setAimAttackerId}
+              lockedAttackerId={engage?.attackerTokenId ?? null}
+              lockedTargetId={engage?.targetTokenId ?? null}
               onViewChange={(view, viewport) => setCam({ view, viewport })}
             />
           ) : (
@@ -1501,7 +1503,9 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                 <span className={cn("font-display text-base font-bold", HUD.text)}>
                   {aimToken.label} is aiming
                 </span>
-                <span className={HUD.faint}>pick the attack, then click an enemy on the map</span>
+                <span className={HUD.faint}>
+                  pick the attack, then click enemies — each click locks the target, click another to switch
+                </span>
                 <button
                   onClick={() =>
                     window.dispatchEvent(
