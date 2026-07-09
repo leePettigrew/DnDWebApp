@@ -227,6 +227,7 @@ export function MapBoard({
   onSelectToken,
   onTarget,
   onProvoke,
+  onAimChange,
   onViewChange,
   shortcuts = false,
 }: {
@@ -245,6 +246,8 @@ export function MapBoard({
   onTarget?: (pick: TargetPick) => void;
   /** Fired when a token's move leaves an enemy's melee reach (opportunity attack). */
   onProvoke?: (p: { moverTokenId: string; enemyTokenIds: string[] }) => void;
+  /** Reports the Target tool's lined-up attacker (null when not aiming). */
+  onAimChange?: (attackerTokenId: string | null) => void;
   /** Reports camera + viewport so a parent can draw a minimap. */
   onViewChange?: (view: View, viewport: { w: number; h: number }) => void;
   /** Enable keyboard shortcuts (1-9 tools, +/- zoom, F fit, Ctrl+Z undo). */
@@ -477,6 +480,31 @@ export function MapBoard({
       setAimPos(null);
     }
   }, [tool]);
+
+  // Report aiming state so the parent can show an attack picker.
+  useEffect(() => {
+    onAimChange?.(tool === "target" ? attackerId : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, attackerId]);
+
+  // "dl:arm-target" {attackerTokenId}: a tray attack was clicked — jump
+  // straight into aiming with that token; null disarms back to Move.
+  useEffect(() => {
+    const onArm = (e: Event) => {
+      const d = (e as CustomEvent<{ attackerTokenId: string | null }>).detail;
+      if (d?.attackerTokenId) {
+        setTool("target");
+        setAttackerId(d.attackerTokenId);
+        setAimPos(null);
+      } else {
+        setAttackerId(null);
+        setAimPos(null);
+        setTool("select");
+      }
+    };
+    window.addEventListener("dl:arm-target", onArm);
+    return () => window.removeEventListener("dl:arm-target", onArm);
+  }, []);
 
   // "dl:arm-aoe" {shape, feet}: a spell card arms the AoE tool with that
   // template so the next map click places it (players get a local preview).

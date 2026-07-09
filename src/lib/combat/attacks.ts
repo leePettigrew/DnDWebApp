@@ -6,6 +6,7 @@ import type {
   StatBlock,
   TokenSize,
 } from "@/lib/domain/types";
+import { spellAttackBonus, spellSaveDC } from "@/lib/domain/character";
 
 /**
  * Bridges the War Table's target-&-roll flow to whatever attack data exists:
@@ -22,10 +23,12 @@ export interface AttackOption {
   /** Damage formula string, e.g. "1d8+3 slashing". */
   damage?: string;
   /** Where it came from, for the card's fine print. */
-  source: "weapon" | "action" | "manual";
+  source: "weapon" | "action" | "spell" | "manual";
   note?: string;
   /** Ranged weapon distances in feet (normal/long), when the text says so. */
   range?: { normal: number; long: number };
+  /** Save-based spells: the target saves instead of the attacker rolling. */
+  saveDC?: { ability: string; dc: number };
 }
 
 /** "+4 to hit" / "+11 to hit" → 4 / 11 (also tolerates "-1 to hit"). */
@@ -61,7 +64,7 @@ export function attackOptionsFor(
   if (combatant.isPC) {
     const ch = characters.find((c) => c.id === combatant.sourceId);
     if (!ch) return [];
-    return (ch.inventory ?? [])
+    const weapons = (ch.inventory ?? [])
       .filter((i) => i.category === "weapon" && (i.attackBonus !== undefined || i.damage))
       .map((i) => ({
         id: i.id,
@@ -72,6 +75,36 @@ export function attackOptionsFor(
         note: i.properties,
         range: parseWeaponRange(i.properties) ?? undefined,
       }));
+    // Damaging spells join the attack list: spell-attack spells carry the
+    // spell attack bonus; save spells carry the caster's save DC instead.
+    const dc = spellSaveDC(ch);
+    const atkBonus = spellAttackBonus(ch);
+    const spells: AttackOption[] = usableSpells(ch)
+      .filter(({ fx }) => fx.damage)
+      .map(({ spell, fx }) => {
+        const isAttackRoll = /spell attack/i.test(spell.description ?? "");
+        const rangeFt = fx.rangeText
+          ? /^(\d+)/.test(fx.rangeText)
+            ? parseInt(fx.rangeText, 10)
+            : fx.rangeText.toLowerCase() === "touch"
+              ? 5
+              : undefined
+          : undefined;
+        return {
+          id: `spell-${spell.id}`,
+          name: spell.name,
+          bonus: isAttackRoll ? (atkBonus ?? undefined) : undefined,
+          damage: fx.damage,
+          source: "spell" as const,
+          note: spell.description,
+          range: rangeFt ? { normal: rangeFt, long: rangeFt } : undefined,
+          saveDC:
+            !isAttackRoll && fx.save && dc !== null
+              ? { ability: fx.save, dc }
+              : undefined,
+        };
+      });
+    return [...weapons, ...spells];
   }
   const sb = statBlocks.find((s) => s.id === combatant.sourceId);
   if (!sb) return [];

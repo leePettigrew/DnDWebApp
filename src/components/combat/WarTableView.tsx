@@ -91,6 +91,7 @@ function TurnTray({
   rolling,
   onD20,
   onDamage,
+  onArmAttack,
 }: {
   cb: Combatant;
   char: Character | null;
@@ -100,6 +101,8 @@ function TurnTray({
   rolling: boolean;
   onD20: (bonus: number, label: string, mode: RollMode) => void;
   onDamage: (damage: string, label: string) => void;
+  /** Click an attack → arm the Target tool with it (aim at an enemy). */
+  onArmAttack: (opt: AttackOption) => void;
 }) {
   const [mode, setMode] = useState<RollMode>("normal");
   const [skillKey, setSkillKey] = useState(SKILLS[0]?.key ?? "athletics");
@@ -163,18 +166,27 @@ function TurnTray({
             <span key={a.id} className="flex overflow-hidden rounded-md border border-[#c9a24a]/30">
               <button
                 disabled={rolling}
-                onClick={() => onD20(a.bonus ?? 0, `${cb.name} — ${a.name}`, mode)}
-                title={a.note ?? a.name}
+                onClick={() => onArmAttack(a)}
+                title={`${a.note ?? a.name} — click, then pick a target on the map`}
                 className="bg-[#241a10] px-2.5 py-1.5 text-[0.8rem] font-semibold text-[#e8d9b5] hover:bg-[#c25a3d]/30 hover:text-[#f4b8a0] disabled:opacity-50"
               >
-                ⚔ {a.name} {a.bonus !== undefined ? formatModifier(a.bonus) : ""}
-                {a.range ? <span className="ml-1 text-[0.65rem] text-[#a3906c]">{a.range.normal}/{a.range.long} ft</span> : null}
+                {a.source === "spell" ? "✦" : "⚔"} {a.name}{" "}
+                {a.bonus !== undefined
+                  ? formatModifier(a.bonus)
+                  : a.saveDC
+                    ? `· DC ${a.saveDC.dc}`
+                    : ""}
+                {a.range ? (
+                  <span className="ml-1 text-[0.65rem] text-[#a3906c]">
+                    {a.range.normal === a.range.long ? `${a.range.normal} ft` : `${a.range.normal}/${a.range.long} ft`}
+                  </span>
+                ) : null}
               </button>
               {a.damage && parseRollSpec(a.damage) && (
                 <button
                   disabled={rolling}
                   onClick={() => onDamage(a.damage!, `${cb.name} — ${a.name} damage`)}
-                  title={`Roll ${a.damage}`}
+                  title={`Roll ${a.damage} (no target)`}
                   className="border-l border-[#c9a24a]/30 bg-[#241a10] px-2 py-1.5 text-[0.7rem] text-[#a3906c] hover:bg-[#c25a3d]/30 hover:text-[#f4b8a0] disabled:opacity-50"
                 >
                   {a.damage.split(" ")[0]}
@@ -346,7 +358,8 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   const [miniNat, setMiniNat] = useState<{ w: number; h: number } | null>(null);
   const [bookmarkName, setBookmarkName] = useState("");
   const [logOpen, setLogOpen] = useState(true);
-  const [dockView, setDockView] = useState<"auto" | "attack" | "token" | "turn">("auto");
+  const [dockView, setDockView] = useState<"auto" | "attack" | "aim" | "token" | "turn">("auto");
+  const [aimAttackerId, setAimAttackerId] = useState<string | null>(null);
   const { items: rollLog } = useRollHistory();
   const [timerNow, setTimerNow] = useState(() => Date.now());
   const turnStartRef = useRef(Date.now());
@@ -373,9 +386,13 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   const targetToken = map?.tokens?.find((t) => t.id === engage?.targetTokenId) ?? null;
   const attackerCb = combat?.combatants.find((c) => c.id === attackerToken?.combatantId);
   const targetCb = combat?.combatants.find((c) => c.id === targetToken?.combatantId);
+  // While aiming (attacker picked, no target yet) the picker works off the
+  // aim token; once the engagement lands they're the same combatant.
+  const aimToken = map?.tokens?.find((t) => t.id === aimAttackerId) ?? null;
+  const aimCb = combat?.combatants.find((c) => c.id === aimToken?.combatantId);
   const attackOptions = useMemo(
-    () => attackOptionsFor(attackerCb, characters, statBlocks),
-    [attackerCb, characters, statBlocks],
+    () => attackOptionsFor(attackerCb ?? aimCb, characters, statBlocks),
+    [attackerCb, aimCb, characters, statBlocks],
   );
 
   function applyAttackOption(o: AttackOption | undefined) {
@@ -390,15 +407,16 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
     setRollMode("normal");
     setDockView("auto"); // a fresh engagement takes the dock
   }
-  // Prefill the roll card whenever a new attacker lines up.
+  // Prefill the roll card whenever a new attacker lines up — but never
+  // clobber an attack the user already picked (tray arming, aim chips).
   const lastAttackerRef = useRef<string | null>(null);
   useEffect(() => {
-    const id = engage?.attackerTokenId ?? null;
+    const id = engage?.attackerTokenId ?? aimAttackerId ?? null;
     if (id === lastAttackerRef.current) return;
     lastAttackerRef.current = id;
-    applyAttackOption(attackOptions[0]);
+    if (!attackOptions.some((o) => o.id === attackId)) applyAttackOption(attackOptions[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engage?.attackerTokenId, attackOptions]);
+  }, [engage?.attackerTokenId, aimAttackerId, attackOptions]);
 
   async function rollAttack() {
     if (rolling || !attackerCb || !targetCb) return;
@@ -485,6 +503,22 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
     }
   }
 
+  /** A tray attack chip arms the Target tool with that attack loaded; with
+   *  no token on the map it falls back to a plain untargeted roll. */
+  function armAttackFromTray(opt: AttackOption) {
+    const tk = map?.tokens?.find((t) => t.combatantId === active?.id);
+    if (!tk) {
+      if (opt.bonus !== undefined) void trayD20(opt.bonus, `${active?.name} — ${opt.name}`, "normal");
+      else if (opt.damage) void trayDamage(opt.damage, `${active?.name} — ${opt.name}`);
+      return;
+    }
+    applyAttackOption(opt);
+    setDockView("auto");
+    window.dispatchEvent(
+      new CustomEvent("dl:arm-target", { detail: { attackerTokenId: tk.id } }),
+    );
+  }
+
   // ── Turn advance (chronicled) + timer ───────────────────────────────
   function advanceTurn(dir: 1 | -1) {
     if (!combat) return;
@@ -566,7 +600,8 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
         const t = toks.find((x) => x.id === id);
         const cb = combat.combatants.find((c) => c.id === t?.combatantId);
         if (!cb) return null;
-        const atts = attackOptionsFor(cb, characters, statBlocks);
+        // OAs are melee weapon strikes — never a spell option.
+        const atts = attackOptionsFor(cb, characters, statBlocks).filter((a) => a.source !== "spell");
         return { cbId: cb.id, name: cb.name, attack: atts[0] ?? null };
       })
       .filter((x): x is NonNullable<typeof x> => !!x);
@@ -650,9 +685,11 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id]);
 
-  // Esc: first dismiss the roll card, then leave the War Table.
+  // Esc: dismiss the roll card, then stop aiming, then leave the War Table.
   const engageOpenRef = useRef(false);
   engageOpenRef.current = !!engage;
+  const aimingRef = useRef(false);
+  aimingRef.current = !!aimAttackerId;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -662,6 +699,8 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
         setEngage(null);
         setAtkResult(null);
         setDmgResult(null);
+      } else if (aimingRef.current) {
+        window.dispatchEvent(new CustomEvent("dl:arm-target", { detail: { attackerTokenId: null } }));
       } else {
         onClose();
       }
@@ -703,25 +742,29 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   const pxOf = (ft: number) => Math.max(0, Math.round(ft * pxPerFoot));
 
   // Bottom dock: one bar, contextual content. Priority when on auto:
-  // attack roll card > selected token > your turn tray.
+  // attack roll card > aiming picker > selected token > your turn tray.
   const contexts = {
     attack: !!(engage && attackerToken && targetToken),
+    aim: !!(aimToken && !engage),
     token: !!(selectedToken && map),
     turn: !!(map && active && canAct),
   };
-  const shownDock: "attack" | "token" | "turn" | null =
+  const shownDock: "attack" | "aim" | "token" | "turn" | null =
     dockView !== "auto" && contexts[dockView]
       ? dockView
       : contexts.attack
         ? "attack"
-        : contexts.token
-          ? "token"
-          : contexts.turn
-            ? "turn"
-            : null;
+        : contexts.aim
+          ? "aim"
+          : contexts.token
+            ? "token"
+            : contexts.turn
+              ? "turn"
+              : null;
   const dockTabs = (
     [
       ["attack", "⚔ Attack"],
+      ["aim", "🎯 Aim"],
       ["token", "◉ Token"],
       ["turn", "🎲 Turn"],
     ] as const
@@ -948,6 +991,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
               onSelectToken={setSelectedTokenId}
               onTarget={handleTarget}
               onProvoke={isDM ? handleProvoke : undefined}
+              onAimChange={setAimAttackerId}
               onViewChange={(view, viewport) => setCam({ view, viewport })}
             />
           ) : (
@@ -1450,6 +1494,63 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
+          {shownDock === "aim" && aimToken && (
+            <div className="text-sm">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="text-base">🎯</span>
+                <span className={cn("font-display text-base font-bold", HUD.text)}>
+                  {aimToken.label} is aiming
+                </span>
+                <span className={HUD.faint}>pick the attack, then click an enemy on the map</span>
+                <button
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent("dl:arm-target", { detail: { attackerTokenId: null } }),
+                    )
+                  }
+                  className="ml-auto rounded p-1 text-[#a3906c] hover:text-[#f0d885]"
+                  aria-label="Stop aiming"
+                >
+                  <CloseIcon className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {attackOptions.length === 0 && (
+                  <span className={HUD.faint}>
+                    No attacks on the sheet/stat block — the roll card will still let you enter numbers by hand.
+                  </span>
+                )}
+                {attackOptions.map((o) => (
+                  <button
+                    key={o.id}
+                    onClick={() => applyAttackOption(o)}
+                    title={o.note ?? o.name}
+                    className={cn(
+                      "rounded-md border px-2.5 py-1.5 text-[0.8rem] font-semibold transition-colors",
+                      attackId === o.id
+                        ? o.source === "spell"
+                          ? "border-[#a993d6] bg-[#6e5a99]/40 text-[#cbb8f0]"
+                          : "border-[#e07a5f] bg-[#c25a3d]/30 text-[#f4b8a0]"
+                        : "border-[#c9a24a]/30 bg-[#241a10] text-[#e8d9b5] hover:bg-[#c9a24a]/20",
+                    )}
+                  >
+                    {o.source === "spell" ? "✦" : "⚔"} {o.name}{" "}
+                    {o.bonus !== undefined
+                      ? formatModifier(o.bonus)
+                      : o.saveDC
+                        ? `· ${o.saveDC.ability} DC ${o.saveDC.dc}`
+                        : ""}
+                    {o.range ? (
+                      <span className="ml-1 text-[0.65rem] opacity-70">
+                        {o.range.normal === o.range.long ? `${o.range.normal} ft` : `${o.range.normal}/${o.range.long} ft`}
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {shownDock === "attack" && engage && attackerToken && targetToken && (
             <div className="text-sm">
               <div className="flex flex-wrap items-center gap-2.5">
@@ -1483,57 +1584,90 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
 
-              <div className="mt-2 flex flex-wrap items-end gap-2.5">
-                {attackOptions.length > 0 && (
-                  <label className={HUD.faint}>
-                    <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Attack</span>
-                    <select
-                      value={attackId}
-                      onChange={(e) => applyAttackOption(attackOptions.find((o) => o.id === e.target.value))}
-                      className="h-8 max-w-44 rounded border border-parchment-400 bg-parchment-50 px-1.5 text-ink"
+              {attackOptions.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {attackOptions.map((o) => (
+                    <button
+                      key={o.id}
+                      onClick={() => applyAttackOption(o)}
+                      title={o.note ?? o.name}
+                      className={cn(
+                        "rounded-md border px-2.5 py-1.5 text-[0.8rem] font-semibold transition-colors",
+                        attackId === o.id
+                          ? o.source === "spell"
+                            ? "border-[#a993d6] bg-[#6e5a99]/40 text-[#cbb8f0]"
+                            : "border-[#e07a5f] bg-[#c25a3d]/30 text-[#f4b8a0]"
+                          : "border-[#c9a24a]/30 bg-[#241a10] text-[#e8d9b5] hover:bg-[#c9a24a]/20",
+                      )}
                     >
-                      {attackOptions.map((o) => (
-                        <option key={o.id} value={o.id}>{o.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <label className={HUD.faint}>
-                  <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">To hit</span>
-                  <input
-                    value={bonusStr}
-                    onChange={(e) => setBonusStr(e.target.value)}
-                    className="numerals h-8 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center text-ink"
-                  />
-                </label>
-                <label className={HUD.faint}>
-                  <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Damage</span>
-                  <input
-                    value={damageStr}
-                    onChange={(e) => setDamageStr(e.target.value)}
-                    placeholder="1d8+3 slashing"
-                    className="h-8 w-36 rounded border border-parchment-400 bg-parchment-50 px-1.5 text-ink"
-                  />
-                </label>
-                <label className={HUD.faint}>
-                  <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Mode</span>
-                  <select
-                    value={rollMode}
-                    onChange={(e) => setRollMode(e.target.value as RollMode)}
-                    className="h-8 rounded border border-parchment-400 bg-parchment-50 px-1.5 text-ink"
-                  >
-                    <option value="normal">Normal</option>
-                    <option value="advantage">Advantage</option>
-                    <option value="disadvantage">Disadvantage</option>
-                  </select>
-                </label>
-                <button disabled={rolling} onClick={() => void rollAttack()} className={cn(trayChip, "bg-[#c25a3d]/25 text-[#f4b8a0] hover:bg-[#c25a3d]/40")}>
-                  🎲 Attack
-                </button>
-                <button disabled={rolling || !parseRollSpec(damageStr)} onClick={() => void rollDamage()} className={trayChip}>
-                  Damage{atkResult?.isCrit ? " ×2 (crit!)" : ""}
-                </button>
-              </div>
+                      {o.source === "spell" ? "✦" : "⚔"} {o.name}{" "}
+                      {o.bonus !== undefined
+                        ? formatModifier(o.bonus)
+                        : o.saveDC
+                          ? `· ${o.saveDC.ability} DC ${o.saveDC.dc}`
+                          : ""}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {(() => {
+                const opt = attackOptions.find((o) => o.id === attackId);
+                const saveSpell = !!opt?.saveDC && opt.bonus === undefined;
+                return (
+                  <div className="mt-2 flex flex-wrap items-end gap-2.5">
+                    {saveSpell ? (
+                      <span className="flex h-9 items-center rounded-md border border-[#a993d6]/50 bg-[#6e5a99]/25 px-3 font-semibold text-[#cbb8f0]">
+                        🛡 {targetToken.label} must make a {opt!.saveDC!.ability} save vs DC {opt!.saveDC!.dc}
+                      </span>
+                    ) : (
+                      <>
+                        <label className={HUD.faint}>
+                          <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">To hit</span>
+                          <input
+                            value={bonusStr}
+                            onChange={(e) => setBonusStr(e.target.value)}
+                            className="numerals h-8 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center text-ink"
+                          />
+                        </label>
+                        <label className={HUD.faint}>
+                          <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Mode</span>
+                          <select
+                            value={rollMode}
+                            onChange={(e) => setRollMode(e.target.value as RollMode)}
+                            className="h-8 rounded border border-parchment-400 bg-parchment-50 px-1.5 text-ink"
+                          >
+                            <option value="normal">Normal</option>
+                            <option value="advantage">Advantage</option>
+                            <option value="disadvantage">Disadvantage</option>
+                          </select>
+                        </label>
+                      </>
+                    )}
+                    <label className={HUD.faint}>
+                      <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Damage</span>
+                      <input
+                        value={damageStr}
+                        onChange={(e) => setDamageStr(e.target.value)}
+                        placeholder="1d8+3 slashing"
+                        className="h-8 w-36 rounded border border-parchment-400 bg-parchment-50 px-1.5 text-ink"
+                      />
+                    </label>
+                    {!saveSpell && (
+                      <button
+                        disabled={rolling}
+                        onClick={() => void rollAttack()}
+                        className={cn(trayChip, "bg-[#c25a3d]/25 text-[#f4b8a0] hover:bg-[#c25a3d]/40")}
+                      >
+                        🎲 Attack
+                      </button>
+                    )}
+                    <button disabled={rolling || !parseRollSpec(damageStr)} onClick={() => void rollDamage()} className={trayChip}>
+                      {saveSpell ? "🎲 Roll damage" : `Damage${atkResult?.isCrit ? " ×2 (crit!)" : ""}`}
+                    </button>
+                  </div>
+                );
+              })()}
 
               {(atkResult || dmgResult) && (
                 <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-[#c9a24a]/25 pt-2">
@@ -1692,6 +1826,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
               rolling={rolling}
               onD20={(b, l, m) => void trayD20(b, l, m)}
               onDamage={(d, l) => void trayDamage(d, l)}
+              onArmAttack={armAttackFromTray}
             />
           )}
         </div>
