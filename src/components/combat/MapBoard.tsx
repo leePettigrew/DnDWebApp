@@ -64,6 +64,20 @@ const ALL_TOOLS: { key: Tool; label: string; dm?: boolean }[] = [
   { key: "erase", label: "Erase", dm: true },
 ];
 
+/** Icon glyphs for the fullscreen HUD's slim tool strip. */
+const TOOL_ICONS: Record<Tool, string> = {
+  select: "✥",
+  pan: "✋",
+  target: "🎯",
+  ruler: "📏",
+  ping: "📍",
+  wall: "🧱",
+  light: "🔥",
+  aoe: "⌖",
+  draw: "✎",
+  erase: "⌫",
+};
+
 function hexA(hex: string, a: number): string {
   const h = hex.replace("#", "");
   const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
@@ -209,6 +223,7 @@ export function MapBoard({
   isDM,
   userId,
   fillHeight = false,
+  chrome = "panel",
   onSelectToken,
   onTarget,
   onProvoke,
@@ -221,6 +236,9 @@ export function MapBoard({
   userId: string | null;
   /** Fill the parent (fullscreen War Table) instead of the 62vh panel. */
   fillHeight?: boolean;
+  /** "panel": the classic floating toolbars; "hud": slim dark icon strip
+   *  (zoom folded in) for the fullscreen War Table's docked frame. */
+  chrome?: "panel" | "hud";
   /** Fired when the user picks (or clears) a token with the Move tool. */
   onSelectToken?: (id: string | null) => void;
   /** Enables the Target tool: fired when attacker → target is lined up. */
@@ -1735,58 +1753,146 @@ export function MapBoard({
           )
         )}
 
-        {/* Tool palette */}
-        <div
-          onPointerDown={(e) => e.stopPropagation()}
-          className="absolute left-2 top-2 flex flex-wrap gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 backdrop-blur"
-        >
-          {tools.map((t) => (
+        {/* Tool palette — floating parchment bar (panel) or slim HUD strip */}
+        {chrome === "hud" ? (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            className="absolute left-2 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-1 rounded-xl border border-[#c9a24a]/30 bg-[#161009]/95 p-1.5 shadow-lg backdrop-blur"
+          >
+            {tools.map((t, i) => (
+              <button
+                key={t.key}
+                onClick={() => setTool(t.key)}
+                title={`${t.label} (${i + 1})`}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-lg text-base transition-colors",
+                  tool === t.key
+                    ? "bg-[#c25a3d] text-[#f9ecd2] shadow"
+                    : "text-[#e8d9b5] hover:bg-[#c9a24a]/20",
+                )}
+              >
+                {TOOL_ICONS[t.key]}
+              </button>
+            ))}
+            <div className="my-0.5 h-px w-6 bg-[#c9a24a]/25" />
             <button
-              key={t.key}
-              onClick={() => setTool(t.key)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
-                tool === t.key
-                  ? "bg-oxblood text-parchment-50"
-                  : "text-ink-soft hover:bg-parchment-300/60",
-              )}
+              onClick={() => setView((v) => ({ ...v, scale: clamp(v.scale * 1.15, 0.1, 8) }))}
+              title="Zoom in (+)"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-lg text-[#e8d9b5] hover:bg-[#c9a24a]/20"
             >
-              {t.label}
+              +
             </button>
-          ))}
-          {isDM && fogEnabled && (
             <button
-              onClick={() => setDmPreview((v) => !v)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
-                dmPreview
-                  ? "bg-arcane text-parchment-50"
-                  : "text-ink-soft hover:bg-parchment-300/60",
-              )}
-              title="See the map as your players do"
+              onClick={() => setView((v) => ({ ...v, scale: clamp(v.scale / 1.15, 0.1, 8) }))}
+              title="Zoom out (−)"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-lg text-[#e8d9b5] hover:bg-[#c9a24a]/20"
             >
-              {dmPreview ? "Previewing" : "Player view"}
+              −
             </button>
-          )}
-          {annotations.length > 0 && (
             <button
-              onClick={() => setShowAnnos((v) => !v)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
-                showAnnos ? "bg-brass/20 text-brass-dark" : "text-ink-soft hover:bg-parchment-300/60",
-              )}
-              title="Show or hide room labels & markers"
+              onClick={() => {
+                const cont = containerRef.current;
+                const sz = imgSizeRef.current;
+                if (!cont || !sz) return;
+                const r = cont.getBoundingClientRect();
+                const scale = Math.min(r.width / sz.w, r.height / sz.h) || 1;
+                setView({
+                  scale,
+                  offsetX: (r.width - sz.w * scale) / 2,
+                  offsetY: (r.height - sz.h * scale) / 2,
+                });
+              }}
+              title="Fit map (F)"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-base text-[#e8d9b5] hover:bg-[#c9a24a]/20"
             >
-              Labels
+              ⛶
             </button>
-          )}
-        </div>
+            {(isDM && fogEnabled) || annotations.length > 0 ? (
+              <div className="my-0.5 h-px w-6 bg-[#c9a24a]/25" />
+            ) : null}
+            {isDM && fogEnabled && (
+              <button
+                onClick={() => setDmPreview((v) => !v)}
+                title="See the map as your players do"
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-lg text-base transition-colors",
+                  dmPreview ? "bg-[#6e5a99] text-[#f9ecd2]" : "text-[#e8d9b5] hover:bg-[#c9a24a]/20",
+                )}
+              >
+                👁
+              </button>
+            )}
+            {annotations.length > 0 && (
+              <button
+                onClick={() => setShowAnnos((v) => !v)}
+                title="Show or hide room labels & markers"
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-lg text-base transition-colors",
+                  showAnnos ? "bg-[#c9a24a]/30 text-[#f0d885]" : "text-[#e8d9b5] hover:bg-[#c9a24a]/20",
+                )}
+              >
+                🏷
+              </button>
+            )}
+          </div>
+        ) : (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            className="absolute left-2 top-2 flex flex-wrap gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 backdrop-blur"
+          >
+            {tools.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTool(t.key)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
+                  tool === t.key
+                    ? "bg-oxblood text-parchment-50"
+                    : "text-ink-soft hover:bg-parchment-300/60",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+            {isDM && fogEnabled && (
+              <button
+                onClick={() => setDmPreview((v) => !v)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
+                  dmPreview
+                    ? "bg-arcane text-parchment-50"
+                    : "text-ink-soft hover:bg-parchment-300/60",
+                )}
+                title="See the map as your players do"
+              >
+                {dmPreview ? "Previewing" : "Player view"}
+              </button>
+            )}
+            {annotations.length > 0 && (
+              <button
+                onClick={() => setShowAnnos((v) => !v)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
+                  showAnnos ? "bg-brass/20 text-brass-dark" : "text-ink-soft hover:bg-parchment-300/60",
+                )}
+                title="Show or hide room labels & markers"
+              >
+                Labels
+              </button>
+            )}
+          </div>
+        )}
 
         {/* AoE template controls */}
         {isDM && tool === "aoe" && (
           <div
             onPointerDown={(e) => e.stopPropagation()}
-            className="absolute bottom-2 left-2 flex flex-wrap items-center gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 text-xs backdrop-blur"
+            className={cn(
+              "absolute flex flex-wrap items-center gap-1 p-1 text-xs backdrop-blur",
+              chrome === "hud"
+                ? "bottom-2 left-14 rounded-xl border border-[#c9a24a]/30 bg-[#161009]/95 text-[#e8d9b5]"
+                : "bottom-2 left-2 rounded-card border border-parchment-400/60 bg-parchment-100/90",
+            )}
           >
             {(["circle", "cone", "line"] as AoeShape[]).map((s) => (
               <button
@@ -1794,27 +1900,36 @@ export function MapBoard({
                 onClick={() => setAoeShape(s)}
                 className={cn(
                   "rounded-md px-2 py-1 font-semibold capitalize transition-colors",
-                  aoeShape === s ? "bg-oxblood text-parchment-50" : "text-ink-soft hover:bg-parchment-300/60",
+                  aoeShape === s
+                    ? chrome === "hud"
+                      ? "bg-[#c25a3d] text-[#f9ecd2]"
+                      : "bg-oxblood text-parchment-50"
+                    : chrome === "hud"
+                      ? "text-[#e8d9b5] hover:bg-[#c9a24a]/20"
+                      : "text-ink-soft hover:bg-parchment-300/60",
                 )}
               >
                 {s}
               </button>
             ))}
-            <label className="ml-1 flex items-center gap-1 text-ink-soft">
+            <label className={cn("ml-1 flex items-center gap-1", chrome === "hud" ? "text-[#a3906c]" : "text-ink-soft")}>
               <input
                 type="number"
                 min={5}
                 step={5}
                 value={aoeFeet}
                 onChange={(e) => setAoeFeet(Math.max(5, Number(e.target.value) || 5))}
-                className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
+                className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center text-ink"
               />
               ft
             </label>
             {templates.length > 0 && (
               <button
                 onClick={() => void updateMap(map.id, { templates: [] })}
-                className="rounded-md px-2 py-1 font-semibold text-ink-soft hover:bg-parchment-300/60 hover:text-oxblood"
+                className={cn(
+                  "rounded-md px-2 py-1 font-semibold",
+                  chrome === "hud" ? "text-[#a3906c] hover:text-[#e07a5f]" : "text-ink-soft hover:bg-parchment-300/60 hover:text-oxblood",
+                )}
               >
                 Clear ({templates.length})
               </button>
@@ -1822,10 +1937,13 @@ export function MapBoard({
           </div>
         )}
 
-        {/* Zoom */}
+        {/* Zoom (panel mode only — the HUD strip carries zoom) */}
         <div
           onPointerDown={(e) => e.stopPropagation()}
-          className="absolute bottom-2 right-2 flex gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 backdrop-blur"
+          className={cn(
+            "absolute bottom-2 right-2 flex gap-1 rounded-card border border-parchment-400/60 bg-parchment-100/90 p-1 backdrop-blur",
+            chrome === "hud" && "hidden",
+          )}
         >
           <button
             onClick={() => setView((v) => ({ ...v, scale: clamp(v.scale * 1.15, 0.1, 8) }))}

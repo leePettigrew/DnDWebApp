@@ -60,8 +60,22 @@ function hpTone(pct: number): string {
 
 const ABILITIES: AbilityKey[] = ["str", "dex", "con", "int", "wis", "cha"];
 
+/* Theme-stable HUD palette — dark leather & gilt in BOTH app themes, so the
+ * bright map reads like a lit table in a dark room. */
+const HUD = {
+  text: "text-[#f2e6cb]",
+  soft: "text-[#e8d9b5]",
+  faint: "text-[#a3906c]",
+  gilt: "text-[#c9a24a]",
+  panel: "border-[#c9a24a]/30 bg-[#161009]/95",
+  divider: "border-[#c9a24a]/25",
+};
+
 const trayChip =
-  "rounded-md border border-parchment-400/70 bg-parchment-50 px-2 py-1 text-[0.7rem] font-semibold text-ink-soft transition-colors hover:bg-brass/20 hover:text-brass-dark disabled:opacity-50";
+  "rounded-md border border-[#c9a24a]/30 bg-[#241a10] px-2.5 py-1.5 text-[0.8rem] font-semibold text-[#e8d9b5] transition-colors hover:bg-[#c9a24a]/20 hover:text-[#f0d885] disabled:opacity-50";
+
+const trayLabel =
+  "w-14 shrink-0 text-[0.65rem] font-semibold uppercase tracking-wide text-[#a3906c]";
 
 /**
  * The active combatant's action tray: their attacks, ability checks, saves
@@ -105,28 +119,25 @@ function TurnTray({
   };
 
   return (
-    <div
-      onPointerDown={(e) => e.stopPropagation()}
-      className="absolute bottom-3 left-1/2 max-h-[38%] w-[42rem] max-w-[96%] -translate-x-1/2 space-y-1.5 overflow-y-auto rounded-card border border-brass/50 bg-parchment-100/97 px-3 py-2 text-xs shadow-gilt backdrop-blur"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-display text-sm font-bold text-ink">⚔ {cb.name}&apos;s turn</span>
+    <div className="space-y-1.5 text-sm">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className={cn("font-display text-base font-bold", HUD.text)}>⚔ {cb.name}&apos;s turn</span>
         {remainingFt !== null && (
-          <span className="rounded-full bg-forest/15 px-2 py-0.5 font-semibold text-forest">
-            {remainingFt} ft movement left
+          <span className="rounded-full bg-[#4d6b4f]/40 px-2.5 py-0.5 text-[0.75rem] font-semibold text-[#a8d0ac]">
+            {remainingFt} ft left
           </span>
         )}
-        <span className="text-ink-faint">
+        <span className={cn("text-[0.8rem]", HUD.faint)}>
           HP {cb.currentHp}/{cb.maxHp} · AC {cb.armorClass}
         </span>
-        <span className="ml-auto flex overflow-hidden rounded-md border border-parchment-400/70">
+        <span className="ml-auto flex overflow-hidden rounded-md border border-[#c9a24a]/30">
           {(["normal", "advantage", "disadvantage"] as RollMode[]).map((m) => (
             <button
               key={m}
               onClick={() => setMode(m)}
               className={cn(
-                "px-1.5 py-0.5 text-[0.6rem] font-bold uppercase",
-                mode === m ? "bg-oxblood text-parchment-50" : "bg-parchment-50 text-ink-faint hover:text-ink",
+                "px-2 py-1 text-[0.65rem] font-bold uppercase",
+                mode === m ? "bg-[#c25a3d] text-[#f9ecd2]" : "bg-[#241a10] text-[#a3906c] hover:text-[#e8d9b5]",
               )}
               title={m}
             >
@@ -137,8 +148,8 @@ function TurnTray({
       </div>
 
       {dying && (
-        <div className="flex items-center gap-2 rounded-md border border-oxblood/50 bg-oxblood/10 px-2 py-1">
-          <span className="font-semibold text-oxblood">At 0 HP — roll a death save (10+ succeeds)</span>
+        <div className="flex items-center gap-2 rounded-md border border-[#c25a3d]/60 bg-[#c25a3d]/15 px-2.5 py-1.5">
+          <span className="font-semibold text-[#e07a5f]">At 0 HP — roll a death save (10+ succeeds)</span>
           <button disabled={rolling} onClick={() => onD20(0, `${cb.name} — death save`, mode)} className={trayChip}>
             🎲 Death save
           </button>
@@ -146,25 +157,25 @@ function TurnTray({
       )}
 
       {attacks.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Attacks</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={trayLabel}>Attacks</span>
           {attacks.map((a) => (
-            <span key={a.id} className="flex overflow-hidden rounded-md border border-parchment-400/70">
+            <span key={a.id} className="flex overflow-hidden rounded-md border border-[#c9a24a]/30">
               <button
                 disabled={rolling}
                 onClick={() => onD20(a.bonus ?? 0, `${cb.name} — ${a.name}`, mode)}
                 title={a.note ?? a.name}
-                className="bg-parchment-50 px-2 py-1 text-[0.7rem] font-semibold text-ink-soft hover:bg-oxblood/15 hover:text-oxblood disabled:opacity-50"
+                className="bg-[#241a10] px-2.5 py-1.5 text-[0.8rem] font-semibold text-[#e8d9b5] hover:bg-[#c25a3d]/30 hover:text-[#f4b8a0] disabled:opacity-50"
               >
                 ⚔ {a.name} {a.bonus !== undefined ? formatModifier(a.bonus) : ""}
-                {a.range ? <span className="ml-1 text-[0.6rem] text-ink-faint">{a.range.normal}/{a.range.long} ft</span> : null}
+                {a.range ? <span className="ml-1 text-[0.65rem] text-[#a3906c]">{a.range.normal}/{a.range.long} ft</span> : null}
               </button>
               {a.damage && parseRollSpec(a.damage) && (
                 <button
                   disabled={rolling}
                   onClick={() => onDamage(a.damage!, `${cb.name} — ${a.name} damage`)}
                   title={`Roll ${a.damage}`}
-                  className="border-l border-parchment-400/70 bg-parchment-50 px-1.5 py-1 text-[0.65rem] text-ink-faint hover:bg-oxblood/15 hover:text-oxblood disabled:opacity-50"
+                  className="border-l border-[#c9a24a]/30 bg-[#241a10] px-2 py-1.5 text-[0.7rem] text-[#a3906c] hover:bg-[#c25a3d]/30 hover:text-[#f4b8a0] disabled:opacity-50"
                 >
                   {a.damage.split(" ")[0]}
                 </button>
@@ -175,18 +186,18 @@ function TurnTray({
       )}
 
       {spells.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Spells</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={trayLabel}>Spells</span>
           {spells.map(({ spell, fx }) => (
             <button
               key={spell.id}
               onClick={() => setOpenSpellId(openSpellId === spell.id ? null : spell.id)}
               title={spell.description}
               className={cn(
-                "rounded-md border px-2 py-1 text-[0.7rem] font-semibold transition-colors",
+                "rounded-md border px-2.5 py-1.5 text-[0.8rem] font-semibold transition-colors",
                 openSpellId === spell.id
-                  ? "border-arcane bg-arcane/20 text-arcane"
-                  : "border-parchment-400/70 bg-parchment-50 text-ink-soft hover:bg-arcane/15 hover:text-arcane",
+                  ? "border-[#a993d6] bg-[#6e5a99]/40 text-[#cbb8f0]"
+                  : "border-[#c9a24a]/30 bg-[#241a10] text-[#e8d9b5] hover:bg-[#6e5a99]/30 hover:text-[#cbb8f0]",
               )}
             >
               ✦ {spell.name}
@@ -196,16 +207,16 @@ function TurnTray({
       )}
 
       {openSpell && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-arcane/40 bg-arcane/10 px-2 py-1.5">
-          <span className="font-semibold text-arcane">✦ {openSpell.spell.name}</span>
-          {openSpell.fx.rangeText && <span className="text-ink-soft">📏 {openSpell.fx.rangeText}</span>}
+        <div className="flex flex-wrap items-center gap-2.5 rounded-md border border-[#a993d6]/40 bg-[#6e5a99]/20 px-2.5 py-1.5">
+          <span className="font-semibold text-[#cbb8f0]">✦ {openSpell.spell.name}</span>
+          {openSpell.fx.rangeText && <span className={HUD.soft}>📏 {openSpell.fx.rangeText}</span>}
           {openSpell.fx.shape && openSpell.fx.feet && (
-            <span className="text-ink-soft">
+            <span className={HUD.soft}>
               ⌖ {openSpell.fx.feet}-ft {openSpell.fx.shape}
             </span>
           )}
           {openSpell.fx.save && (
-            <span className="text-ink-soft">
+            <span className={HUD.soft}>
               🛡 {openSpell.fx.save} save{dc !== null ? ` DC ${dc}` : ""}
             </span>
           )}
@@ -227,8 +238,8 @@ function TurnTray({
       )}
 
       {items.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Items</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={trayLabel}>Items</span>
           {items.map(({ item, dice }) => (
             <button
               key={item.id}
@@ -245,8 +256,8 @@ function TurnTray({
       )}
 
       {scores && (
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Checks</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={trayLabel}>Checks</span>
           {ABILITIES.map((k) => {
             const m = abilityMod(scores, k);
             return (
@@ -264,8 +275,8 @@ function TurnTray({
       )}
 
       {scores && (
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Saves</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={trayLabel}>Saves</span>
           {ABILITIES.map((k) => {
             const m = char ? savingThrowBonus(char, k) : abilityMod(scores, k);
             return (
@@ -283,12 +294,12 @@ function TurnTray({
       )}
 
       {char && skill && (
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="w-12 shrink-0 text-[0.6rem] font-semibold uppercase tracking-wide text-ink-faint">Skills</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={trayLabel}>Skills</span>
           <select
             value={skillKey}
             onChange={(e) => setSkillKey(e.target.value as typeof skillKey)}
-            className="h-6 rounded border border-parchment-400 bg-parchment-50 px-1 text-[0.7rem]"
+            className="h-8 rounded border border-parchment-400 bg-parchment-50 px-1.5 text-[0.8rem] text-ink"
           >
             {SKILLS.map((s) => (
               <option key={s.key} value={s.key}>
@@ -307,7 +318,7 @@ function TurnTray({
       )}
 
       {!scores && attacks.length === 0 && (
-        <p className="text-[0.65rem] text-ink-faint">
+        <p className={cn("text-[0.8rem]", HUD.faint)}>
           No linked sheet or stat block — quick d20:
           <button disabled={rolling} onClick={() => onD20(0, `${cb.name} — d20`, mode)} className={cn(trayChip, "ml-2")}>
             🎲 d20
@@ -335,6 +346,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   const [miniNat, setMiniNat] = useState<{ w: number; h: number } | null>(null);
   const [bookmarkName, setBookmarkName] = useState("");
   const [logOpen, setLogOpen] = useState(true);
+  const [dockView, setDockView] = useState<"auto" | "attack" | "token" | "turn">("auto");
   const { items: rollLog } = useRollHistory();
   const [timerNow, setTimerNow] = useState(() => Date.now());
   const turnStartRef = useRef(Date.now());
@@ -376,6 +388,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
     setAtkResult(null);
     setDmgResult(null);
     setRollMode("normal");
+    setDockView("auto"); // a fresh engagement takes the dock
   }
   // Prefill the roll card whenever a new attacker lines up.
   const lastAttackerRef = useRef<string | null>(null);
@@ -689,24 +702,129 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
   const ftOf = (px: number | undefined) => (px && pxPerFoot > 0 ? Math.round(px / pxPerFoot) : 0);
   const pxOf = (ft: number) => Math.max(0, Math.round(ft * pxPerFoot));
 
+  // Bottom dock: one bar, contextual content. Priority when on auto:
+  // attack roll card > selected token > your turn tray.
+  const contexts = {
+    attack: !!(engage && attackerToken && targetToken),
+    token: !!(selectedToken && map),
+    turn: !!(map && active && canAct),
+  };
+  const shownDock: "attack" | "token" | "turn" | null =
+    dockView !== "auto" && contexts[dockView]
+      ? dockView
+      : contexts.attack
+        ? "attack"
+        : contexts.token
+          ? "token"
+          : contexts.turn
+            ? "turn"
+            : null;
+  const dockTabs = (
+    [
+      ["attack", "⚔ Attack"],
+      ["token", "◉ Token"],
+      ["turn", "🎲 Turn"],
+    ] as const
+  ).filter(([k]) => contexts[k]);
+
   return (
-    // bg-leather stays dark in BOTH themes (bg-ink flips to light in dark
-    // mode, which read as a blank cream void while the map loaded).
-    <div className="fixed inset-0 z-[70] flex flex-col bg-leather">
-      {/* ── Command bar ─────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 border-b border-parchment-400/30 bg-parchment-100 px-4 py-2">
-        <SwordsIcon className="h-5 w-5 text-oxblood" />
-        <span className="font-display text-sm font-bold text-ink">
+    // One dark game-HUD frame in BOTH app themes: the bright map is the
+    // playfield, everything else is leather & gilt chrome.
+    <div className="fixed inset-0 z-[70] flex flex-col bg-[#0f0b07] text-[#e8d9b5]">
+      {/* ── Header: title · turn banner · controls ─────────────────── */}
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[#c9a24a]/25 bg-[#161009] px-4">
+        <SwordsIcon className="h-5 w-5 text-[#c25a3d]" />
+        <span className={cn("hidden font-display text-sm font-bold sm:block", HUD.text)}>
           {combat?.encounterName || map?.name || "War Table"}
         </span>
-        <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={() => setLogOpen((v) => !v)}>
-            📜 Chronicle
-          </Button>
+
+        {/* Turn banner — centered, always in the same place */}
+        <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-3">
+          {combat?.active ? (
+            <>
+              <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+                {timerLeft !== null && turnSeconds > 0 && (
+                  <svg viewBox="0 0 44 44" className="absolute inset-0 h-full w-full -rotate-90">
+                    <circle cx="22" cy="22" r="20" fill="none" stroke="#3a2d1a" strokeWidth="3" />
+                    <circle
+                      cx="22"
+                      cy="22"
+                      r="20"
+                      fill="none"
+                      stroke={timerLeft / turnSeconds < 0.25 ? "#e05545" : "#c9a24a"}
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeDasharray={`${(timerLeft / turnSeconds) * 125.7} 125.7`}
+                      className={timerLeft / turnSeconds < 0.25 ? "animate-pulse" : undefined}
+                    />
+                  </svg>
+                )}
+                <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-[#c9a24a]/70 bg-[#241a10] text-xs font-bold text-[#f0d885]">
+                  {active && portraitOf(active) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={portraitOf(active)} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    active?.name.slice(0, 2).toUpperCase() ?? "—"
+                  )}
+                </span>
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[0.6rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">
+                  Round {combat.round}
+                  {timerLeft !== null && turnSeconds > 0 ? ` · ${Math.ceil(timerLeft)}s` : ""}
+                </span>
+                <span className={cn("block max-w-56 truncate font-display text-base font-bold leading-tight", HUD.text)}>
+                  {active?.name ?? "—"}
+                </span>
+              </span>
+              {canEditCombat && (
+                <span className="flex items-center gap-1">
+                  <button
+                    onClick={() => advanceTurn(-1)}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-[#c9a24a]/40 text-[#e8d9b5] hover:bg-[#c9a24a]/20"
+                    aria-label="Previous turn"
+                  >
+                    <ChevronLeftIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => advanceTurn(1)}
+                    className="flex h-9 items-center gap-1 rounded-full border border-[#c9a24a]/60 bg-[#c9a24a]/15 px-3.5 text-xs font-bold uppercase tracking-wide text-[#f0d885] hover:bg-[#c9a24a]/30"
+                  >
+                    End turn <ChevronRightIcon className="h-4 w-4" />
+                  </button>
+                </span>
+              )}
+            </>
+          ) : (
+            <span className={cn("text-sm", HUD.faint)}>No combat running</span>
+          )}
+        </div>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            onClick={() => {
+              setLogOpen((v) => !v);
+              setSettingsOpen(false);
+            }}
+            className={cn(
+              "rounded-md px-2.5 py-1.5 text-sm font-semibold transition-colors",
+              logOpen && !settingsOpen ? "bg-[#c9a24a]/25 text-[#f0d885]" : "text-[#a3906c] hover:text-[#f0d885]",
+            )}
+            title="The fight's chronicle"
+          >
+            📜
+          </button>
           {isDM && map && (
-            <Button size="sm" variant="secondary" onClick={() => setSettingsOpen((v) => !v)}>
-              {settingsOpen ? "✕ Settings" : "⚙ Map settings"}
-            </Button>
+            <button
+              onClick={() => setSettingsOpen((v) => !v)}
+              className={cn(
+                "rounded-md px-2.5 py-1.5 text-sm font-semibold transition-colors",
+                settingsOpen ? "bg-[#c9a24a]/25 text-[#f0d885]" : "text-[#a3906c] hover:text-[#f0d885]",
+              )}
+              title="Map settings"
+            >
+              ⚙
+            </button>
           )}
           {isDM && maps.length > 0 && (
             <select
@@ -719,7 +837,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                 void updateCombat({ activeMapId: e.target.value || undefined });
               }}
               aria-label="Active map"
-              className="h-8 rounded-md border border-parchment-400 bg-parchment-50 px-2 text-sm text-ink focus:border-brass focus:outline-none"
+              className="h-8 max-w-40 rounded-md border border-[#c9a24a]/30 bg-[#241a10] px-2 text-sm text-[#e8d9b5] focus:border-[#c9a24a] focus:outline-none"
             >
               <option value="">Choose a map…</option>
               {maps.map((m) => (
@@ -730,7 +848,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
           <button
             onClick={onClose}
             aria-label="Leave the War Table"
-            className="rounded-md p-1.5 text-ink-faint hover:bg-parchment-300/60 hover:text-ink"
+            className="rounded-md p-1.5 text-[#a3906c] hover:bg-[#c9a24a]/20 hover:text-[#f0d885]"
           >
             <CloseIcon className="h-5 w-5" />
           </button>
@@ -739,13 +857,13 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
 
       <div className="flex min-h-0 flex-1">
         {/* ── Initiative rail ─────────────────────────────────────── */}
-        <div className="flex w-60 shrink-0 flex-col border-r border-parchment-400/30 bg-parchment-100/95">
-          <p className="border-b border-parchment-400/40 px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">
+        <div className="flex w-64 shrink-0 flex-col border-r border-[#c9a24a]/25 bg-[#120d08]">
+          <p className="border-b border-[#c9a24a]/25 px-3 py-2 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">
             Initiative
           </p>
           <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
             {!combat?.active || combat.combatants.length === 0 ? (
-              <p className="px-1 py-2 text-xs text-ink-faint">
+              <p className={cn("px-1 py-2 text-sm", HUD.faint)}>
                 No combat running — muster combatants on the Combat page, or use the map freely.
               </p>
             ) : (
@@ -765,20 +883,20 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                     className={cn(
                       "block w-full rounded-lg border p-2 text-left transition-colors",
                       isActive
-                        ? "border-brass bg-brass/15 shadow-gilt"
-                        : "border-parchment-400/50 bg-parchment-50/60 hover:bg-parchment-300/40",
-                      down && "opacity-60",
+                        ? "border-[#c9a24a]/80 bg-[#c9a24a]/15 shadow-[0_0_12px_rgba(201,162,74,0.15)]"
+                        : "border-[#c9a24a]/15 bg-[#1d1510]/80 hover:bg-[#241a10]",
+                      down && "opacity-55",
                     )}
                     title="Find on the map"
                   >
                     <span className="flex items-center gap-2">
-                      <span className="numerals w-6 shrink-0 text-center font-display text-sm font-bold text-ink">
+                      <span className="numerals w-6 shrink-0 text-center font-display text-sm font-bold text-[#f0d885]">
                         {c.initiative}
                       </span>
                       <span
                         className={cn(
-                          "flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 text-[0.6rem] font-bold",
-                          c.isPC ? "border-forest/70 bg-forest/15 text-forest" : "border-oxblood/70 bg-oxblood/10 text-oxblood",
+                          "flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 text-[0.65rem] font-bold",
+                          c.isPC ? "border-[#6e9a72]/80 bg-[#2a3a2c] text-[#a8d0ac]" : "border-[#c25a3d]/80 bg-[#3a201a] text-[#e8a18a]",
                         )}
                       >
                         {art ? (
@@ -825,6 +943,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
               isDM={isDM}
               userId={userId}
               fillHeight
+              chrome="hud"
               shortcuts
               onSelectToken={setSelectedTokenId}
               onTarget={handleTarget}
@@ -833,177 +952,20 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
             />
           ) : (
             <div className="flex h-full items-center justify-center">
-              <p className="text-sm text-parchment-300/70">
+              <p className={cn("text-sm", HUD.faint)}>
                 {isDM ? "Choose a map above to begin." : "The DM hasn't set a battle map yet."}
               </p>
             </div>
           )}
-
-          {/* Minimap (DM — the plain image would leak fogged areas to players) */}
-          {isDM && map && (
-            <div
-              onPointerDown={(e) => e.stopPropagation()}
-              className="absolute right-2 top-2 w-44 overflow-hidden rounded-md border border-parchment-400/70 bg-ink/80 shadow-lg"
-              style={{ display: settingsOpen ? "none" : undefined }}
-            >
-              <div
-                className="relative cursor-pointer"
-                onClick={(e) => {
-                  if (!miniNat) return;
-                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  const fx = (e.clientX - r.left) / r.width;
-                  const fy = (e.clientY - r.top) / r.height;
-                  window.dispatchEvent(
-                    new CustomEvent("dl:map-camera", {
-                      detail: { x: fx * miniNat.w, y: fy * miniNat.h },
-                    }),
-                  );
-                }}
-                title="Click to jump the camera"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={map.imageUrl}
-                  alt=""
-                  className="block w-full opacity-90"
-                  onLoad={(e) =>
-                    setMiniNat({
-                      w: (e.target as HTMLImageElement).naturalWidth,
-                      h: (e.target as HTMLImageElement).naturalHeight,
-                    })
-                  }
-                />
-                {miniNat && (
-                  <svg
-                    viewBox={`0 0 ${miniNat.w} ${miniNat.h}`}
-                    className="pointer-events-none absolute inset-0 h-full w-full"
-                  >
-                    {(map.tokens ?? []).map((t) => (
-                      <circle
-                        key={t.id}
-                        cx={t.x}
-                        cy={t.y}
-                        r={Math.max(6, miniNat.w * 0.012)}
-                        fill={t.isPC ? "#86b58a" : "#d6794a"}
-                      />
-                    ))}
-                    {cam && cam.view.scale > 0 && (
-                      <rect
-                        x={-cam.view.offsetX / cam.view.scale}
-                        y={-cam.view.offsetY / cam.view.scale}
-                        width={cam.viewport.w / cam.view.scale}
-                        height={cam.viewport.h / cam.view.scale}
-                        fill="none"
-                        stroke="#E6C772"
-                        strokeWidth={Math.max(2, miniNat.w * 0.004)}
-                      />
-                    )}
-                  </svg>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Chronicle — the fight's story: rolls, damage, turns, doors */}
-          {logOpen && (
-            <div
-              onPointerDown={(e) => e.stopPropagation()}
-              className="absolute bottom-14 right-2 z-10 flex max-h-[42%] w-80 max-w-[85%] flex-col overflow-hidden rounded-card border border-[#c9a24a]/40 bg-[#161009]/92 shadow-lg backdrop-blur"
-            >
-              <div className="flex items-center gap-2 border-b border-[#c9a24a]/25 px-3 py-1.5">
-                <span className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">
-                  📜 Chronicle
-                </span>
-                <button
-                  onClick={() => setLogOpen(false)}
-                  className="ml-auto rounded p-0.5 text-[#a3906c] hover:text-[#f2e6cb]"
-                  aria-label="Close chronicle"
-                >
-                  <CloseIcon className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
-                {chronicle.length === 0 ? (
-                  <p className="text-[0.7rem] text-[#a3906c]">Nothing yet — the tale begins…</p>
-                ) : (
-                  chronicle.map((e) => (
-                    <p key={e.id} className="text-[0.7rem] leading-snug text-[#e8d9b5]">
-                      <span className="mr-1">{e.icon}</span>
-                      {e.text}
-                    </p>
-                  ))
-                )}
-                <div ref={chronicleEndRef} />
-              </div>
-            </div>
-          )}
-
-          {/* ── Top-center HUD stack: turn banner, reminders, saves, OAs ── */}
+          {/* ── Alert toasts: start-of-turn, concentration, OAs ─────── */}
           <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex w-[30rem] max-w-[94%] -translate-x-1/2 flex-col items-center gap-2">
-            {combat?.active && (
-              <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-[#c9a24a]/60 bg-[#161009]/95 py-1.5 pl-2 pr-2 shadow-lg backdrop-blur">
-                <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
-                  {timerLeft !== null && turnSeconds > 0 && (
-                    <svg viewBox="0 0 44 44" className="absolute inset-0 h-full w-full -rotate-90">
-                      <circle cx="22" cy="22" r="20" fill="none" stroke="#3a2d1a" strokeWidth="3" />
-                      <circle
-                        cx="22"
-                        cy="22"
-                        r="20"
-                        fill="none"
-                        stroke={timerLeft / turnSeconds < 0.25 ? "#e05545" : "#c9a24a"}
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeDasharray={`${(timerLeft / turnSeconds) * 125.7} 125.7`}
-                        className={timerLeft / turnSeconds < 0.25 ? "animate-pulse" : undefined}
-                      />
-                    </svg>
-                  )}
-                  <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-[#c9a24a]/70 bg-[#241a10] text-xs font-bold text-[#f0d885]">
-                    {active && portraitOf(active) ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={portraitOf(active)} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      active?.name.slice(0, 2).toUpperCase() ?? "—"
-                    )}
-                  </span>
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-[0.6rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">
-                    Round {combat.round}
-                    {timerLeft !== null && turnSeconds > 0 ? ` · ${Math.ceil(timerLeft)}s` : ""}
-                  </span>
-                  <span className="block max-w-52 truncate font-display text-base font-bold leading-tight text-[#f2e6cb]">
-                    {active?.name ?? "—"}
-                  </span>
-                </span>
-                {canEditCombat && (
-                  <span className="ml-1 flex items-center gap-1">
-                    <button
-                      onClick={() => advanceTurn(-1)}
-                      className="flex h-8 w-8 items-center justify-center rounded-full border border-[#c9a24a]/40 text-[#e8d9b5] hover:bg-[#c9a24a]/20"
-                      aria-label="Previous turn"
-                    >
-                      <ChevronLeftIcon className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => advanceTurn(1)}
-                      className="flex h-8 items-center gap-1 rounded-full border border-[#c9a24a]/60 bg-[#c9a24a]/15 px-3 text-xs font-bold uppercase tracking-wide text-[#f0d885] hover:bg-[#c9a24a]/30"
-                    >
-                      End turn <ChevronRightIcon className="h-4 w-4" />
-                    </button>
-                  </span>
-                )}
-              </div>
-            )}
-
             {prompt && (
-              <div className="pointer-events-auto w-full rounded-card border border-brass/60 bg-parchment-100/95 p-3 shadow-gilt backdrop-blur">
-                <div className="flex items-start gap-2">
+              <div className={cn("pointer-events-auto w-full rounded-card border p-3 text-sm shadow-lg backdrop-blur", HUD.panel)}>
+                <div className="flex items-start gap-2.5">
                   <span className="text-lg">⚔️</span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-ink">{prompt.name}&apos;s turn</p>
-                    <ul className="mt-1 space-y-0.5 text-xs text-ink-soft">
+                    <p className={cn("font-bold", HUD.text)}>{prompt.name}&apos;s turn</p>
+                    <ul className={cn("mt-1 space-y-0.5 text-[0.8rem]", HUD.soft)}>
                       {prompt.lines.map((l, i) => (
                         <li key={i}>• {l}</li>
                       ))}
@@ -1011,7 +973,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                   </div>
                   <button
                     onClick={() => setPrompt(null)}
-                    className="rounded p-1 text-ink-faint hover:text-ink"
+                    className="rounded p-1 text-[#a3906c] hover:text-[#f0d885]"
                     aria-label="Dismiss"
                   >
                     <CloseIcon className="h-4 w-4" />
@@ -1021,17 +983,20 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
             )}
 
             {conPrompts.map((p) => (
-              <div key={p.id} className="pointer-events-auto flex w-full flex-wrap items-center gap-2 rounded-card border border-arcane/60 bg-parchment-100/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
+              <div
+                key={p.id}
+                className="pointer-events-auto flex w-full flex-wrap items-center gap-2.5 rounded-card border border-[#a993d6]/50 bg-[#161009]/95 px-3 py-2.5 text-sm shadow-lg backdrop-blur"
+              >
                 <span className="text-base">🧠</span>
-                <span className="min-w-0 flex-1 font-semibold text-ink">
+                <span className={cn("min-w-0 flex-1 font-semibold", HUD.text)}>
                   {p.name} took {p.dmg} — CON save DC {p.dc} to keep concentration
                 </span>
-                <Button size="sm" disabled={rolling} onClick={() => void rollConcentration(p)}>
+                <button disabled={rolling} onClick={() => void rollConcentration(p)} className={trayChip}>
                   🎲 Roll {formatModifier(p.bonus)}
-                </Button>
+                </button>
                 <button
                   onClick={() => setConPrompts((q) => q.filter((x) => x.id !== p.id))}
-                  className="rounded p-1 text-ink-faint hover:text-ink"
+                  className="rounded p-1 text-[#a3906c] hover:text-[#f0d885]"
                   aria-label="Dismiss"
                 >
                   <CloseIcon className="h-4 w-4" />
@@ -1040,21 +1005,21 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
             ))}
 
             {oaPrompt && (
-              <div className="pointer-events-auto w-full rounded-card border border-oxblood/60 bg-parchment-100/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
-                <div className="flex items-center gap-2">
+              <div className="pointer-events-auto w-full rounded-card border border-[#c25a3d]/60 bg-[#161009]/95 px-3 py-2.5 text-sm shadow-lg backdrop-blur">
+                <div className="flex items-center gap-2.5">
                   <span className="text-base">⚡</span>
-                  <span className="min-w-0 flex-1 font-semibold text-ink">
+                  <span className={cn("min-w-0 flex-1 font-semibold", HUD.text)}>
                     {oaPrompt.moverName} provokes opportunity attacks!
                   </span>
                   <button
                     onClick={() => setOaPrompt(null)}
-                    className="rounded p-1 text-ink-faint hover:text-ink"
+                    className="rounded p-1 text-[#a3906c] hover:text-[#f0d885]"
                     aria-label="Dismiss"
                   >
                     <CloseIcon className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   {oaPrompt.enemies.map((e) => (
                     <span key={e.cbId} className="flex items-center gap-1">
                       <button
@@ -1066,7 +1031,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                             "normal",
                           )
                         }
-                        className="rounded-md border border-oxblood/50 bg-oxblood/10 px-2 py-1 font-semibold text-oxblood hover:bg-oxblood/20 disabled:opacity-50"
+                        className="rounded-md border border-[#c25a3d]/60 bg-[#c25a3d]/15 px-2.5 py-1.5 text-[0.8rem] font-semibold text-[#e8a18a] hover:bg-[#c25a3d]/30 disabled:opacity-50"
                       >
                         ⚔ {e.name} {e.attack?.bonus !== undefined ? formatModifier(e.attack.bonus) : ""}
                       </button>
@@ -1074,7 +1039,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                         <button
                           disabled={rolling}
                           onClick={() => void trayDamage(e.attack!.damage!, `${e.name} — OA damage`)}
-                          className="rounded-md border border-parchment-400/70 bg-parchment-50 px-1.5 py-1 text-[0.65rem] text-ink-faint hover:text-oxblood disabled:opacity-50"
+                          className="rounded-md border border-[#c9a24a]/30 bg-[#241a10] px-2 py-1.5 text-[0.7rem] text-[#a3906c] hover:text-[#e8a18a] disabled:opacity-50"
                         >
                           {e.attack.damage.split(" ")[0]}
                         </button>
@@ -1085,264 +1050,96 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
               </div>
             )}
           </div>
+        </div>
 
-          {/* Roll card — attack lined up with the Target tool */}
-          {engage && attackerToken && targetToken && (
-            <div
-              onPointerDown={(e) => e.stopPropagation()}
-              className="absolute bottom-3 left-1/2 w-[34rem] max-w-[95%] -translate-x-1/2 rounded-card border border-oxblood/50 bg-parchment-100/97 p-3 text-xs shadow-lg backdrop-blur"
-            >
-              <div className="flex items-center gap-2">
-                <SwordsIcon className="h-4 w-4 text-oxblood" />
-                <span className="font-display text-sm font-bold text-ink">
-                  {attackerToken.label} → {targetToken.label}
-                </span>
-                <span className={cn("font-semibold", engage.losBlocked ? "text-oxblood" : "text-ink-soft")}>
-                  {engage.feet} ft{engage.losBlocked ? " · no line of sight!" : ""}
-                </span>
-                {(() => {
-                  const opt = attackOptions.find((o) => o.id === attackId);
-                  if (!opt?.range) return null;
-                  if (engage.feet > opt.range.long)
-                    return <span className="font-bold text-oxblood">out of range ({opt.range.long} ft max)</span>;
-                  if (engage.feet > opt.range.normal)
-                    return <span className="font-semibold text-brass-dark">long range — disadvantage</span>;
-                  return null;
-                })()}
-                {isDM && targetCb && (
-                  <span className="text-ink-faint">AC {targetCb.armorClass}</span>
-                )}
-                <button
-                  onClick={() => { setEngage(null); setAtkResult(null); setDmgResult(null); }}
-                  className="ml-auto rounded p-1 text-ink-faint hover:text-ink"
-                  aria-label="Close roll card"
-                >
-                  <CloseIcon className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="mt-2 flex flex-wrap items-end gap-2">
-                {attackOptions.length > 0 && (
-                  <label className="text-ink-soft">
-                    <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Attack</span>
-                    <select
-                      value={attackId}
-                      onChange={(e) => applyAttackOption(attackOptions.find((o) => o.id === e.target.value))}
-                      className="h-7 max-w-40 rounded border border-parchment-400 bg-parchment-50 px-1"
+        {/* ── Right dock: minimap + chronicle, or DM settings ───────── */}
+        {(logOpen || (settingsOpen && isDM && !!map)) && (
+          <div className="flex w-72 shrink-0 flex-col border-l border-[#c9a24a]/25 bg-[#120d08]">
+            {!(settingsOpen && isDM && map) ? (
+              <>
+                {isDM && map && (
+                  <div className="shrink-0 border-b border-[#c9a24a]/25 p-2">
+                    <div
+                      className="relative cursor-pointer overflow-hidden rounded-md border border-[#c9a24a]/30 bg-black/40"
+                      onClick={(e) => {
+                        if (!miniNat) return;
+                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const fx = (e.clientX - r.left) / r.width;
+                        const fy = (e.clientY - r.top) / r.height;
+                        window.dispatchEvent(
+                          new CustomEvent("dl:map-camera", {
+                            detail: { x: fx * miniNat.w, y: fy * miniNat.h },
+                          }),
+                        );
+                      }}
+                      title="Click to jump the camera"
                     >
-                      {attackOptions.map((o) => (
-                        <option key={o.id} value={o.id}>{o.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <label className="text-ink-soft">
-                  <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">To hit</span>
-                  <input
-                    value={bonusStr}
-                    onChange={(e) => setBonusStr(e.target.value)}
-                    className="numerals h-7 w-12 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
-                  />
-                </label>
-                <label className="text-ink-soft">
-                  <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Damage</span>
-                  <input
-                    value={damageStr}
-                    onChange={(e) => setDamageStr(e.target.value)}
-                    placeholder="1d8+3 slashing"
-                    className="h-7 w-32 rounded border border-parchment-400 bg-parchment-50 px-1"
-                  />
-                </label>
-                <label className="text-ink-soft">
-                  <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Mode</span>
-                  <select
-                    value={rollMode}
-                    onChange={(e) => setRollMode(e.target.value as RollMode)}
-                    className="h-7 rounded border border-parchment-400 bg-parchment-50 px-1"
-                  >
-                    <option value="normal">Normal</option>
-                    <option value="advantage">Advantage</option>
-                    <option value="disadvantage">Disadvantage</option>
-                  </select>
-                </label>
-                <Button size="sm" disabled={rolling} onClick={() => void rollAttack()}>
-                  🎲 Attack
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={rolling || !parseRollSpec(damageStr)}
-                  onClick={() => void rollDamage()}
-                >
-                  Damage{atkResult?.isCrit ? " ×2 (crit!)" : ""}
-                </Button>
-              </div>
-
-              {(atkResult || dmgResult) && (
-                <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-parchment-400/50 pt-2">
-                  {atkResult && (
-                    <span className="font-semibold text-ink">
-                      To hit: <span className="numerals text-base">{atkResult.total}</span>
-                      {atkResult.isCrit && <span className="ml-1 text-forest">natural 20!</span>}
-                      {atkResult.isFumble && <span className="ml-1 text-oxblood">natural 1…</span>}
-                      {isDM && targetCb && !atkResult.isFumble && (
-                        <span className={cn("ml-2 rounded px-1.5 py-0.5 text-[0.65rem] font-bold uppercase", atkResult.isCrit || atkResult.total >= targetCb.armorClass ? "bg-forest/15 text-forest" : "bg-oxblood/12 text-oxblood")}>
-                          {atkResult.isCrit || atkResult.total >= targetCb.armorClass ? "HIT" : "MISS"}
-                        </span>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={map.imageUrl}
+                        alt=""
+                        className="block w-full opacity-90"
+                        onLoad={(e) =>
+                          setMiniNat({
+                            w: (e.target as HTMLImageElement).naturalWidth,
+                            h: (e.target as HTMLImageElement).naturalHeight,
+                          })
+                        }
+                      />
+                      {miniNat && (
+                        <svg
+                          viewBox={`0 0 ${miniNat.w} ${miniNat.h}`}
+                          className="pointer-events-none absolute inset-0 h-full w-full"
+                        >
+                          {(map.tokens ?? []).map((t) => (
+                            <circle
+                              key={t.id}
+                              cx={t.x}
+                              cy={t.y}
+                              r={Math.max(6, miniNat.w * 0.012)}
+                              fill={t.isPC ? "#86b58a" : "#d6794a"}
+                            />
+                          ))}
+                          {cam && cam.view.scale > 0 && (
+                            <rect
+                              x={-cam.view.offsetX / cam.view.scale}
+                              y={-cam.view.offsetY / cam.view.scale}
+                              width={cam.viewport.w / cam.view.scale}
+                              height={cam.viewport.h / cam.view.scale}
+                              fill="none"
+                              stroke="#E6C772"
+                              strokeWidth={Math.max(2, miniNat.w * 0.004)}
+                            />
+                          )}
+                        </svg>
                       )}
-                    </span>
+                    </div>
+                  </div>
+                )}
+                <p className="shrink-0 border-b border-[#c9a24a]/25 px-3 py-2 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">
+                  📜 Chronicle
+                </p>
+                <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 py-2">
+                  {chronicle.length === 0 ? (
+                    <p className={cn("text-[0.8rem]", HUD.faint)}>Nothing yet — the tale begins…</p>
+                  ) : (
+                    chronicle.map((e) => (
+                      <p key={e.id} className={cn("text-[0.8rem] leading-snug", HUD.soft)}>
+                        <span className="mr-1">{e.icon}</span>
+                        {e.text}
+                      </p>
+                    ))
                   )}
-                  {dmgResult && (
-                    <span className="font-semibold text-ink">
-                      Damage: <span className="numerals text-base text-oxblood">{dmgResult.total}</span>
-                    </span>
-                  )}
-                  {dmgResult && canEditCombat && targetCb && (
-                    <Button size="sm" onClick={applyRolledDamage}>
-                      Apply {dmgResult.total} to {targetCb.name}
-                    </Button>
-                  )}
-                  <span className="ml-auto text-[0.6rem] text-ink-faint">rolls land in the shared dice log</span>
+                  <div ref={chronicleEndRef} />
                 </div>
-              )}
-            </div>
-          )}
+              </>
+            ) : isDM && map ? (
 
-          {/* Turn tray — your combatant's actions, like a proper game turn */}
-          {!engage && !selectedToken && map && active && canAct && (
-            <TurnTray
-              cb={active}
-              char={activeChar}
-              sb={activeSb}
-              attacks={activeAttacks}
-              remainingFt={(() => {
-                if ((map.enforceSpeed ?? "off") === "off") return null;
-                const tk = map.tokens?.find((t) => t.combatantId === active.id);
-                return tk ? Math.max(0, (tk.speed ?? 30) - (tk.movedFt ?? 0)) : null;
-              })()}
-              rolling={rolling}
-              onD20={(b, l, m) => void trayD20(b, l, m)}
-              onDamage={(d, l) => void trayDamage(d, l)}
-            />
-          )}
-
-          {/* Token HUD */}
-          {!engage && selectedToken && map && (
             <div
               onPointerDown={(e) => e.stopPropagation()}
-              className="absolute bottom-3 left-1/2 flex max-w-[95%] -translate-x-1/2 flex-wrap items-end gap-2 rounded-card border border-parchment-400/70 bg-parchment-100/95 px-3 py-2 text-xs shadow-lg backdrop-blur"
+              className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-xs"
             >
-              <span className="mr-1 font-display text-sm font-bold text-ink">{selectedToken.label}</span>
-              {canEditToken ? (
-                <>
-                  {isDM && (
-                    <label className="text-ink-soft">
-                      <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Size</span>
-                      <select
-                        value={selectedToken.size ?? "medium"}
-                        onChange={(e) => {
-                          const size = e.target.value as TokenSize;
-                          patchToken({
-                            size,
-                            radius: grid ? grid * 0.42 * Math.max(1, TOKEN_SIZE_CELLS[size]) : selectedToken.radius,
-                          });
-                        }}
-                        className="h-7 rounded border border-parchment-400 bg-parchment-50 px-1 capitalize"
-                      >
-                        {SIZES.map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  <label className="text-ink-soft">
-                    <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Speed ft</span>
-                    <input
-                      type="number"
-                      value={selectedToken.speed ?? 30}
-                      onChange={(e) => patchToken({ speed: Math.max(0, Number(e.target.value) || 0) })}
-                      className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
-                    />
-                  </label>
-                  <label className="text-ink-soft">
-                    <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Elev ft</span>
-                    <input
-                      type="number"
-                      step={5}
-                      value={selectedToken.elevation ?? 0}
-                      onChange={(e) => patchToken({ elevation: Number(e.target.value) || 0 })}
-                      className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
-                    />
-                  </label>
-                  <label className="text-ink-soft" title="How far this creature sees (0 = blind beyond others' sight)">
-                    <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Vision ft</span>
-                    <input
-                      type="number"
-                      step={5}
-                      value={ftOf(selectedToken.visionRadius)}
-                      onChange={(e) => patchToken({ visionRadius: pxOf(Number(e.target.value) || 0) })}
-                      className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
-                    />
-                  </label>
-                  <label className="text-ink-soft" title="Light this creature carries (a torch is 40 ft)">
-                    <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Torch ft</span>
-                    <input
-                      type="number"
-                      step={5}
-                      value={ftOf(selectedToken.lightRadius)}
-                      onChange={(e) => patchToken({ lightRadius: pxOf(Number(e.target.value) || 0) })}
-                      className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
-                    />
-                  </label>
-                  <label className="text-ink-soft" title="Sees in the dark without light">
-                    <span className="mb-0.5 block text-[0.6rem] font-semibold uppercase tracking-wide">Darkv ft</span>
-                    <input
-                      type="number"
-                      step={5}
-                      value={ftOf(selectedToken.darkvision)}
-                      onChange={(e) => patchToken({ darkvision: pxOf(Number(e.target.value) || 0) })}
-                      className="numerals h-7 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center"
-                    />
-                  </label>
-                  {isDM && (
-                    <>
-                      <label className="flex h-7 items-center gap-1 self-end text-ink-soft">
-                        <input
-                          type="checkbox"
-                          checked={selectedToken.hidden ?? false}
-                          onChange={(e) => patchToken({ hidden: e.target.checked })}
-                          className="h-3.5 w-3.5 accent-oxblood"
-                        />
-                        Hidden
-                      </label>
-                      <Button size="sm" variant="secondary" onClick={useSheetArt} title="Pull portrait art from the linked sheet/stat block">
-                        Use art
-                      </Button>
-                      <button
-                        onClick={removeToken}
-                        className="h-7 self-end rounded-md px-2 text-[0.65rem] font-semibold text-ink-faint hover:text-oxblood"
-                      >
-                        Remove
-                      </button>
-                    </>
-                  )}
-                </>
-              ) : (
-                <span className="text-ink-faint">
-                  {selectedToken.size ?? "medium"} · speed {selectedToken.speed ?? 30} ft
-                  {(selectedToken.elevation ?? 0) !== 0 ? ` · elevation ${selectedToken.elevation} ft` : ""}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Settings drawer (DM) */}
-          {isDM && map && settingsOpen && (
-            <div
-              onPointerDown={(e) => e.stopPropagation()}
-              className="absolute right-0 top-0 h-full w-64 space-y-3 overflow-y-auto border-l border-parchment-400/40 bg-parchment-100/95 p-3 text-xs backdrop-blur"
-            >
-              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Grid</p>
+              <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">Grid</p>
               <div className="flex flex-wrap items-center gap-2">
                 <label className="flex items-center gap-1.5">
                   <input
@@ -1413,7 +1210,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
 
-              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Light & sight</p>
+              <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">Light & sight</p>
               <div className="space-y-1.5">
                 <div className="flex flex-wrap gap-1">
                   {LIGHT_PRESETS.map((p) => (
@@ -1478,7 +1275,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                 </label>
               </div>
 
-              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Rules</p>
+              <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">Rules</p>
               <div className="space-y-1.5">
                 <label className="flex items-center gap-1.5" title="Tokens can't pass through solid walls or closed doors">
                   <input
@@ -1540,7 +1337,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                 </label>
               </div>
 
-              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Camera spots</p>
+              <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">Camera spots</p>
               <div className="space-y-1.5">
                 <div className="flex gap-1">
                   <input
@@ -1597,7 +1394,7 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                 ))}
               </div>
 
-              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-faint">Housekeeping</p>
+              <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[#c9a24a]">Housekeeping</p>
               <div className="flex flex-wrap gap-1.5">
                 <button
                   onClick={() => updateMap(map.id, { tokens: [] })}
@@ -1625,9 +1422,280 @@ export function WarTableView({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
             </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {/* ── Bottom action dock: attack > selected token > your turn ── */}
+      {shownDock && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="max-h-[38%] shrink-0 overflow-y-auto border-t border-[#c9a24a]/25 bg-[#161009] px-4 py-2.5"
+        >
+          {dockTabs.length > 1 && (
+            <div className="mb-2 flex items-center gap-1">
+              {dockTabs.map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setDockView(k)}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[0.7rem] font-bold uppercase tracking-wide transition-colors",
+                    shownDock === k ? "bg-[#c9a24a]/25 text-[#f0d885]" : "text-[#a3906c] hover:text-[#e8d9b5]",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {shownDock === "attack" && engage && attackerToken && targetToken && (
+            <div className="text-sm">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <SwordsIcon className="h-4 w-4 text-[#c25a3d]" />
+                <span className={cn("font-display text-base font-bold", HUD.text)}>
+                  {attackerToken.label} → {targetToken.label}
+                </span>
+                <span className={cn("font-semibold", engage.losBlocked ? "text-[#e07a5f]" : HUD.soft)}>
+                  {engage.feet} ft{engage.losBlocked ? " · no line of sight!" : ""}
+                </span>
+                {(() => {
+                  const opt = attackOptions.find((o) => o.id === attackId);
+                  if (!opt?.range) return null;
+                  if (engage.feet > opt.range.long)
+                    return <span className="font-bold text-[#e07a5f]">out of range ({opt.range.long} ft max)</span>;
+                  if (engage.feet > opt.range.normal)
+                    return <span className="font-semibold text-[#d9ae5e]">long range — disadvantage</span>;
+                  return null;
+                })()}
+                {isDM && targetCb && <span className={HUD.faint}>AC {targetCb.armorClass}</span>}
+                <button
+                  onClick={() => {
+                    setEngage(null);
+                    setAtkResult(null);
+                    setDmgResult(null);
+                  }}
+                  className="ml-auto rounded p-1 text-[#a3906c] hover:text-[#f0d885]"
+                  aria-label="Close roll card"
+                >
+                  <CloseIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-end gap-2.5">
+                {attackOptions.length > 0 && (
+                  <label className={HUD.faint}>
+                    <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Attack</span>
+                    <select
+                      value={attackId}
+                      onChange={(e) => applyAttackOption(attackOptions.find((o) => o.id === e.target.value))}
+                      className="h-8 max-w-44 rounded border border-parchment-400 bg-parchment-50 px-1.5 text-ink"
+                    >
+                      {attackOptions.map((o) => (
+                        <option key={o.id} value={o.id}>{o.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className={HUD.faint}>
+                  <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">To hit</span>
+                  <input
+                    value={bonusStr}
+                    onChange={(e) => setBonusStr(e.target.value)}
+                    className="numerals h-8 w-14 rounded border border-parchment-400 bg-parchment-50 px-1 text-center text-ink"
+                  />
+                </label>
+                <label className={HUD.faint}>
+                  <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Damage</span>
+                  <input
+                    value={damageStr}
+                    onChange={(e) => setDamageStr(e.target.value)}
+                    placeholder="1d8+3 slashing"
+                    className="h-8 w-36 rounded border border-parchment-400 bg-parchment-50 px-1.5 text-ink"
+                  />
+                </label>
+                <label className={HUD.faint}>
+                  <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Mode</span>
+                  <select
+                    value={rollMode}
+                    onChange={(e) => setRollMode(e.target.value as RollMode)}
+                    className="h-8 rounded border border-parchment-400 bg-parchment-50 px-1.5 text-ink"
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="advantage">Advantage</option>
+                    <option value="disadvantage">Disadvantage</option>
+                  </select>
+                </label>
+                <button disabled={rolling} onClick={() => void rollAttack()} className={cn(trayChip, "bg-[#c25a3d]/25 text-[#f4b8a0] hover:bg-[#c25a3d]/40")}>
+                  🎲 Attack
+                </button>
+                <button disabled={rolling || !parseRollSpec(damageStr)} onClick={() => void rollDamage()} className={trayChip}>
+                  Damage{atkResult?.isCrit ? " ×2 (crit!)" : ""}
+                </button>
+              </div>
+
+              {(atkResult || dmgResult) && (
+                <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-[#c9a24a]/25 pt-2">
+                  {atkResult && (
+                    <span className={cn("font-semibold", HUD.text)}>
+                      To hit: <span className="numerals text-lg">{atkResult.total}</span>
+                      {atkResult.isCrit && <span className="ml-1.5 text-[#a8d0ac]">natural 20!</span>}
+                      {atkResult.isFumble && <span className="ml-1.5 text-[#e07a5f]">natural 1…</span>}
+                      {isDM && targetCb && !atkResult.isFumble && (
+                        <span
+                          className={cn(
+                            "ml-2 rounded px-2 py-0.5 text-[0.7rem] font-bold uppercase",
+                            atkResult.isCrit || atkResult.total >= targetCb.armorClass
+                              ? "bg-[#4d6b4f]/50 text-[#a8d0ac]"
+                              : "bg-[#c25a3d]/25 text-[#e8a18a]",
+                          )}
+                        >
+                          {atkResult.isCrit || atkResult.total >= targetCb.armorClass ? "HIT" : "MISS"}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {dmgResult && (
+                    <span className={cn("font-semibold", HUD.text)}>
+                      Damage: <span className="numerals text-lg text-[#e8a18a]">{dmgResult.total}</span>
+                    </span>
+                  )}
+                  {dmgResult && canEditCombat && targetCb && (
+                    <button onClick={applyRolledDamage} className={cn(trayChip, "bg-[#c25a3d]/25 text-[#f4b8a0] hover:bg-[#c25a3d]/40")}>
+                      Apply {dmgResult.total} to {targetCb.name}
+                    </button>
+                  )}
+                  <span className={cn("ml-auto text-[0.65rem]", HUD.faint)}>rolls land in the shared dice log</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {shownDock === "token" && selectedToken && map && (
+            <div className="flex flex-wrap items-end gap-2.5 text-sm">
+              <span className={cn("mr-1 font-display text-base font-bold", HUD.text)}>{selectedToken.label}</span>
+              {canEditToken ? (
+                <>
+                  {isDM && (
+                    <label className={HUD.faint}>
+                      <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Size</span>
+                      <select
+                        value={selectedToken.size ?? "medium"}
+                        onChange={(e) => {
+                          const size = e.target.value as TokenSize;
+                          patchToken({
+                            size,
+                            radius: grid ? grid * 0.42 * Math.max(1, TOKEN_SIZE_CELLS[size]) : selectedToken.radius,
+                          });
+                        }}
+                        className="h-8 rounded border border-parchment-400 bg-parchment-50 px-1.5 capitalize text-ink"
+                      >
+                        {SIZES.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label className={HUD.faint}>
+                    <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Speed ft</span>
+                    <input
+                      type="number"
+                      value={selectedToken.speed ?? 30}
+                      onChange={(e) => patchToken({ speed: Math.max(0, Number(e.target.value) || 0) })}
+                      className="numerals h-8 w-16 rounded border border-parchment-400 bg-parchment-50 px-1 text-center text-ink"
+                    />
+                  </label>
+                  <label className={HUD.faint}>
+                    <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Elev ft</span>
+                    <input
+                      type="number"
+                      step={5}
+                      value={selectedToken.elevation ?? 0}
+                      onChange={(e) => patchToken({ elevation: Number(e.target.value) || 0 })}
+                      className="numerals h-8 w-16 rounded border border-parchment-400 bg-parchment-50 px-1 text-center text-ink"
+                    />
+                  </label>
+                  <label className={HUD.faint} title="How far this creature sees (0 = blind beyond others' sight)">
+                    <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Vision ft</span>
+                    <input
+                      type="number"
+                      step={5}
+                      value={ftOf(selectedToken.visionRadius)}
+                      onChange={(e) => patchToken({ visionRadius: pxOf(Number(e.target.value) || 0) })}
+                      className="numerals h-8 w-16 rounded border border-parchment-400 bg-parchment-50 px-1 text-center text-ink"
+                    />
+                  </label>
+                  <label className={HUD.faint} title="Light this creature carries (a torch is 40 ft)">
+                    <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Torch ft</span>
+                    <input
+                      type="number"
+                      step={5}
+                      value={ftOf(selectedToken.lightRadius)}
+                      onChange={(e) => patchToken({ lightRadius: pxOf(Number(e.target.value) || 0) })}
+                      className="numerals h-8 w-16 rounded border border-parchment-400 bg-parchment-50 px-1 text-center text-ink"
+                    />
+                  </label>
+                  <label className={HUD.faint} title="Sees in the dark without light">
+                    <span className="mb-0.5 block text-[0.65rem] font-semibold uppercase tracking-wide">Darkv ft</span>
+                    <input
+                      type="number"
+                      step={5}
+                      value={ftOf(selectedToken.darkvision)}
+                      onChange={(e) => patchToken({ darkvision: pxOf(Number(e.target.value) || 0) })}
+                      className="numerals h-8 w-16 rounded border border-parchment-400 bg-parchment-50 px-1 text-center text-ink"
+                    />
+                  </label>
+                  {isDM && (
+                    <>
+                      <label className={cn("flex h-8 items-center gap-1.5 self-end", HUD.soft)}>
+                        <input
+                          type="checkbox"
+                          checked={selectedToken.hidden ?? false}
+                          onChange={(e) => patchToken({ hidden: e.target.checked })}
+                          className="h-4 w-4 accent-oxblood"
+                        />
+                        Hidden
+                      </label>
+                      <button onClick={useSheetArt} className={trayChip} title="Pull portrait art from the linked sheet/stat block">
+                        Use art
+                      </button>
+                      <button
+                        onClick={removeToken}
+                        className="h-8 self-end rounded-md px-2 text-[0.75rem] font-semibold text-[#a3906c] hover:text-[#e07a5f]"
+                      >
+                        Remove
+                      </button>
+                    </>
+                  )}
+                </>
+              ) : (
+                <span className={HUD.faint}>
+                  {selectedToken.size ?? "medium"} · speed {selectedToken.speed ?? 30} ft
+                  {(selectedToken.elevation ?? 0) !== 0 ? ` · elevation ${selectedToken.elevation} ft` : ""}
+                </span>
+              )}
+            </div>
+          )}
+
+          {shownDock === "turn" && map && active && canAct && (
+            <TurnTray
+              cb={active}
+              char={activeChar}
+              sb={activeSb}
+              attacks={activeAttacks}
+              remainingFt={(() => {
+                if ((map.enforceSpeed ?? "off") === "off") return null;
+                const tk = map.tokens?.find((t) => t.combatantId === active.id);
+                return tk ? Math.max(0, (tk.speed ?? 30) - (tk.movedFt ?? 0)) : null;
+              })()}
+              rolling={rolling}
+              onD20={(b, l, m) => void trayD20(b, l, m)}
+              onDamage={(d, l) => void trayDamage(d, l)}
+            />
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
